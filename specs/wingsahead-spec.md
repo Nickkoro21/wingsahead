@@ -242,6 +242,50 @@ the count beside the list — chips in the form, a "3 items" badge in the CO's
 tables, "(3 items)" in the brief and the instructor card — and the entries CSV
 carries the list **comma-joined** in one cell plus an **Item count** column.
 
+## 4d. Round 5b (2026-08-13) — the three residuals of the round-5 review
+
+Three findings survived round 5. All three are the same species of defect: a
+rule that is stated in one place and not applied in another.
+
+**Whitespace is not data — the NORMALISATION BOUNDARY.** `wa.code_track()`
+matches `^[BCIFN][0-9]{4}$` and `wa.chk_text` never trimmed, so a hand-made
+payload with `flight_code = " C4302 "` under the *Instrument* track was not a
+syllabus code to the validator: the category⇄track refusal never ran and the
+padded string was stored verbatim (HTTP 200). The regexes were right; the input
+reaching them was not. Every string of a record is now normalised **once**, at
+the boundary: `wa.norm_line` (whitespace runs — space / tab / newline / NBSP /
+ZWSP — collapse to one space, ends cut), `wa.norm_code` (= `norm_line` + upper
+case, for `flight_code` / `sortie` / `slot` / `evaluation`) and `wa.norm_free`
+(free text keeps its paragraphs, loses its edges: `note` / `result` / `phase` /
+`comment`). `wa.norm_record` is applied in `wa.write_record` **before**
+`wa.validate_record` and as **what is stored**, so a value is checked exactly as
+it is kept; and again in `wa.migrate_record`, so a padded value written by an
+older instance surfaces clean on read. The client mirrors it (`WA.normLine` /
+`WA.normCode`, used by `WA.codeTrack`, `WA.sortieOf`, `WA.sortieKnown` and the
+form's `buildPayload`) — without it the *live* "belongs to the Contact track"
+note and the pre-save refusal went quiet on padded input too.
+**Already-stored padded values**: the row is **never rewritten behind the
+owner's back**. It surfaces trimmed, stays readable on every surface, and if the
+clean value now contradicts its own category the next save is **refused until
+the pair is fixed in the picker** — the same "keep it, ask for it" contract the
+`legacy` rows have.
+
+**The rounding offer is LIVE.** The block message told the student to press the
+"Round to 63%" button on the row, but the button was rendered only for a
+fraction that was already *stored*: typing `62.5` produced the message and no
+button. `fixnoteHTML` is now called both at render time and on every keystroke
+in a grade box (`refreshFixnote`, in place — the input is never redrawn under
+the student's fingers), so the note and the button appear the moment the value
+is fractional and leave the moment it is not. One form serves the student and
+the CO, so both got it.
+
+**The print sheet states the item count.** The FAIL / ALMOST GOOD rows of the
+printed brief listed the items without ever saying how many, while the form's
+chip header, the CO's tables, the brief, the instructor card and the CSV all
+did. The wording now lives in one helper (`WA.itemsN` / `WA.itemsCount` /
+`WA.itemsCountHTML`) that every surface calls, print included — a new surface
+cannot drift from the others.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /

@@ -17,6 +17,11 @@
 -- (wa.write_record / wa.write_proposal), and what they write is stamped
 -- entered_by='admin' server-side — the tag the whole UI renders as "CO".
 -- The owner saving their own form clears it.
+-- ROUND 5b — THE NORMALISATION BOUNDARY: every string of a record is trimmed,
+-- its inner whitespace collapsed, and (for the code-shaped fields) upper-cased
+-- ONCE, before validation and as stored (wa.norm_record in wa.write_record) and
+-- again on read (wa.migrate_record). A rule can no longer be walked past with a
+-- space: ' C4302 ' under the Instrument track is refused exactly as C4302 is.
 -- ROUND 5: the NFS reason (the printed causes of the ΦΜΠ, form Α0473),
 -- whole-number grades, category⇄flight-code agreement, FIXED SYLLABUS SLOTS
 -- for the solos and the eight checkrides (pending until flown — an unflown
@@ -205,6 +210,98 @@ begin
   return true;
 exception when others then return false;
 end $$;
+
+-- ══ NORMALISATION — WHITESPACE IS NOT DATA (round 5b) ═════════════════════
+-- A field must be CHECKED as it is STORED and stored as it is checked. Before
+-- this boundary existed the two drifted apart: wa.code_track matches
+-- '^[BCIFN][0-9]{4}$', so ' C4302 ' was not a syllabus code to it, the
+-- category⇄code contradiction it exists to refuse was never evaluated, and
+-- the padded string entered the record verbatim — a value the picker can
+-- never produce and no later read could reconcile. The regexes were right;
+-- the input reaching them was not.
+--
+-- So every string is normalised ONCE, on the way in (wa.write_record, before
+-- wa.validate_record) and on the way out (wa.migrate_record, so a padded
+-- value written by an older instance surfaces clean). Same function, same
+-- result, both directions — a check can no longer be dodged by a space.
+--
+--   norm_line  single-line values (codes, names, dates, enum ids):
+--              every whitespace run — space / tab / newline / NBSP / ZWSP —
+--              collapses to ONE space, and the ends are cut.
+--   norm_code  norm_line + upper case: 'c4302', ' C4302 ' and 'C4302' are
+--              the same sortie, so they must be the same string.
+--   norm_free  free text (a note, a result, a phase of flight) keeps its
+--              inner shape — it may legitimately be typed on several lines —
+--              and only loses the whitespace at its ends.
+create or replace function wa.norm_line(t text) returns text
+language sql immutable as $$
+  select case when t is null then null else
+    btrim(regexp_replace(translate(t, U&'\00a0\200b\feff', '   '), '\s+', ' ', 'g')) end
+$$;
+create or replace function wa.norm_code(t text) returns text
+language sql immutable as $$ select upper(wa.norm_line(t)) $$;
+create or replace function wa.norm_free(t text) returns text
+language sql immutable as $$
+  select case when t is null then null else
+    regexp_replace(regexp_replace(translate(t, U&'\00a0', ' '), '^\s+', ''), '\s+$', '') end
+$$;
+
+-- WHICH RULE A FIELD GETS, BY ITS NAME. The name is the same wherever the
+-- field appears (a flight_code is a flight_code in fail, almost_good, fpc and
+-- cef alike), so this classification also covers the superseded v1 section
+-- names the read-time migration still accepts.
+create or replace function wa.code_fields() returns text[]
+language sql immutable as $$
+  select array['flight_code','sortie','slot','evaluation']::text[]
+$$;
+create or replace function wa.free_fields() returns text[]
+language sql immutable as $$
+  select array['note','result','phase','comment']::text[]
+$$;
+
+-- the rule this field's name earns, applied to one string
+create or replace function wa.norm_str(p_key text, t text) returns text
+language sql immutable as $$
+  select case when p_key = any(wa.code_fields()) then wa.norm_code(t)
+              when p_key = any(wa.free_fields()) then wa.norm_free(t)
+              else wa.norm_line(t) end
+$$;
+
+-- one value of one field, normalised. Non-strings pass through untouched
+-- (a grade stays a number, `pending` stays a boolean, json null stays null);
+-- a list of strings — items[] — is normalised element by element.
+create or replace function wa.norm_field(p_key text, v jsonb) returns jsonb
+language sql immutable as $$
+  select case
+    when v is null then 'null'::jsonb
+    when jsonb_typeof(v) = 'string' then to_jsonb(wa.norm_str(p_key, v #>> '{}'))
+    when jsonb_typeof(v) = 'array' then coalesce((
+      select jsonb_agg(case when jsonb_typeof(x) = 'string'
+                            then to_jsonb(wa.norm_str(p_key, x #>> '{}')) else x end)
+      from jsonb_array_elements(v) x), '[]'::jsonb)
+    else v end
+$$;
+
+-- one entry, every field normalised
+create or replace function wa.norm_entry(e jsonb) returns jsonb
+language sql immutable as $$
+  select case when jsonb_typeof(e) <> 'object' then e else
+    coalesce((select jsonb_object_agg(t.k, wa.norm_field(t.k, t.v))
+              from jsonb_each(e) t(k, v)), '{}'::jsonb) end
+$$;
+
+-- a whole record: every entry of every section. Applied at BOTH boundaries,
+-- so the validator, the storage and the read all see the same string.
+create or replace function wa.norm_record(p jsonb) returns jsonb
+language sql immutable as $$
+  select case when p is null or jsonb_typeof(p) <> 'object' then p else
+    coalesce((select jsonb_object_agg(t.k, case
+        when jsonb_typeof(t.v) = 'array' then coalesce((
+          select jsonb_agg(wa.norm_entry(x)) from jsonb_array_elements(t.v) x), '[]'::jsonb)
+        when jsonb_typeof(t.v) = 'object' then wa.norm_entry(t.v)
+        else t.v end)
+      from jsonb_each(p) t(k, v)), '{}'::jsonb) end
+$$;
 
 -- one field of one entry: type + format checks
 create or replace function wa.chk(p_ok boolean, p_where text, p_msg text) returns void
@@ -673,6 +770,16 @@ declare
 begin
   if p is null or jsonb_typeof(p) <> 'object' then return '{}'::jsonb; end if;
 
+  -- WHITESPACE FIRST (round 5b). A record written before the normalisation
+  -- boundary existed can hold a padded value — ' C4302 ' — that every regex
+  -- below would read as free text. It surfaces CLEAN, so the form shows the
+  -- code it always was and every rule applies to it as designed. The stored
+  -- row is not rewritten behind the owner's back (nothing here ever is): if
+  -- the clean value now contradicts its own category, the record stays
+  -- READABLE everywhere and the next save REFUSES until the pair is fixed in
+  -- the picker — the same "keep it, ask for it" contract as the legacy rows.
+  p := wa.norm_record(p);
+
   -- NFS — v1 { count, dates[] } → one dated entry per date, plus a placeholder
   -- per counted-but-undated event (the count itself is never re-typed again).
   if jsonb_typeof(p->'nfs') = 'array' then
@@ -1078,6 +1185,7 @@ returns jsonb
 language plpgsql volatile as $$
 declare
   t timestamptz;
+  pl jsonb;
   old jsonb;
   prev text;
   had boolean;
@@ -1085,7 +1193,13 @@ declare
   stamped jsonb;
   by_who text;
 begin
-  perform wa.validate_record(p_payload);
+  -- THE NORMALISATION BOUNDARY (round 5b) — FIRST, before anything looks at a
+  -- value. What is validated below is exactly what is stored further down, so
+  -- a padded ' C4302 ' cannot be a syllabus code to the storage and free text
+  -- to wa.code_track: the category⇄track refusal fires on it exactly as it
+  -- fires on a clean C4302, on the owner path and the CO path alike.
+  pl := wa.norm_record(p_payload);
+  perform wa.validate_record(pl);
 
   select wa.migrate_record(sr.data), sr.entered_by, true into old, prev, had
   from public.student_records sr where sr.student_id = p_student;
@@ -1096,8 +1210,8 @@ begin
   -- only be USED UP, never created: a section can never come back with more
   -- legacy rows than the stored record already had. Without this, the flag
   -- would be a way to store undated entries for ever.
-  for k in select jsonb_object_keys(p_payload) loop
-    perform wa.chk(wa.legacy_count(p_payload->k) <= wa.legacy_count(old->k),
+  for k in select jsonb_object_keys(pl) loop
+    perform wa.chk(wa.legacy_count(pl->k) <= wa.legacy_count(old->k),
                    k, 'entries imported from the previous form cannot be added, only completed');
   end loop;
 
@@ -1105,8 +1219,8 @@ begin
   -- only what he actually wrote carries his name; the owner's save reclaims
   -- everything. Applied server-side on EVERY write, so a stamp can neither be
   -- forged by a hand-made payload nor kept alive by one.
-  stamped := case when p_as_admin then wa.stamp_record_diff(p_payload, old)
-                  else wa.strip_stamps(p_payload) end;
+  stamped := case when p_as_admin then wa.stamp_record_diff(pl, old)
+                  else wa.strip_stamps(pl) end;
   -- DERIVED, never typed. On a CO save of a record that does not exist yet the
   -- CO is its creator, which is what an empty record has instead of entries.
   by_who := case when p_as_admin
@@ -1169,7 +1283,9 @@ begin
   perform wa.chk_bool(p_payload->'flew_with', 'flew_with');
   fw := coalesce((p_payload->>'flew_with')::boolean, false);
   perform wa.chk_text(p_payload->'comment', 'comment', false, 500);
-  cm := nullif(trim(coalesce(p_payload->>'comment', '')), '');
+  -- free text: the ends are cut (round 5b); the paragraphing the instructor
+  -- typed is his own and is kept
+  cm := nullif(wa.norm_free(coalesce(p_payload->>'comment', '')), '');
 
   insert into public.proposals as pr
          (instructor_id, student_id, rank_fighters, rank_helicopters,
@@ -1343,15 +1459,15 @@ begin
   if p_id is null then
     r := (p->>'role')::public.wa_role;
     perform wa.chk(r in ('student', 'instructor'), 'role', 'only student/instructor can be created');
-    perform wa.chk(nullif(trim(p->>'last_name'), '') is not null, 'last_name', 'required');
+    perform wa.chk(nullif(wa.norm_line(p->>'last_name'), '') is not null, 'last_name', 'required');
     insert into public.people
            (role, mn, rank, first_name, last_name, class, duty, leadership, status)
     values (r,
-            nullif(trim(coalesce(p->>'mn', '')), ''),
-            nullif(trim(coalesce(p->>'rank', '')), ''),
-            nullif(trim(coalesce(p->>'first_name', '')), ''),
-            trim(p->>'last_name'),
-            nullif(trim(coalesce(p->>'class', '')), ''),
+            nullif(wa.norm_line(coalesce(p->>'mn', '')), ''),
+            nullif(wa.norm_line(coalesce(p->>'rank', '')), ''),
+            nullif(wa.norm_line(coalesce(p->>'first_name', '')), ''),
+            wa.norm_line(p->>'last_name'),
+            nullif(wa.norm_line(coalesce(p->>'class', '')), ''),
             (nullif(p->>'duty', ''))::public.wa_duty,
             (nullif(p->>'leadership', ''))::public.wa_leadership,
             (nullif(p->>'status', ''))::public.wa_status)
@@ -1361,11 +1477,11 @@ begin
     if not found then raise exception 'WA: unknown person'; end if;
     perform wa.chk(not (p ? 'role'), 'role', 'role cannot be changed');
     update public.people set
-      mn         = case when p ? 'mn'         then nullif(trim(coalesce(p->>'mn', '')), '')         else mn end,
-      rank       = case when p ? 'rank'       then nullif(trim(coalesce(p->>'rank', '')), '')       else rank end,
-      first_name = case when p ? 'first_name' then nullif(trim(coalesce(p->>'first_name', '')), '') else first_name end,
-      last_name  = case when p ? 'last_name'  then coalesce(nullif(trim(p->>'last_name'), ''), last_name) else last_name end,
-      class      = case when p ? 'class'      then nullif(trim(coalesce(p->>'class', '')), '')      else class end,
+      mn         = case when p ? 'mn'         then nullif(wa.norm_line(coalesce(p->>'mn', '')), '')         else mn end,
+      rank       = case when p ? 'rank'       then nullif(wa.norm_line(coalesce(p->>'rank', '')), '')       else rank end,
+      first_name = case when p ? 'first_name' then nullif(wa.norm_line(coalesce(p->>'first_name', '')), '') else first_name end,
+      last_name  = case when p ? 'last_name'  then coalesce(nullif(wa.norm_line(p->>'last_name'), ''), last_name) else last_name end,
+      class      = case when p ? 'class'      then nullif(wa.norm_line(coalesce(p->>'class', '')), '') else class end,
       duty       = case when p ? 'duty'       then (nullif(p->>'duty', ''))::public.wa_duty         else duty end,
       leadership = case when p ? 'leadership' then (nullif(p->>'leadership', ''))::public.wa_leadership else leadership end,
       status     = case when p ? 'status'     then (nullif(p->>'status', ''))::public.wa_status     else status end

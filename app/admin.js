@@ -450,8 +450,8 @@ WA.renderAdmin = async function (view, me) {
           <td>${esc(WA.itemCatLabel(e.category))}</td>
           <td>${WA.sortieCell(e.category, e.flight_code)}</td>
           <td class="items">${esc(WA.itemsLabel(e))}
-            ${(e.items || []).length > 1
-              ? `<span class="badge" title="${esc((e.items || []).join(" · "))}">${(e.items || []).length} items</span>` : ""}</td>
+            ${WA.itemsN(e) > 1
+              ? `<span class="badge" title="${esc((e.items || []).join(" · "))}">${WA.itemsN(e)} items</span>` : ""}</td>
           <td>${esc(e.instructor || "—")}</td>
           <td class="num">${WA.pct(e.grade)}</td>
           <td>${e.pending ? `<span class="badge badge-warn">pending</span>` : ""}</td>
@@ -742,7 +742,7 @@ WA.renderAdmin = async function (view, me) {
               ${list.length ? list.map((e) => `<div class="sub">${esc(fmtD(e.date))}` +
                 (e.flight_code ? " <b>" + WA.sortieCell(e.category, e.flight_code) + "</b>" : "") + " " +
                 esc(WA.itemsLabel(e)) +
-                ((e.items || []).length > 1 ? ` <span class="k">(${(e.items || []).length} items)</span>` : "") +
+                WA.itemsCountHTML(e) +
                 (e.grade === null || e.grade === undefined ? "" : " <b>" + WA.pct(e.grade) + "</b>") +
                 (e.instructor ? " <span class='k'>w/ " + esc(e.instructor) + "</span>" : "") +
                 (e.pending ? " ⏳" : "") + WA.coTag(e) + `</div>`).join("")
@@ -813,7 +813,8 @@ WA.renderAdmin = async function (view, me) {
           <td>${esc(fmtD(e.date))}</td><td>${e.pending ? "pending" : ""}</td></tr>`));
       const fgRows = (k) => (s.record[k] || []).map((e) =>
         `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${esc(WA.itemCatLabel(e.category))}</td>
-          <td>${esc(e.flight_code || "—")}</td><td>${esc(WA.itemsLabel(e))}</td>
+          <td>${esc(e.flight_code || "—")}</td>
+          <td>${esc(WA.itemsLabel(e))}${WA.itemsCountHTML(e, "pr-n")}</td>
           <td>${esc(e.instructor || "—")}</td>
           <td>${WA.pct(e.grade)}</td>
           <td>${e.pending ? "pending" : ""}</td></tr>`);
@@ -1141,7 +1142,7 @@ WA.renderAdmin = async function (view, me) {
     const add = (s, sec, e, detail, code, items, who, grade, pend, date) =>
       rows.push([WA.personName(s.person, true), s.person.class, WA.secLabel(sec),
         fmtD(date === undefined ? e.date : date), detail, code || "",
-        items || "", Array.isArray(e.items) ? e.items.length : "", who || "",
+        items || "", WA.itemsN(e) || "", who || "",
         WA.pctRaw(grade), pend ? "yes" : "",
         e.legacy ? "yes" : "", WA.coWord(e)]);
     for (const s of A.data.students) {

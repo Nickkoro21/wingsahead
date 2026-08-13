@@ -123,20 +123,31 @@ WA.renderStudent = async function (view, me, opts) {
              ${list ? `list="${esc(list)}" autocomplete="off"` : ""} ${F(sec, i, field)}></label>`;
 
   /* GRADES ARE WHOLE NUMBERS (round 5). step=1 on every grade box, and a
-     fractional value inherited from an older record is never silently
-     rounded: the row says what is stored and offers the rounding as an act. */
-  const gradeF = (sec, i, field, val, label, req) => {
+     fractional value is never silently rounded: the row says the value is not
+     a whole number and offers the rounding as an act.
+     ROUND 5b — THE OFFER IS LIVE. The note used to be drawn once, at render
+     time, so it existed only for a fraction that was already STORED: a student
+     who TYPED 62.5 was refused on save and told to press a "Round to 63%"
+     button that was nowhere on the row. It now appears on the keystroke that
+     makes the value fractional and leaves on the one that does not — the same
+     wording, the same button, on the student form and the CO's alike (they
+     are one form). */
+  function fixnoteHTML(sec, i, field, val) {
     const n = Number(val);
-    const frac = val !== null && val !== undefined && val !== "" &&
-                 isFinite(n) && n !== Math.round(n);
+    if (val === null || val === undefined || val === "" ||
+        !isFinite(n) || n === Math.round(n)) return "";
+    return `Grades are whole numbers &mdash; <b>${esc(val)}%</b> is not one.
+      <button type="button" class="btn btn-sm" data-round="${esc(sec)}:${i}:${esc(field)}"
+        >Round to ${esc(Math.round(n))}%</button>`;
+  }
+  const gradeF = (sec, i, field, val, label, req) => {
+    const fx = fixnoteHTML(sec, i, field, val);
     return `
     <label class="f"><span>${esc(label)}${req ? " *" : ""}</span>
       <input type="number" min="0" max="100" step="1" inputmode="numeric" placeholder="0-100"
              value="${val === null || val === undefined || val === "" ? "" : esc(val)}"
              ${F(sec, i, field)}>
-      ${frac ? `<span class="fixnote">Stored as <b>${esc(val)}%</b> — grades are whole numbers.
-        <button type="button" class="btn btn-sm" data-round="${esc(sec)}:${i}:${esc(field)}"
-          >Round to ${esc(Math.round(n))}%</button></span>` : ""}</label>`;
+      ${fx ? `<span class="fixnote">${fx}</span>` : ""}</label>`;
   };
 
   /* ── ONE PICKER, five uses (round 5) ──────────────────────────────────────
@@ -197,7 +208,7 @@ WA.renderStudent = async function (view, me, opts) {
       { free: true, disabled: !cat,
         ph: cat ? "— which sortie of " + WA.itemCatLabel(cat) + "? —" : "— choose the track first —",
         otherLabel: "Other… (type the code)", freePh: "e.g. C4302",
-        note: codeNoteHTML(e.category, txt(e.flight_code).toUpperCase()) });
+        note: codeNoteHTML(e.category, WA.normCode(e.flight_code)) });
   }
 
   /* any sortie of the stage, checkrides included — the FPC / CEF trigger */
@@ -303,7 +314,9 @@ WA.renderStudent = async function (view, me, opts) {
         <button type="button" class="x" data-msrm="${esc(sec)}:${i}:${k}"
                 aria-label="Remove ${esc(n)}">&#10005;</button></span>`).join("");
     return `
-      <div class="ms-chips">${chips || `<span class="ms-none">no item chosen yet</span>`}</div>
+      <div class="ms-chips">${WA.itemsN(e) > 1
+          ? `<span class="ms-n">${esc(WA.itemsCount(e))}</span>` : ""}${
+        chips || `<span class="ms-none">no item chosen yet</span>`}</div>
       <input type="search" class="ms-q" placeholder="filter ${esc(WA.itemCatLabel(e.category))} items&hellip;"
              value="${esc(e._q || "")}" data-msq="${esc(sec)}:${i}" aria-label="Filter items">
       <select class="ms-add" data-msadd="${esc(sec)}:${i}" aria-label="Add an item">
@@ -683,12 +696,30 @@ WA.renderStudent = async function (view, me, opts) {
     if (!label) return;
     const e = S.data[secId][i];
     const html = field === "flight_code" && (secId === "fail" || secId === "almost_good")
-      ? codeNoteHTML(e.category, txt(e.flight_code).toUpperCase()) : "";
+      ? codeNoteHTML(e.category, WA.normCode(e.flight_code)) : "";
     let note = label.querySelector(".fnote");
     if (!html) { if (note) note.remove(); return; }
     if (!note) {
       note = document.createElement("span");
       note.className = "fnote";
+      label.appendChild(note);
+    }
+    note.innerHTML = html;
+  }
+
+  /* the same note under a grade box, live — added/removed without redrawing
+     the box the student is typing into (round 5b) */
+  function refreshFixnote(secId, i, field) {
+    const box = form.querySelector(`.rrow[data-row="${secId}:${i}"] [data-field="${field}"]`);
+    if (!box) return;
+    const label = box.closest("label.f");
+    if (!label) return;
+    const html = fixnoteHTML(secId, i, field, S.data[secId][i][field]);
+    let note = label.querySelector(".fixnote");
+    if (!html) { if (note) note.remove(); return; }
+    if (!note) {
+      note = document.createElement("span");
+      note.className = "fixnote";
       label.appendChild(note);
     }
     note.innerHTML = html;
@@ -929,6 +960,7 @@ WA.renderStudent = async function (view, me, opts) {
       if (f === "pending") el.closest(".rrow").classList.toggle("is-pending", el.checked);
     } else if (el.type === "number") {
       entry[f] = el.value === "" ? null : num(el.value);
+      refreshFixnote(sec, i, f);
     } else {
       entry[f] = el.value;
     }
@@ -940,7 +972,7 @@ WA.renderStudent = async function (view, me, opts) {
        removes — so it is dropped, out loud. */
     if (f === "category") {
       entry._q = ""; entry._other = false;
-      const code = txt(entry.flight_code);
+      const code = WA.normCode(entry.flight_code);
       if (code && WA.codeTrack(code) !== entry.category) {
         entry.flight_code = ""; entry._o_flight_code = false;
         if (WA.itemCat(entry.category)) {
@@ -1046,12 +1078,12 @@ WA.renderStudent = async function (view, me, opts) {
     });
     d.airsickness.forEach((e, i) => {
       if (!isDate(e.date) && !e.legacy) { need("airsickness", i, "the date is required"); return; }
-      push("airsickness", { date: e.date || null, instructor: txt(e.instructor) || null,
+      push("airsickness", { date: e.date || null, instructor: WA.normLine(e.instructor) || null,
                             phase: txt(e.phase) || null }, e);
     });
     for (const k of ["fail", "almost_good"]) {
       d[k].forEach((e, i) => {
-        const code = txt(e.flight_code).toUpperCase();
+        const code = WA.normCode(e.flight_code);
         if (!e.legacy) {
           if (!isDate(e.date)) { need(k, i, "the date is required"); return; }
           if (!WA.itemCat(e.category)) { need(k, i, "choose the track"); return; }
@@ -1068,8 +1100,8 @@ WA.renderStudent = async function (view, me, opts) {
         push(k, {
           date: e.date || null, category: e.category || null,
           flight_code: code || null,
-          items: (e.items || []).map(txt).filter(Boolean),
-          instructor: txt(e.instructor) || null,
+          items: (e.items || []).map((x) => WA.normLine(x)).filter(Boolean),
+          instructor: WA.normLine(e.instructor) || null,
           grade: gr(e.grade), pending: !!e.pending,
         }, e);
       });
@@ -1086,7 +1118,7 @@ WA.renderStudent = async function (view, me, opts) {
       if (!intOK("evaluations", i, e, "grade", "the grade")) return;
       push("evaluations", {
         date: e.date || null, evaluation: WA.evalById(e.evaluation) ? e.evaluation : null,
-        with: txt(e.with) || null, grade: gr(e.grade), pending: !!e.pending }, e);
+        with: WA.normLine(e.with) || null, grade: gr(e.grade), pending: !!e.pending }, e);
     });
     /* THE SOLO SLOTS — same rule, plus the sortie that was flown solo */
     d.solo_flights.forEach((e, i) => {
@@ -1098,7 +1130,7 @@ WA.renderStudent = async function (view, me, opts) {
         if (!e.ng && !txt(e.instructor)) { need("solo_flights", i, "a graded solo needs the evaluator or instructor"); return; }
       }
       if (!intOK("solo_flights", i, e, "grade", "the grade")) return;
-      const sortie = txt(e.sortie).toUpperCase();
+      const sortie = WA.normCode(e.sortie);
       if (sortie && slot && sortie[0] !== String(slot.id)[0]) {
         need("solo_flights", i, "sortie " + sortie + " does not belong to Training Section " + slot.sec);
         return;
@@ -1108,15 +1140,15 @@ WA.renderStudent = async function (view, me, opts) {
         sortie: sortie || null,
         date: e.date || null, ng: !!e.ng,
         grade: e.ng ? null : gr(e.grade),
-        instructor: e.ng ? null : (txt(e.instructor) || null) }, e);
+        instructor: e.ng ? null : (WA.normLine(e.instructor) || null) }, e);
     });
     for (const k of ["fpc", "cef"]) {
       d[k].forEach((e, i) => {
         if (!isDate(e.date) && !e.legacy) { need(k, i, "the date is required"); return; }
         if (!intOK(k, i, e, "grade", "the grade")) return;
         push(k, { date: e.date || null,
-                  flight_code: txt(e.flight_code).toUpperCase() || null,
-                  evaluator: txt(e.evaluator) || null,
+                  flight_code: WA.normCode(e.flight_code) || null,
+                  evaluator: WA.normLine(e.evaluator) || null,
                   result: txt(e.result) || null, grade: gr(e.grade), pending: !!e.pending }, e);
       });
     }
@@ -1151,11 +1183,24 @@ WA.renderStudent = async function (view, me, opts) {
          An instance still running the round-4 schema sends no record back and
          really does stamp everything, so that branch mirrors what it did. */
       const srv = (res.record && typeof res.record === "object") ? res.record : null;
+      /* ROUND 5b — the server NORMALISES what it stores (trim, one space,
+         upper case for the codes). The row must then show the value the record
+         actually holds, not the padded text that produced it, or the box would
+         keep offering to save something the record no longer contains. */
+      const ADOPT = ["category", "reason", "flight_code", "sortie", "slot",
+                     "evaluation", "instructor", "evaluator", "with",
+                     "note", "result", "phase"];
       for (const sec of SECTIONS) {
         const list = srv ? (Array.isArray(srv[sec.id]) ? srv[sec.id] : []) : null;
         (rows[sec.id] || []).forEach((e, i) => {
           const by = srv ? ((list[i] || {}).entered_by || null) : (asCO ? "admin" : null);
           if (by) e.entered_by = by; else delete e.entered_by;
+          const stored = srv ? (list[i] || null) : null;
+          if (!stored) return;
+          for (const f of ADOPT) {
+            if (typeof stored[f] === "string" && e[f] !== stored[f]) e[f] = stored[f];
+          }
+          if (Array.isArray(stored.items)) e.items = stored.items.slice();
         });
         redraw(sec.id);
       }

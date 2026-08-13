@@ -562,6 +562,25 @@ WA.itemsLabel = function (entry) {
   if (!list.length) return "—";
   return list.map((n) => WA.itemText(e.category, n)).join(" · ");
 };
+/* HOW MANY items one FAIL / ALMOST GOOD entry names. The list itself is
+   rendered by WA.itemsLabel; the COUNT belongs beside it on every surface that
+   shows the list — the form's chip header, the admin table, the brief, the
+   instructor card, the CSV and the PRINT SHEET. Print was the one that carried
+   the items without ever saying how many (round 5b), so the wording now lives
+   in ONE place and a new surface cannot drift from the others. */
+WA.itemsN = function (entry) {
+  const l = (entry || {}).items;
+  return Array.isArray(l) ? l.length : 0;
+};
+/* "(3 items)" — and nothing at all for a single item, which needs no count */
+WA.itemsCount = function (entry) {
+  const n = WA.itemsN(entry);
+  return n > 1 ? "(" + n + " items)" : "";
+};
+WA.itemsCountHTML = function (entry, cls) {
+  const t = WA.itemsCount(entry);
+  return t ? ` <span class="${esc(cls || "k")}">${esc(t)}</span>` : "";
+};
 WA.sorties = function (catId) {
   const s = (typeof WA_SORTIES === "object" && WA_SORTIES) ? WA_SORTIES[catId] : null;
   return Array.isArray(s) ? s : [];
@@ -575,20 +594,34 @@ WA.allSorties = function () {
   WA._allSorties = out;
   return out;
 };
+/* ── NORMALISATION — WHITESPACE IS NOT DATA (round 5b) ────────────────────
+   MIRROR: db/schema.sql → wa.norm_line / wa.norm_code. The server normalises
+   every string at the write boundary and on read; the client does the same
+   BEFORE it judges a value, because a check that reads ' C4302 ' as free text
+   is a check that does not run: the live "wrong track" note under the box and
+   the pre-save refusal both go quiet on a padded code otherwise. */
+WA.normLine = function (v) {
+  /* JS \s already covers NBSP / BOM / every Unicode space; the
+     zero-width space is the one it does not, so it goes first. */
+  return String(v === null || v === undefined ? "" : v)
+    .replace(/\u200B/g, "").replace(/\s+/g, " ").trim();
+};
+WA.normCode = function (v) { return WA.normLine(v).toUpperCase(); };
+
 WA.sortieOf = function (code) {
   if (!code) return null;
   if (!WA._sortieIx) {
     WA._sortieIx = {};
     for (const s of WA.allSorties()) WA._sortieIx[s.c] = s;
   }
-  return WA._sortieIx[String(code).toUpperCase()] || null;
+  return WA._sortieIx[WA.normCode(code)] || null;
 };
 /* the track a syllabus code belongs to, from its letter (B/C contact,
    I instrument, F formation, N navigation) — null for free text.
    MIRROR: db/schema.sql → wa.code_track. This is what makes the pair
    "category Instrument + flight C4302" impossible instead of merely unlikely. */
 WA.codeTrack = function (code) {
-  const c = String(code || "").toUpperCase();
+  const c = WA.normCode(code);
   if (!/^[BCIFN]\d{4}$/.test(c)) return null;
   return { B: "contact", C: "contact", I: "instrument", F: "formation", N: "vfr_navigation" }[c[0]];
 };
@@ -596,7 +629,7 @@ WA.codeTrack = function (code) {
    accepted — the syllabus data can lag reality — but it is shown marked) */
 WA.sortieKnown = function (catId, code) {
   if (!code) return true;
-  const c = String(code).toUpperCase();
+  const c = WA.normCode(code);
   return catId ? WA.sorties(catId).some((s) => s.c === c) : !!WA.sortieOf(c);
 };
 /* "C4302 — Contact — advanced handling (simulator)" · free text as typed */

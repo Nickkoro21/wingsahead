@@ -85,7 +85,7 @@ WA.renderInstructor = async function (view, me, opts) {
       if (!list.length) return "";
       return `<div class="line">${esc(WA.secLabel(k))}:` + list.map((e) =>
         `<div class="sub">${esc(fmtD(e.date))}${e.flight_code ? " <b>" + WA.sortieCell(e.category, e.flight_code) + "</b>" : ""}
-          ${esc(WA.itemsLabel(e))}${(e.items || []).length > 1 ? ` <span class="k">(${(e.items || []).length} items)</span>` : ""}${
+          ${esc(WA.itemsLabel(e))}${WA.itemsCountHTML(e)}${
           e.grade === null || e.grade === undefined ? "" : ` <b>${WA.pct(e.grade)}</b>`}
           ${e.instructor ? `<span class="k">w/ ${esc(e.instructor)}</span>` : ""}
           ${e.pending ? "⏳" : ""}${WA.coTag(e)}</div>`).join("") + `</div>`;
