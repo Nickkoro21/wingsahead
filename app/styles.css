@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   WingsAhead — styles. Mobile-first for the student & instructor forms,
+   Wings Ahead — styles. Mobile-first for the student & instructor forms,
    desktop-first for the admin dashboard. Print is ALWAYS monochrome.
    ──────────────────────────────────────────────────────────────────────────
    PALETTE CATALOGUE — ported from FDMS (same 8 palettes, same contract).
@@ -146,7 +146,7 @@ a { color: var(--accent); }
   background: var(--top-bg); position: sticky; top: 0; z-index: 10;
 }
 .brand { display: flex; gap: 10px; align-items: center; min-width: 0; }
-.brand-icon { font-size: 22px; color: var(--accent); }
+.brand-icon { width: 26px; height: 40px; object-fit: contain; flex: 0 0 auto; }
 .brand h1 { font-size: 17px; letter-spacing: 0.5px; white-space: nowrap; }
 .tagline { color: var(--muted); font-size: 11px; }
 .top-actions { display: flex; gap: 8px; align-items: center; }
@@ -265,6 +265,13 @@ input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent);
 .ck { display: flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; user-select: none; }
 .ck.pend { color: var(--warn); }
 
+/* the ⓘ that carries a terminology tooltip next to a section header */
+.tipdot {
+  color: var(--accent); font-size: 13px; cursor: help; line-height: 1;
+  border-radius: 50%; padding: 0 1px;
+}
+.tipdot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* repeatable rows */
 .rrow {
   display: grid; gap: 8px; align-items: end;
@@ -272,6 +279,65 @@ input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent);
   border-radius: 8px; padding: 10px; margin-bottom: 8px; background: var(--panel-2);
 }
 .rrow.is-pending { border-left-color: var(--warn); }
+.rrow.is-legacy { border-left-color: var(--bad); }
+.rrow.is-co { border-left-color: var(--accent); }
+.legnote {
+  font-size: 11.5px; color: var(--bad); background: var(--bad-soft);
+  border: 1px solid rgba(var(--bad-rgb), 0.35); border-radius: 6px;
+  padding: 5px 8px; line-height: 1.45;
+}
+
+/* ── ENTERED BY THE CO — the transparency tag (round 4) ──
+   Small, quiet and everywhere: drill-downs, summary tables, brief, print.
+   It states a fact about the SOURCE of a row, so it must never look like an
+   alert (warn/bad are taken); the accent tint reads as "noted, not wrong". */
+.cotag {
+  display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: 0.6px;
+  color: var(--accent); background: var(--accent-soft);
+  border: 1px solid rgba(var(--accent-rgb), 0.55); border-radius: 4px;
+  padding: 0 4px; margin-left: 5px; vertical-align: baseline; cursor: help; white-space: nowrap;
+}
+/* PART of the record is the CO's — hollow chip reading "+1 CO" (round 4b).
+   Filled means every entry is his; a record of 17 self-reported entries plus
+   one CO addition is still the student's record, and must not look like his. */
+.cotag.part { background: transparent; border-style: dashed; font-weight: 600; }
+.conote {
+  font-size: 11.5px; color: var(--accent); background: var(--accent-soft);
+  border: 1px solid rgba(var(--accent-rgb), 0.3); border-radius: 6px;
+  padding: 4px 8px; line-height: 1.4;
+}
+.conote .cotag { margin-left: 0; margin-right: 4px; }
+/* the banner that says loudly WHOSE form this is */
+.cobar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--accent-soft); border: 1px solid rgba(var(--accent-rgb), 0.55);
+  border-left: 4px solid var(--accent); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 12px;
+}
+.cobar .cotxt { flex: 1 1 260px; font-size: 12.5px; line-height: 1.5; min-width: 0; }
+.cobar .btn { flex: 0 0 auto; }
+.segrow { gap: 4px; }
+.segrow .chip { padding: 8px 10px; font-size: 12px; }
+
+/* multi-select of syllabus items (FAIL / ALMOST GOOD) */
+.ms { display: flex; flex-direction: column; gap: 6px; }
+.ms-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.ms-none { font-size: 12px; color: var(--muted); font-style: italic; }
+.mschip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  background: var(--accent-soft); border: 1px solid rgba(var(--accent-rgb), 0.5);
+  border-radius: 999px; padding: 3px 6px 3px 10px; font-size: 11.5px; line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.mschip.is-custom { background: var(--warn-soft); border-color: rgba(var(--warn-rgb), 0.5); }
+.mschip .x {
+  background: transparent; border: 0; color: var(--muted); cursor: pointer;
+  font-size: 12px; padding: 0 4px; line-height: 1; flex: 0 0 auto;
+}
+.mschip .x:hover { color: var(--bad); }
+.ms-q { min-height: 34px; font-size: 13px; }
+.ms-other { display: flex; gap: 6px; align-items: center; }
+.ms-other input { flex: 1 1 auto; }
 .rrow .rm {
   background: transparent; border: 1px solid var(--line); color: var(--muted);
   border-radius: 7px; padding: 4px 10px; font-size: 12px; cursor: pointer; justify-self: start;
@@ -326,6 +392,7 @@ input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent);
 .kgrid b { font-weight: 600; }
 .selfrep .line { font-size: 11.5px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
 .selfrep .line b { color: var(--text); font-weight: 600; }
+.selfrep .sub { padding-left: 10px; border-left: 2px solid var(--line); margin: 2px 0 2px 2px; }
 .rankrow { display: grid; grid-template-columns: minmax(96px, auto) 1fr; gap: 6px 10px; align-items: center; margin-bottom: 6px; }
 .rankrow .bl { font-size: 12.5px; font-weight: 600; }
 .rk-chips { display: flex; gap: 5px; flex-wrap: wrap; }
@@ -375,6 +442,22 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 
 .chartbox { background: var(--chart-bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
 .chartbox svg { display: block; width: 100%; height: auto; }
+.chartbox .chk { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.chartbox .chk b { color: var(--text); }
+.warn-t { color: var(--warn); }
+
+/* the summary table the plot points point at */
+#sumtbl tbody tr.in-cat td { background: var(--accent-soft); }
+#sumtbl tbody tr.is-hi td {
+  background: var(--gold); color: var(--on-gold); font-weight: 600;
+}
+#sumtbl tbody tr.is-hi .badge { color: var(--on-gold); border-color: var(--on-gold); }
+.card h3 .cnt {
+  font-size: 11px; color: var(--muted); border: 1px solid var(--line);
+  border-radius: 999px; padding: 1px 8px; font-weight: 400; margin-left: 6px;
+}
+.card h2 .cnt { font-size: 11px; color: var(--muted); border: 1px solid var(--line);
+  border-radius: 999px; padding: 1px 8px; font-weight: 400; margin-left: 6px; }
 .legendrow { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-top: 6px; }
 .legendrow i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 
@@ -401,6 +484,17 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .brief-nav { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .brief-nav .pos { color: var(--muted); font-size: 14px; }
 .brief-nav .spacer { flex: 1; }
+.b-detail .kline {
+  font-size: clamp(12px, 1.4vw, 15px); line-height: 1.7; padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+}
+.b-detail .kline:last-child { border-bottom: none; }
+.b-detail .kline .k {
+  display: inline-block; min-width: 116px; color: var(--muted);
+  font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.4px;
+}
+.b-detail .sub { margin-left: 116px; padding-left: 10px; border-left: 2px solid var(--line); }
+@media (max-width: 700px) { .b-detail .sub { margin-left: 0; } }
 
 /* landing */
 .landing { max-width: 460px; margin: 8vh auto; text-align: center; padding: 0 16px; }
@@ -464,13 +558,33 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
   main, .wrap, .wrap-wide { padding: 0; max-width: none; }
   .foot { display: none; }
 
-  .pr-page { page-break-after: always; padding: 10mm 2mm 0; }
+  .pr-page { page-break-after: always; padding: 8mm 2mm 0; }
   .pr-page:last-child { page-break-after: auto; }
   .pr-page h2 { font-size: 20px; margin-bottom: 2mm; }
   .pr-page .pr-meta { font-size: 12px; color: #333; margin-bottom: 5mm; }
-  .pr-t { border-collapse: collapse; width: 100%; font-size: 11.5px; margin-bottom: 5mm; }
-  .pr-t th { background: #eeeeee !important; color: #000; border: 1px solid #000; padding: 4px 7px; text-align: left; }
-  .pr-t td { border: 1px solid #000; padding: 4px 7px; }
-  .pr-sec { font-size: 13px; font-weight: 700; margin: 4mm 0 2mm; letter-spacing: 0.4px; }
+  .pr-t { border-collapse: collapse; width: 100%; font-size: 11px; margin-bottom: 4mm; }
+  .pr-t th { background: #eeeeee !important; color: #000; border: 1px solid #000; padding: 3px 6px; text-align: left; }
+  .pr-t td { border: 1px solid #000; padding: 3px 6px; }
+  .pr-sec { font-size: 12.5px; font-weight: 700; margin: 3.5mm 0 1.5mm; letter-spacing: 0.4px; }
   .pr-bullets { margin: 0 0 3mm 6mm; font-size: 11px; line-height: 1.5; }
+  .pr-none { font-size: 11px; color: #333; margin-bottom: 3mm; font-style: italic; }
+  .pr-src { font-size: 11px; color: #000; margin: 0 0 2mm; }
+  /* the CO tag on paper — monochrome like everything else, still unmistakable */
+  .cotag {
+    color: #000 !important; background: #ffffff !important; border: 1px solid #000 !important;
+    font-size: 8.5px; padding: 0 3px; margin-left: 4px;
+  }
+  /* partial ("+1 CO") stays distinguishable without colour: dashed border */
+  .cotag.part { border-style: dashed !important; }
+  /* the wordmark on paper — the emblem is forced monochrome like everything else */
+  .pr-brand {
+    display: flex; align-items: center; gap: 8px;
+    border-bottom: 1.5px solid #000; padding-bottom: 2mm; margin-bottom: 4mm;
+  }
+  .pr-brand img {
+    width: 12mm; height: auto; filter: grayscale(1) contrast(1.25) !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .pr-brand span { font-size: 16px; font-weight: 800; letter-spacing: 1px; }
+  .pr-brand .pr-brand-sub { font-size: 10.5px; font-weight: 400; letter-spacing: 0.4px; margin-left: auto; color: #333; }
 }

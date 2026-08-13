@@ -1,31 +1,41 @@
 "use strict";
 /* ══════════════════════════════════════════════════════════════════════════
-   WingsAhead — ADMIN dashboard (desktop-first).
+   Wings Ahead — ADMIN dashboard (desktop-first).
    Overview · Student analysis (4-bar SVG comparison + trend + branch boxes)
    · Brief mode (large type, one student/screen, arrows + keyboard, print)
    · People & link management · CSV/JSON export.
    ══════════════════════════════════════════════════════════════════════════ */
 
 WA.renderAdmin = async function (view, me) {
-  const A = { data: null, people: null, tab: "overview", sel: 0,
-              metric: "eval_mean", rankSel: 1, loading: false };
+  /* coming back from an "enter on behalf" detour, the dashboard reopens where
+     it was left (tab + student), so Back is a return and not a reset */
+  const back = WA._admReturn || {};
+  WA._admReturn = null;
+  const A = { data: null, people: null, tab: back.tab || "overview", sel: back.sel || 0,
+              metric: "fail", evalSel: "C4590", plotCat: "contact",
+              rankSel: 1, loading: false, hi: null };
   WA._adminState = A;
 
   const BR = WA.BRANCHES;   // [{id,label}] — defined in instructor.js
   const RW = WA.RANK_WORD;  // {1:"1st",2:"2nd",3:"3rd"}
 
+  /* Countable metrics only — round-2 R4 removed the evaluation COUNT chip
+     (every student converges to the same eight checkrides) and the mean
+     evaluation grade (evaluations are compared one identity at a time,
+     in the per-evaluation card below).
+     DIRECTION AUDIT (round-3 W5): FPC and CEF exist only after a failure,
+     so more of them is worse — they can never read "higher is better". */
   const METRICS = [
-    { id: "eval_mean", label: "Mean eval grade", dir: "high", fn: (s) => s.evalMean },
-    { id: "evals", label: "Evaluations", dir: "high", fn: (s) => s.evals },
     { id: "fail", label: "FAIL", dir: "low", fn: (s) => s.fail },
     { id: "almost_good", label: "ALMOST GOOD", dir: "low", fn: (s) => s.almost_good },
     { id: "nfs", label: "NFS", dir: "low", fn: (s) => s.nfs },
     { id: "sms", label: "SMS entries", dir: "low", fn: (s) => s.sms },
     { id: "airsickness", label: "Airsickness", dir: "low", fn: (s) => s.airsickness },
     { id: "solos", label: "Solo flights", dir: "high", fn: (s) => s.solos },
-    { id: "progress", label: "Progress tests", dir: "high", fn: (s) => s.progress },
-    { id: "aptitude", label: "Aptitude exams", dir: "high", fn: (s) => s.aptitude },
+    { id: "fpc", label: "FPC", dir: "low", fn: (s) => s.fpc, tip: WA.secTip("fpc") },
+    { id: "cef", label: "CEF", dir: "low", fn: (s) => s.cef, tip: WA.secTip("cef") },
   ];
+  const DIRWORD = { high: "higher is better", low: "lower is better" };
 
   /* ── data loading ── */
   async function load(soft) {
@@ -38,7 +48,19 @@ WA.renderAdmin = async function (view, me) {
       ]);
       A.data = d;
       A.people = p;
-      for (const s of A.data.students) s._stats = WA.recStats(s.record);
+      for (const s of A.data.students) {
+        /* the server migrates on read; repeating it here keeps the dashboard
+           correct against a cloud instance still running the v1 schema */
+        s.record = WA.migrateRecord(s.record);
+        s._stats = WA.recStats(s.record);
+        s._evals = WA.evalRows(s.record);
+        s._fpc = WA.fpcRows(s.record);
+        /* WHOSE record this is, counted from the entries (round 4b): _src.all
+           = the CO entered all of it, _src.some = the owner's record with
+           _src.n CO additions. The record-level flag alone cannot tell them
+           apart, and reading it as "CO record" is what round 4 got wrong. */
+        s._src = WA.coSource(s.record, s.entered_by);
+      }
       if (A.sel >= A.data.students.length) A.sel = Math.max(0, A.data.students.length - 1);
       if (!soft || safeToRedraw()) render();
       buildPrint();
@@ -47,6 +69,30 @@ WA.renderAdmin = async function (view, me) {
       else toast("Refresh failed: " + e.message, true);
     }
     A.loading = false;
+  }
+
+  /* how many records the students reported themselves and how many the CO
+     entered for them — the one line the class summary owes the reader.
+     A record the CO merely ADDED to stays in the self-reported count and is
+     named separately; folding it into "entered by CO" would say the student
+     never reported anything (round-4b fix). */
+  function sourceLine(list) {
+    const src = list.filter((s) => s.completion.has_record);
+    if (!src.length) return "no records submitted yet";
+    const co = src.filter((s) => s._src.all).length;
+    const part = src.filter((s) => s._src.some);
+    const adds = part.reduce((a, s) => a + s._src.n, 0);
+    return (src.length - co) + " self-reported" +
+      (part.length ? " (" + part.length + " with " + adds +
+        (adds === 1 ? " entry" : " entries") + " added by the CO)" : "") +
+      (co ? " · " + co + " entered by CO" : "");
+  }
+
+  /* the "enter on behalf" hop: remember where the dashboard was, then hand
+     over to the hash route (the admin token travels in the hash). */
+  function editAs(kind, id) {
+    WA._admReturn = { tab: A.tab, sel: A.sel };
+    location.hash = WA.coHash(kind, id);
   }
 
   function safeToRedraw() {
@@ -95,19 +141,21 @@ WA.renderAdmin = async function (view, me) {
     const rows = students.map((s, i) => {
       const st = s._stats, c = s.completion, pc = propCounts(s);
       const mb = (v) => Math.max(2, Math.min(18, v * 5));
+      /* NOTE (round-4 W3c): no "Evals" column — every student converges to the
+         same eight checkrides, so the count ranks nobody. The per-evaluation
+         grades (analysis + print matrix) carry the comparison. */
       return `
         <tr class="rowlink" data-goto="${i}" title="Open student analysis">
           <td><b>${esc(WA.personName(s.person, true))}</b></td>
           <td>${esc(s.person.class || "—")}</td>
-          <td class="num">${st.evals}${st.evalMean !== null ? ` <span class="badge badge-acc">μ ${esc(st.evalMean)}</span>` : ""}</td>
           <td class="num">${st.solos}</td>
           <td class="num">${st.nfs}</td>
           <td class="num">${st.sms}</td>
           <td class="num">${st.fail}</td>
           <td class="num">${st.almost_good}</td>
           <td class="num">${st.airsickness}</td>
-          <td class="num">${st.progress}</td>
-          <td class="num">${st.aptitude}</td>
+          <td class="num">${st.fpc}</td>
+          <td class="num">${st.cef}</td>
           <td>${st.pending ? `<span class="badge badge-warn">${st.pending} pending</span>` : `<span class="badge">—</span>`}</td>
           <td><span class="minibars" title="proposals naming Fighters / Helicopters / Transport–FF">
                 <i style="height:${mb(pc.fighters)}px" title="Fighters: ${pc.fighters}"></i>
@@ -116,7 +164,11 @@ WA.renderAdmin = async function (view, me) {
               </span> <span class="badge">${c.proposals_in}/${c.instructors_total}</span></td>
           <td>${c.has_record
             ? `<span class="badge badge-good">✓ ${esc(fmtDT(s.last_update))}</span>`
-            : `<span class="badge badge-bad">not submitted</span>`}</td>
+            : `<span class="badge badge-bad">not submitted</span>`}
+            ${WA.coRecordTag(s._src)}</td>
+          <td><button type="button" class="btn btn-sm" data-editrec="${esc(s.person.id)}"
+                title="Open this student's form and enter data on their behalf — every entry is tagged 'entered by CO'"
+                >&#9998; Edit record</button></td>
         </tr>`;
     }).join("");
 
@@ -134,17 +186,20 @@ WA.renderAdmin = async function (view, me) {
     return `
       <div class="toolrow">
         <span class="hint">${students.length} students · ${insTotal} active instructors ·
+          records: ${esc(sourceLine(students))} ·
           data as of ${esc(fmtDT(A.data.generated_at))}</span>
         <span class="spacer"></span>
         <button type="button" class="btn btn-sm" data-act="csv-summary">Export CSV — summary</button>
+        <button type="button" class="btn btn-sm" data-act="csv-entries">Export CSV — every entry</button>
         <button type="button" class="btn btn-sm" data-act="csv-proposals">Export CSV — proposals</button>
         <button type="button" class="btn btn-sm" data-act="json-export">Export JSON — full</button>
       </div>
       <div class="tblwrap"><table class="tbl">
         <thead><tr>
-          <th>Student</th><th>Class</th><th>Evals</th><th>Solos</th><th>NFS</th><th>SMS</th>
-          <th>FAIL</th><th>A.Good</th><th>Airsick</th><th>Progr.</th><th>Aptit.</th>
-          <th>Pending</th><th>Proposals</th><th>Self-report</th>
+          <th>Student</th><th>Class</th><th>Solos</th><th>NFS</th><th>SMS</th>
+          <th>FAIL</th><th>A.Good</th><th>Airsick</th>
+          <th title="${esc(WA.secTip("fpc"))}">FPC</th><th title="${esc(WA.secTip("cef"))}">CEF</th>
+          <th>Pending</th><th>Proposals</th><th>Self-report</th><th>Enter for</th>
         </tr></thead><tbody>${rows}</tbody></table></div>
       <div class="grid2" style="margin-top:12px">
         <div class="card"><h3>Students without a self-report</h3>
@@ -155,18 +210,13 @@ WA.renderAdmin = async function (view, me) {
   }
 
   /* ════════ STUDENT ANALYSIS ════════ */
-  function metricValues(m) {
-    return A.data.students
-      .map((s) => m.fn(s._stats))
-      .filter((v) => v !== null && v !== undefined && isFinite(v));
-  }
-
-  function fourBarSVG(s) {
-    const m = METRICS.find((x) => x.id === A.metric);
-    const vals = metricValues(m);
-    const mine = m.fn(s._stats);
-    const best = vals.length ? (m.dir === "high" ? Math.max(...vals) : Math.min(...vals)) : null;
-    const worst = vals.length ? (m.dir === "high" ? Math.min(...vals) : Math.max(...vals)) : null;
+  /* one 4-bar comparison: this student · class best · class worst · class average.
+     opts.unit — "%" appended to every value · opts.max — fixed axis top. */
+  function barsSVG(caption, mine, vals, dir, opts) {
+    const o = opts || {};
+    const unit = o.unit || "";
+    const best = vals.length ? (dir === "high" ? Math.max(...vals) : Math.min(...vals)) : null;
+    const worst = vals.length ? (dir === "high" ? Math.min(...vals) : Math.max(...vals)) : null;
     const avg = vals.length ? round1(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
     const bars = [
       { label: "This student", v: mine, color: "var(--accent)" },
@@ -175,12 +225,14 @@ WA.renderAdmin = async function (view, me) {
       { label: "Class average", v: avg, color: "var(--hf)" },
     ];
     const W = 640, H = 280, L = 44, R = 10, T = 26, B = 38;
-    const max = Math.max(1, ...bars.map((b) => (b.v === null ? 0 : b.v))) * 1.12;
+    /* counts get whole-number gridlines; grades keep the honest 0-100 axis */
+    const peak = Math.max(0, ...bars.map((b) => (b.v === null ? 0 : b.v)));
+    const step = o.max ? o.max / 4 : Math.max(1, Math.ceil(peak / 4));
+    const max = o.max || step * 4;
     const iw = (W - L - R) / bars.length;
     let grid = "", labels = "";
-    const ticks = 4;
-    for (let i = 0; i <= ticks; i++) {
-      const val = (max / ticks) * i;
+    for (let i = 0; i <= 4; i++) {
+      const val = step * i;
       const y = H - B - ((H - T - B) * val) / max;
       grid += `<line x1="${L}" y1="${y}" x2="${W - R}" y2="${y}" style="stroke:var(--line);stroke-width:${i === 0 ? 1.4 : 0.6}"/>` +
               `<text x="${L - 6}" y="${y + 3.5}" text-anchor="end" style="fill:var(--muted);font-size:10px">${esc(round1(val))}</text>`;
@@ -191,39 +243,226 @@ WA.renderAdmin = async function (view, me) {
       const h = Math.max(b.v === null ? 0 : 2, ((H - T - B) * v) / max);
       const y = H - B - h;
       labels += `<text x="${x + w / 2}" y="${H - B + 15}" text-anchor="middle" style="fill:var(--muted);font-size:10.5px">${esc(b.label)}</text>` +
-                `<text x="${x + w / 2}" y="${y - 6}" text-anchor="middle" style="fill:var(--text);font-size:12px;font-weight:600">${b.v === null ? "—" : esc(b.v)}</text>`;
+                `<text x="${x + w / 2}" y="${y - 6}" text-anchor="middle" style="fill:var(--text);font-size:12px;font-weight:600">${
+                  b.v === null ? "—" : esc(b.v + unit)}</text>`;
       return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" style="fill:${b.color}"/>`;
     }).join("");
-    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Comparison chart — ${esc(m.label)}">
-      <text x="${L}" y="14" style="fill:var(--muted);font-size:11px">${esc(m.label)} — ${esc(m.dir === "high" ? "higher is better" : "lower is better")}</text>
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Comparison chart — ${esc(caption)}">
+      <text x="${L}" y="14" style="fill:var(--muted);font-size:11px">${esc(caption)}</text>
       ${grid}${rects}${labels}</svg>`;
   }
 
-  function trendSVG(s) {
-    const evals = (Array.isArray(s.record.evaluations) ? s.record.evaluations : [])
-      .filter((e) => isFinite(Number(e.grade)) && e.date)
-      .slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    if (evals.length < 2)
-      return `<p class="hint" style="padding:6px 2px">${evals.length === 0
-        ? "No dated evaluation grades reported yet — no trend to draw."
-        : "Only one dated evaluation grade — the trend needs two or more."}</p>`;
-    const W = 640, H = 170, L = 40, R = 12, T = 14, B = 30;
-    const gs = evals.map((e) => Number(e.grade));
-    let lo = Math.min(...gs), hi = Math.max(...gs);
-    if (hi - lo < 4) { hi += 2; lo = Math.max(0, lo - 2); }
-    const pad = (hi - lo) * 0.15;
-    lo = Math.max(0, lo - pad); hi = hi + pad;
-    const x = (i) => L + ((W - L - R) * i) / (evals.length - 1);
+  function fourBarSVG(s) {
+    const m = METRICS.find((x) => x.id === A.metric) || METRICS[0];
+    const vals = A.data.students.map((x) => m.fn(x._stats))
+      .filter((v) => v !== null && v !== undefined && isFinite(v));
+    return barsSVG(m.label + " — " + DIRWORD[m.dir], m.fn(s._stats), vals, m.dir, {});
+  }
+
+  /* ── per-evaluation comparison: the SAME checkride across the class ──
+     one value per student = their LATEST graded attempt (WA.evalLatest). */
+  function evalValues(id) {
+    return A.data.students.map((x) => {
+      const r = WA.evalLatest(x._evals, id);
+      return { name: x.person.last_name, v: r ? r.grade : null };
+    });
+  }
+
+  function evalCompare(s) {
+    const id = A.evalSel;
+    const all = evalValues(id);
+    const vals = all.filter((x) => x.v !== null).map((x) => x.v);
+    const mineRow = WA.evalLatest(s._evals, id);
+    const mine = mineRow ? mineRow.grade : null;
+    const chart = barsSVG(WA.evalLabel(id) + " — grade %, higher is better", mine, vals, "high",
+                          { unit: "%", max: 100 });
+    const listed = all.filter((x) => x.v !== null)
+      .sort((a, b) => b.v - a.v)
+      .map((x) => `${esc(x.name)} ${esc(x.v)}%`).join(" · ");
+    return `
+      ${chart}
+      <p class="hint chk">Class values on <b>${esc(id)}</b>: ${listed || "nobody has flown it yet"}
+        ${vals.length ? ` &mdash; best ${esc(Math.max(...vals))}%, worst ${esc(Math.min(...vals))}%,
+        average ${esc(round1(vals.reduce((a, b) => a + b, 0) / vals.length))}%` : ""}
+        (n = ${vals.length} of ${A.data.students.length} students).
+        ${mine === null ? "<b>This student has no graded attempt on this evaluation.</b>" : ""}</p>`;
+  }
+
+  /* ── per-category plot: the category's evaluations in SYLLABUS order ──
+     (never date order) with the class average as a faint reference. */
+  function plotDef(cat) {
+    if (cat === "fpc") {
+      const n = A.data.students.reduce((m, x) => Math.max(m, x._fpc.length), 0);
+      return {
+        note: "An FPC has no position in the syllabus — entries are numbered in date order.",
+        pts: Array.from({ length: n }, (_, k) => ({ key: k, label: "FPC #" + (k + 1), title: "FPC #" + (k + 1) })),
+        val: (x, p) => (x._fpc[p.key] ? x._fpc[p.key].grade : null),
+        row: (x, p) => (x._fpc[p.key] ? "fpc:" + x._fpc[p.key].i : null),
+      };
+    }
+    return {
+      note: "Shown in syllabus order — never in date order.",
+      pts: WA.evalsOfCat(cat).map((d) => ({ key: d.id, label: d.id, title: WA.evalLabel(d.id) })),
+      val: (x, p) => { const r = WA.evalLatest(x._evals, p.key); return r ? r.grade : null; },
+      row: (x, p) => { const r = WA.evalLatest(x._evals, p.key); return r ? "ev:" + r.i : null; },
+    };
+  }
+
+  function catPlotSVG(s) {
+    const def = plotDef(A.plotCat);
+    if (!def.pts.length)
+      return `<p class="hint" style="padding:6px 2px">Nothing to plot in this category yet.</p>`;
+    const mine = def.pts.map((p) => def.val(s, p));
+    const cls = def.pts.map((p) => {
+      const vs = A.data.students.map((x) => def.val(x, p)).filter((v) => v !== null);
+      return vs.length ? round1(vs.reduce((a, b) => a + b, 0) / vs.length) : null;
+    });
+    const seen = mine.concat(cls).filter((v) => v !== null);
+    if (!seen.length)
+      return `<p class="hint" style="padding:6px 2px">No grades reported in this category yet
+        &mdash; the ${def.pts.length} position${def.pts.length === 1 ? "" : "s"} of the plot are still empty.</p>`;
+    let lo = Math.min(...seen), hi = Math.max(...seen);
+    if (hi - lo < 10) { const c = (hi + lo) / 2; lo = c - 5; hi = c + 5; }
+    const pad = (hi - lo) * 0.18;
+    lo = Math.max(0, Math.floor(lo - pad));
+    hi = Math.min(100, Math.ceil(hi + pad));
+
+    const W = 660, H = 230, L = 40, R = 14, T = 22, B = 46;
+    const n = def.pts.length;
+    const x = (i) => n === 1 ? (L + (W - L - R) / 2) : L + ((W - L - R) * i) / (n - 1);
     const y = (g) => H - B - ((H - T - B) * (g - lo)) / (hi - lo);
-    const pts = evals.map((e, i) => `${x(i)},${y(Number(e.grade))}`).join(" ");
-    const dots = evals.map((e, i) =>
-      `<circle cx="${x(i)}" cy="${y(Number(e.grade))}" r="3.4" style="fill:var(--gold)"/>` +
-      `<text x="${x(i)}" y="${y(Number(e.grade)) - 8}" text-anchor="middle" style="fill:var(--text);font-size:10px">${esc(Number(e.grade))}</text>` +
-      `<text x="${x(i)}" y="${H - B + 14}" text-anchor="middle" style="fill:var(--muted);font-size:9px">${esc(fmtD(e.date).slice(0, 5))}</text>`).join("");
-    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Evaluation grade trend">
-      <line x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}" style="stroke:var(--line)"/>
-      <polyline points="${pts}" style="fill:none;stroke:var(--gold);stroke-width:2"/>
-      ${dots}</svg>`;
+
+    let grid = "";
+    for (let i = 0; i <= 4; i++) {
+      const val = lo + ((hi - lo) / 4) * i, yy = y(val);
+      grid += `<line x1="${L}" y1="${yy}" x2="${W - R}" y2="${yy}" style="stroke:var(--line);stroke-width:${i === 0 ? 1.4 : 0.6}"/>` +
+              `<text x="${L - 6}" y="${yy + 3.5}" text-anchor="end" style="fill:var(--muted);font-size:10px">${esc(round1(val))}</text>`;
+    }
+    const segs = (vals, style) => {
+      let out = "", run = [];
+      vals.forEach((v, i) => {
+        if (v === null) { if (run.length > 1) out += `<polyline points="${run.join(" ")}" style="${style}"/>`; run = []; }
+        else run.push(x(i) + "," + y(v));
+      });
+      if (run.length > 1) out += `<polyline points="${run.join(" ")}" style="${style}"/>`;
+      return out;
+    };
+    const clsLine = segs(cls, "fill:none;stroke:var(--muted);stroke-width:1.4;stroke-dasharray:5 4;opacity:.55");
+    const clsDots = cls.map((v, i) => v === null ? "" :
+      `<circle cx="${x(i)}" cy="${y(v)}" r="2.6" style="fill:var(--muted);opacity:.55"/>`).join("");
+    const myLine = segs(mine, "fill:none;stroke:var(--accent);stroke-width:2.4");
+    const myDots = def.pts.map((p, i) => {
+      const v = mine[i];
+      const key = def.row(s, p);
+      const xLab = `<text x="${x(i)}" y="${H - B + 15}" text-anchor="middle" style="fill:var(--muted);font-size:10px">${esc(p.label)}</text>`;
+      if (v === null) {
+        return xLab + `<text x="${x(i)}" y="${y(lo) - 4}" text-anchor="middle" style="fill:var(--muted);font-size:9px">not flown</text>`;
+      }
+      return xLab +
+        `<circle cx="${x(i)}" cy="${y(v)}" r="4.4" style="fill:var(--accent)"/>` +
+        `<text x="${x(i)}" y="${y(v) - 10}" text-anchor="middle" style="fill:var(--text);font-size:11px;font-weight:600">${esc(v)}</text>` +
+        (key ? `<circle class="hit" cx="${x(i)}" cy="${y(v)}" r="13" data-pt="${esc(key)}"
+                  style="fill:transparent;cursor:pointer"><title>${esc(p.title)} — ${esc(v)}%. Click to find it in the table below.</title></circle>` : "");
+    }).join("");
+
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Grades in ${esc(A.plotCat)}, syllabus order">
+      ${grid}${clsLine}${clsDots}${myLine}${myDots}
+      <text x="${L}" y="13" style="fill:var(--muted);font-size:10.5px">${esc(def.note)}</text>
+      </svg>`;
+  }
+
+  /* ── the summary table every plot point points at ── */
+  function evalSummary(s) {
+    const rows = [];
+    s._evals.slice().sort((a, b) => (a.order - b.order) || String(a.date).localeCompare(String(b.date)))
+      .forEach((r) => rows.push({
+        key: "ev:" + r.i, cat: r.cat,
+        what: r.def ? `<b>${esc(r.id)}</b> ${esc(r.def.name)}` : `<span class="warn-t">(not identified — imported entry)</span>`,
+        who: r.with, grade: r.grade, date: r.date, pending: r.pending, co: WA.isCO(r),
+      }));
+    s._fpc.forEach((r, k) => rows.push({
+      key: "fpc:" + r.i, cat: "fpc",
+      what: `<b>FPC #${k + 1}</b> ${esc(r.result || "flight progress check")}`,
+      who: r.with, grade: r.grade, date: r.date, pending: r.pending, co: WA.isCO(r),
+    }));
+    if (!rows.length) return `<p class="hint">No evaluations or FPC entries reported yet.</p>`;
+    return `
+      <div class="tblwrap"><table class="tbl" id="sumtbl">
+        <thead><tr><th>Evaluation</th><th>With whom</th><th>Grade</th><th>Date</th><th>Pending</th><th>Source</th></tr></thead>
+        <tbody>${rows.map((r) => `
+          <tr data-sumrow="${esc(r.key)}" class="${r.cat === A.plotCat ? "in-cat" : ""}${A.hi === r.key ? " is-hi" : ""}">
+            <td>${r.what}</td><td>${esc(r.who || "—")}</td>
+            <td class="num">${WA.pct(r.grade)}</td>
+            <td>${esc(fmtD(r.date))}</td>
+            <td>${r.pending ? `<span class="badge badge-warn">pending</span>` : "—"}</td>
+            <td>${r.co ? `<span class="cotag" title="${esc(WA.CO_TIP)}">CO</span>` : `<span class="k">self</span>`}</td></tr>`).join("")}
+        </tbody></table></div>`;
+  }
+
+  /* ── the dated-entry tables the CO asked to see in full ── */
+  function evTable(head, rows) {
+    if (!rows.length) return "";
+    return `<div class="tblwrap" style="margin-bottom:10px"><table class="tbl">
+      <thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead>
+      <tbody>${rows.join("")}</tbody></table></div>`;
+  }
+
+  /* the last cell of every entry table: who put this row in the record */
+  function srcCell(e) {
+    return `<td>${WA.isCO(e)
+      ? `<span class="cotag" title="${esc(WA.CO_TIP)}">CO</span>`
+      : `<span class="k">self</span>`}</td>`;
+  }
+
+  function failTable(s, k) {
+    const list = Array.isArray(s.record[k]) ? s.record[k] : [];
+    if (!list.length) return `<p class="hint">No ${esc(WA.secLabel(k))} entries reported.</p>`;
+    return evTable(["Date", "Track", "Flight", "Items", "Instructor", "Grade", "", "Source"],
+      list.slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).map((e) => `
+        <tr><td>${esc(fmtD(e.date))}</td>
+          <td>${esc(WA.itemCatLabel(e.category))}</td>
+          <td title="${esc(WA.sortieLabel(e.category, e.flight_code))}">${esc(e.flight_code || "—")}</td>
+          <td>${esc(WA.itemsLabel(e))}</td>
+          <td>${esc(e.instructor || "—")}</td>
+          <td class="num">${WA.pct(e.grade)}</td>
+          <td>${e.pending ? `<span class="badge badge-warn">pending</span>` : ""}</td>
+          ${srcCell(e)}</tr>`));
+  }
+
+  function airsickTable(s) {
+    const list = Array.isArray(s.record.airsickness) ? s.record.airsickness : [];
+    if (!list.length) return `<p class="hint">No airsickness reported.</p>`;
+    return evTable(["Date", "With whom", "Phase of flight / note", "Source"],
+      list.slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).map((e) => `
+        <tr><td>${esc(fmtD(e.date))}</td><td>${esc(e.instructor || "—")}</td>
+          <td>${esc(e.phase || "—")}</td>${srcCell(e)}</tr>`));
+  }
+
+  function otherTables(s) {
+    const r = s.record;
+    const nfs = (r.nfs || []).map((e) =>
+      `<tr><td>${esc(fmtD(e.date))}</td><td>${esc(e.note || "—")}</td>${srcCell(e)}</tr>`);
+    const sms = (r.sms || []).map((e) =>
+      `<tr><td>${esc(fmtD(e.entrance_date))}</td><td>${e.exit_date ? esc(fmtD(e.exit_date)) : `<span class="badge badge-warn">still open</span>`}</td>
+        <td>${esc(e.note || "—")}</td>${srcCell(e)}</tr>`);
+    const solo = (r.solo_flights || []).map((e) =>
+      `<tr><td>${esc(fmtD(e.date))}</td>
+        <td>${e.ng ? `<span class="badge">NG — non-graded</span>` : WA.pct(e.grade)}</td>
+        <td>${esc(e.ng ? "—" : (e.instructor || "—"))}</td>${srcCell(e)}</tr>`);
+    const chk = (k) => (r[k] || []).map((e) =>
+      `<tr><td>${esc(fmtD(e.date))}</td><td>${esc(e.by || "—")}</td>
+        <td>${esc(e.result || "—")}</td>
+        <td class="num">${WA.pct(e.grade)}</td>
+        <td>${e.pending ? `<span class="badge badge-warn">pending</span>` : ""}</td>${srcCell(e)}</tr>`);
+    const blk = (k, head, rows) => `
+      <h3 style="margin-top:8px">${esc(WA.secLabel(k))} ${WA.tipDot(k)}
+        <span class="cnt">${rows.length} ${rows.length === 1 ? "entry" : "entries"}</span></h3>
+      ${rows.length ? evTable(head, rows) : `<p class="hint">None reported.</p>`}`;
+    return blk("nfs", ["Date", "Note", "Source"], nfs) +
+           blk("sms", ["Entrance", "Exit", "Note", "Source"], sms) +
+           blk("solo_flights", ["Date", "Grade", "Instructor", "Source"], solo) +
+           blk("fpc", ["Date", "By", "Result", "Grade", "", "Source"], chk("fpc")) +
+           blk("cef", ["Date", "By", "Result", "Grade", "", "Source"], chk("cef"));
   }
 
   function branchBoxes(s, forBrief) {
@@ -270,22 +509,31 @@ WA.renderAdmin = async function (view, me) {
     const st = s._stats;
     const pend = WA.pendingItems(s.record);
     const chips = METRICS.map((m) =>
-      `<button type="button" class="chip${m.id === A.metric ? " is-on" : ""}" data-metric="${esc(m.id)}">${esc(m.label)}</button>`).join("");
+      `<button type="button" class="chip${m.id === A.metric ? " is-on" : ""}" data-metric="${esc(m.id)}"
+        title="${esc((m.tip ? m.tip + " " : "") + "(" + DIRWORD[m.dir] + ")")}">${esc(m.label)}</button>`).join("");
     const rsel = [1, 2, 3].map((r) =>
       `<button type="button" class="chip${A.rankSel === r ? " is-on" : ""}" data-ranksel="${r}">${esc(RW[r])} choice</button>`).join("");
     const drill = s.proposals.length ? `
       <details class="drill"><summary>Drill-down — every proposal for this student (${s.proposals.length})</summary>
         <div class="tblwrap" style="margin-top:8px"><table class="tbl">
           <thead><tr><th>Instructor</th><th>Duty</th><th>Leadership</th><th>Status</th>
-            <th>Fighters</th><th>Helicopters</th><th>Transport–FF</th><th>Flew with</th><th>Comment</th></tr></thead>
+            <th>Fighters</th><th>Helicopters</th><th>Transport–FF</th><th>Flew with</th><th>Comment</th>
+            <th>Source</th></tr></thead>
           <tbody>${s.proposals.map((p) => `
             <tr><td><b>${esc((p.rank ? p.rank + " " : "") + p.last_name)}</b></td>
               <td>${esc(p.duty || "—")}</td><td>${esc(p.leadership || "—")}</td><td>${esc(p.status || "—")}</td>
               <td>${esc(p.ranks.fighters ? RW[p.ranks.fighters] : "—")}</td>
               <td>${esc(p.ranks.helicopters ? RW[p.ranks.helicopters] : "—")}</td>
               <td>${esc(p.ranks.transport_ff ? RW[p.ranks.transport_ff] : "—")}</td>
-              <td>${p.flew_with ? "✓" : "—"}</td><td>${esc(p.comment || "")}</td></tr>`).join("")}
+              <td>${p.flew_with ? "✓" : "—"}</td><td>${esc(p.comment || "")}</td>
+              ${srcCell(p)}</tr>`).join("")}
           </tbody></table></div></details>` : "";
+
+    const evOpts = WA.EVALUATIONS.map((d) =>
+      `<option value="${esc(d.id)}"${A.evalSel === d.id ? " selected" : ""}>${esc(WA.evalLabel(d.id))}</option>`).join("");
+    const catChips = WA.EVAL_CATS.map((c) =>
+      `<button type="button" class="chip${A.plotCat === c.id ? " is-on" : ""}" data-plotcat="${esc(c.id)}"
+        ${c.id === "fpc" ? `title="${esc(WA.secTip("fpc"))}"` : ""}>${esc(c.label)}</button>`).join("");
 
     return `
       <div class="ana-nav">
@@ -300,16 +548,64 @@ WA.renderAdmin = async function (view, me) {
           <span class="meta">${esc([s.person.mn ? "MN " + s.person.mn : "", s.person.class ? "Class " + s.person.class : ""].filter(Boolean).join(" · "))}</span>
           <span class="lastupd">Self-report: <b>${s.completion.has_record ? esc(fmtDT(s.last_update)) : "not submitted"}</b></span>
           ${st.pending ? `<span class="badge badge-warn">${st.pending} pending item${st.pending === 1 ? "" : "s"}</span>` : ""}
+          ${st.legacy ? `<span class="badge badge-bad">${st.legacy} imported entr${st.legacy === 1 ? "y" : "ies"} incomplete</span>` : ""}
+          ${s._src.any ? `<span class="badge badge-acc" title="${esc(s._src.tip)}">${
+            s._src.all ? (s._src.total ? "record entered by CO" : "record opened by CO")
+                       : s._src.n + " entr" + (s._src.n === 1 ? "y" : "ies") + " entered by CO"}</span>` : ""}
+          <button type="button" class="btn btn-sm" data-editrec="${esc(s.person.id)}"
+            title="Open this student's form and enter data on their behalf — every entry is tagged 'entered by CO'"
+            >&#9998; Edit record</button>
         </div>
         ${pend.length ? `<ul class="pendlist">${pend.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
       </div>
       <div class="card">
         <h2>Comparison vs class</h2>
-        <p class="hint">Click a metric — the chart shows this student against the class best, worst and average.</p>
+        <p class="hint">Click a metric — the chart shows this student against the class best, worst and average.
+          Every count is derived from the student's dated entries.</p>
         <div class="chiprow" style="margin:10px 0">${chips}</div>
         <div class="chartbox">${fourBarSVG(s)}</div>
-        <h3 style="margin-top:14px">Evaluation grade trend</h3>
-        <div class="chartbox">${trendSVG(s)}</div>
+      </div>
+      <div class="card">
+        <h2>Evaluations ${WA.tipDot("evaluations")}</h2>
+        <p class="hint">Evaluations are separate events, so they are compared <b>one checkride at a time</b> —
+          never as an average, and never as a count. A re-flown checkride counts with its latest graded attempt.</p>
+        <div class="toolrow" style="margin:10px 0 8px">
+          <label class="f" style="max-width:340px"><span>Compare on this evaluation</span>
+            <select id="evalsel">${evOpts}</select></label>
+        </div>
+        <div class="chartbox">${evalCompare(s)}</div>
+
+        <h3 style="margin-top:16px">Grades per category</h3>
+        <p class="hint">The category's evaluations in syllabus order, with the class average as the faint
+          dashed reference. Click a point to find it in the table below.</p>
+        <div class="chiprow" style="margin:10px 0">${catChips}</div>
+        <div class="chartbox" id="catplot">${catPlotSVG(s)}</div>
+        <div class="legendrow">
+          <span><i style="background:var(--accent)"></i>this student</span>
+          <span><i style="background:var(--muted)"></i>class average on the same evaluation</span>
+        </div>
+
+        <h3 style="margin-top:16px">Summary — every evaluation and FPC of this student</h3>
+        ${evalSummary(s)}
+      </div>
+      <div class="card">
+        <h2>FAIL &amp; ALMOST GOOD</h2>
+        <h3>${esc(WA.secLabel("fail"))} ${WA.tipDot("fail")}
+          <span class="cnt">${st.fail} ${st.fail === 1 ? "entry" : "entries"}</span></h3>
+        ${failTable(s, "fail")}
+        <h3 style="margin-top:10px">${esc(WA.secLabel("almost_good"))} ${WA.tipDot("almost_good")}
+          <span class="cnt">${st.almost_good} ${st.almost_good === 1 ? "entry" : "entries"}</span></h3>
+        ${failTable(s, "almost_good")}
+      </div>
+      <div class="card">
+        <h2>Airsickness ${WA.tipDot("airsickness")}
+          <span class="cnt">${st.airsickness} ${st.airsickness === 1 ? "entry" : "entries"}</span></h2>
+        <p class="hint">When each incident happened and with whom.</p>
+        ${airsickTable(s)}
+      </div>
+      <div class="card">
+        <h2>Other dated entries</h2>
+        ${otherTables(s)}
       </div>
       <div class="card">
         <h2>Proposals</h2>
@@ -337,18 +633,49 @@ WA.renderAdmin = async function (view, me) {
         </div>
         <div class="b-name">${esc(WA.personName(s.person, true))}</div>
         <div class="b-meta">${esc([s.person.mn ? "MN " + s.person.mn : "", s.person.class ? "Class " + s.person.class : ""].filter(Boolean).join(" · "))}
-          ${st.pending ? ` · <span style="color:var(--warn)">${st.pending} pending</span>` : ""}</div>
+          ${st.pending ? ` · <span style="color:var(--warn)">${st.pending} pending</span>` : ""}
+          ${s._src.any ? ` · ${WA.coRecordTag(s._src)} ${esc(s._src.all
+            ? "record entered by the CO"
+            : s._src.n + (s._src.n === 1 ? " entry" : " entries") + " entered by the CO")}` : ""}</div>
         <div class="card"><div class="kgrid">
-          <span><span class="k">Evaluations</span> <b>${st.evals}</b>${st.evalMean !== null ? ` <span class="k">mean</span> <b>${esc(st.evalMean)}</b>` : ""}</span>
           <span><span class="k">Solos</span> <b>${st.solos}</b></span>
           <span><span class="k">NFS</span> <b>${st.nfs}</b></span>
           <span><span class="k">SMS</span> <b>${st.sms}</b></span>
           <span><span class="k">FAIL</span> <b>${st.fail}</b></span>
           <span><span class="k">ALMOST GOOD</span> <b>${st.almost_good}</b></span>
           <span><span class="k">Airsickness</span> <b>${st.airsickness}</b></span>
-          <span><span class="k">Progress</span> <b>${st.progress}</b></span>
-          <span><span class="k">Aptitude</span> <b>${st.aptitude}</b></span>
+          <span title="${esc(WA.secTip("fpc"))}"><span class="k">FPC</span> <b>${st.fpc}</b></span>
+          <span title="${esc(WA.secTip("cef"))}"><span class="k">CEF</span> <b>${st.cef}</b></span>
         </div></div>
+        <div class="card b-detail">
+          <div class="kline"><span class="k">Evaluations</span>
+            ${s._evals.length ? s._evals.slice().sort((a, b) => a.order - b.order).map((e) =>
+              `<b>${esc(WA.evalShort(e.id))}</b> ${WA.pct(e.grade)}${
+                e.with ? " <span class='k'>w/ " + esc(e.with) + "</span>" : ""}${e.pending ? " ⏳" : ""}${WA.coTag(e)}`).join(" · ")
+              : "<span class='k'>none reported</span>"}</div>
+          <div class="kline"><span class="k">Solo flights</span>
+            ${st.solos ? (s.record.solo_flights || []).map((e) =>
+              esc(fmtD(e.date)) + (e.ng ? " <span class='k'>NG</span>" : " <b>" + WA.pct(e.grade) + "</b>") +
+              WA.coTag(e)).join(" · ")
+              : "<span class='k'>none reported</span>"}</div>
+          ${["fail", "almost_good"].map((k) => {
+            const list = s.record[k] || [];
+            /* one sub-line per entry: the items inside an entry are already
+               separated by · , so entries must not be */
+            return `<div class="kline"><span class="k">${esc(WA.secLabel(k))}</span>
+              ${list.length ? list.map((e) => `<div class="sub">${esc(fmtD(e.date))}` +
+                (e.flight_code ? " <b>" + esc(e.flight_code) + "</b>" : "") + " " + esc(WA.itemsLabel(e)) +
+                (e.grade === null || e.grade === undefined ? "" : " <b>" + WA.pct(e.grade) + "</b>") +
+                (e.instructor ? " <span class='k'>w/ " + esc(e.instructor) + "</span>" : "") +
+                (e.pending ? " ⏳" : "") + WA.coTag(e) + `</div>`).join("")
+                : "<span class='k'>none reported</span>"}</div>`;
+          }).join("")}
+          <div class="kline"><span class="k">Airsickness</span>
+            ${(s.record.airsickness || []).length ? (s.record.airsickness || []).map((e) =>
+              esc(fmtD(e.date)) + (e.instructor ? " <span class='k'>w/ " + esc(e.instructor) + "</span>" : "") +
+              (e.phase ? " (" + esc(e.phase) + ")" : "") + WA.coTag(e)).join(" · ")
+              : "<span class='k'>none reported</span>"}</div>
+        </div>
         <div class="grid3">${branchBoxes(s, true)}</div>
       </div>`;
   }
@@ -373,19 +700,72 @@ WA.renderAdmin = async function (view, me) {
         s.not_submitted.map((n) => `<li>${esc(n)} has not submitted a recommendation for this student yet</li>`).join("");
       const comments = s.proposals.filter((p) => p.comment).map((p) =>
         `<li><b>${esc((p.rank ? p.rank + " " : "") + p.last_name)}:</b> ${esc(p.comment)}</li>`).join("");
+      const prT = (head, rows) => rows.length
+        ? `<table class="pr-t"><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>
+           <tbody>${rows.join("")}</tbody></table>`
+        : `<p class="pr-none">None reported.</p>`;
+      /* the CO tag rides in the first cell of every printed row — small, and
+         it costs the table no extra column (round-4 W2c) */
+      const evRows = s._evals.slice().sort((a, b) => a.order - b.order).map((e) =>
+        `<tr><td>${esc(e.def ? e.id + " — " + e.def.name : "(not identified)")}${WA.coTag(e)}</td>
+          <td>${esc(e.with || "—")}</td><td>${WA.pct(e.grade)}</td>
+          <td>${esc(fmtD(e.date))}</td><td>${e.pending ? "pending" : ""}</td></tr>`);
+      const fgRows = (k) => (s.record[k] || []).map((e) =>
+        `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${esc(WA.itemCatLabel(e.category))}</td>
+          <td>${esc(e.flight_code || "—")}</td><td>${esc(WA.itemsLabel(e))}</td>
+          <td>${esc(e.instructor || "—")}</td>
+          <td>${WA.pct(e.grade)}</td>
+          <td>${e.pending ? "pending" : ""}</td></tr>`);
+      const asRows = (s.record.airsickness || []).map((e) =>
+        `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${esc(e.instructor || "—")}</td><td>${esc(e.phase || "—")}</td></tr>`);
+      const soRows = (s.record.solo_flights || []).map((e) =>
+        `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${e.ng ? "NG (non-graded)" : WA.pct(e.grade)}</td>
+          <td>${esc(e.ng ? "—" : (e.instructor || "—"))}</td></tr>`);
+      const ckRows = (k) => (s.record[k] || []).map((e) =>
+        `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${esc(e.by || "—")}</td><td>${esc(e.result || "—")}</td>
+          <td>${WA.pct(e.grade)}</td>
+          <td>${e.pending ? "pending" : ""}</td></tr>`);
+      const nfsRows = (s.record.nfs || []).map((e) =>
+        `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${esc(e.note || "—")}</td></tr>`);
+      const smsRows = (s.record.sms || []).map((e) =>
+        `<tr><td>${esc(fmtD(e.entrance_date))}${WA.coTag(e)}</td><td>${e.exit_date ? esc(fmtD(e.exit_date)) : "still open"}</td>
+          <td>${esc(e.note || "—")}</td></tr>`);
       return `
         <div class="pr-page">
+          <div class="pr-brand"><img src="assets/364mea-240.png" alt=""><span>Wings Ahead</span>
+            <span class="pr-brand-sub">364 MEA — student utilization</span></div>
           <h2>${esc(WA.personName(s.person, true))}</h2>
           <div class="pr-meta">${esc([s.person.mn ? "MN " + s.person.mn : "", s.person.class ? "Class " + s.person.class : ""].filter(Boolean).join(" · "))}
-            · self-report ${s.completion.has_record ? "updated " + esc(fmtDT(s.last_update)) : "NOT submitted"}
+            · ${s._src.all ? "record ENTERED BY THE CO"
+              : "self-report" + (s._src.some
+                ? " (+" + s._src.n + " entered by the CO)" : "")}
+            ${s.completion.has_record ? "updated " + esc(fmtDT(s.last_update)) : "NOT submitted"}
             · proposals in: ${s.completion.proposals_in}/${s.completion.instructors_total}</div>
-          <div class="pr-sec">Self-reported record</div>
-          <table class="pr-t"><thead><tr><th>Evals</th><th>Mean grade</th><th>Solos</th><th>NFS</th>
-            <th>SMS</th><th>FAIL</th><th>Almost Good</th><th>Airsick</th><th>Progress</th><th>Aptitude</th><th>Pending</th></tr></thead>
-            <tbody><tr><td>${st.evals}</td><td>${st.evalMean === null ? "—" : esc(st.evalMean)}</td>
+          <div class="pr-sec">Reported record — counts derived from the dated entries</div>
+          <table class="pr-t"><thead><tr><th>Solos</th><th>NFS</th>
+            <th>SMS</th><th>FAIL</th><th>Almost Good</th><th>Airsick</th><th>FPC</th><th>CEF</th><th>Pending</th></tr></thead>
+            <tbody><tr>
               <td>${st.solos}</td><td>${st.nfs}</td><td>${st.sms}</td><td>${st.fail}</td>
-              <td>${st.almost_good}</td><td>${st.airsickness}</td><td>${st.progress}</td>
-              <td>${st.aptitude}</td><td>${st.pending}</td></tr></tbody></table>
+              <td>${st.almost_good}</td><td>${st.airsickness}</td><td>${st.fpc}</td>
+              <td>${st.cef}</td><td>${st.pending}</td></tr></tbody></table>
+          <div class="pr-sec">Evaluations (syllabus order)</div>
+          ${prT(["Evaluation", "With whom", "Grade", "Date", ""], evRows)}
+          <div class="pr-sec">FAIL</div>
+          ${prT(["Date", "Track", "Flight", "Items", "Instructor", "Grade", ""], fgRows("fail"))}
+          <div class="pr-sec">ALMOST GOOD</div>
+          ${prT(["Date", "Track", "Flight", "Items", "Instructor", "Grade", ""], fgRows("almost_good"))}
+          <div class="pr-sec">Airsickness — when and with whom</div>
+          ${prT(["Date", "With whom", "Phase of flight / note"], asRows)}
+          <div class="pr-sec">Solo flights</div>
+          ${prT(["Date", "Grade", "Instructor"], soRows)}
+          <div class="pr-sec">NFS</div>
+          ${prT(["Date", "Note"], nfsRows)}
+          <div class="pr-sec">SMS</div>
+          ${prT(["Entrance", "Exit", "Note"], smsRows)}
+          <div class="pr-sec">FPC — Δοκιμή Προόδου (flight progress check)</div>
+          ${prT(["Date", "By", "Result", "Grade", ""], ckRows("fpc"))}
+          <div class="pr-sec">CEF — Εξέταση Καταλληλότητας (Squadron Evaluator)</div>
+          ${prT(["Date", "By", "Result", "Grade", ""], ckRows("cef"))}
           <div class="pr-sec">Utilization proposals (weighted 3×1st + 2×2nd + 1×3rd)</div>
           <table class="pr-t"><thead><tr><th>Branch</th><th>1st choice</th><th>2nd choice</th><th>3rd choice</th><th>Σ</th></tr></thead>
             <tbody>${branchRows}</tbody></table>
@@ -407,23 +787,50 @@ WA.renderAdmin = async function (view, me) {
       });
       return `
         <div class="pr-sec">Class ${esc(cls)} — summary ranking (weighted 3/2/1 per branch)</div>
+        <p class="pr-src">Records: ${esc(sourceLine(list))}
+          — &ldquo;CO&rdquo; marks a record the squadron CO entered in full,
+          &ldquo;+N CO&rdquo; a self-reported record he added N entries to.</p>
         <table class="pr-t"><thead><tr><th>#</th><th>Student</th>
           <th>Fighters Σ</th><th>Helicopters Σ</th><th>Transport–FF Σ</th>
-          <th>1st-choice votes</th><th>Proposals in</th><th>Mean eval</th></tr></thead><tbody>
+          <th>1st-choice votes</th><th>Proposals in</th><th>FAIL</th><th>A.Good</th><th>FPC</th><th>CEF</th></tr></thead><tbody>
           ${list.map((s, i) => {
             const firsts = BR.reduce((acc, b) => acc + (s.aggregates[b.id].by_rank["1"] || []).length, 0);
-            return `<tr><td>${i + 1}</td><td><b>${esc(WA.personName(s.person, true))}</b></td>
+            return `<tr><td>${i + 1}</td><td><b>${esc(WA.personName(s.person, true))}</b>${
+                WA.coRecordTag(s._src)}</td>
               <td>${esc(s.aggregates.fighters.weighted)}</td>
               <td>${esc(s.aggregates.helicopters.weighted)}</td>
               <td>${esc(s.aggregates.transport_ff.weighted)}</td>
               <td>${firsts}</td>
               <td>${s.completion.proposals_in}/${s.completion.instructors_total}</td>
-              <td>${s._stats.evalMean === null ? "—" : esc(s._stats.evalMean)}</td></tr>`;
+              <td>${s._stats.fail}</td><td>${s._stats.almost_good}</td>
+              <td>${s._stats.fpc}</td><td>${s._stats.cef}</td></tr>`;
           }).join("")}</tbody></table>`;
     }).join("");
 
-    holder.innerHTML = pages + `<div class="pr-page"><h2>WingsAhead — class summary</h2>
-      <div class="pr-meta">Generated ${esc(fmtDT(A.data.generated_at))}</div>${summary}</div>`;
+    /* one row per student per evaluation — the same-checkride comparison on paper */
+    const evalMatrix = `
+      <div class="pr-sec">Evaluations — every student on the same checkride (latest graded attempt)</div>
+      <table class="pr-t"><thead><tr><th>Student</th>
+        ${WA.EVALUATIONS.map((d) => `<th>${esc(d.id)}</th>`).join("")}</tr></thead><tbody>
+        ${students.map((s) => `<tr><td><b>${esc(WA.personName(s.person, true))}</b></td>
+          ${WA.EVALUATIONS.map((d) => {
+            const r = WA.evalLatest(s._evals, d.id);
+            return `<td>${WA.pct(r ? r.grade : null)}${r ? WA.coTag(r) : ""}</td>`;
+          }).join("")}</tr>`).join("")}
+        <tr><td><b>Class average</b></td>
+          ${WA.EVALUATIONS.map((d) => {
+            const vs = students.map((s) => { const r = WA.evalLatest(s._evals, d.id); return r ? r.grade : null; })
+              .filter((v) => v !== null);
+            return `<td>${vs.length ? esc(round1(vs.reduce((a, b) => a + b, 0) / vs.length)) + "%" : "—"}</td>`;
+          }).join("")}</tr>
+      </tbody></table>`;
+
+    holder.innerHTML = pages + `<div class="pr-page">
+      <div class="pr-brand"><img src="assets/364mea-240.png" alt=""><span>Wings Ahead</span>
+        <span class="pr-brand-sub">364 MEA — student utilization</span></div>
+      <h2>Class summary</h2>
+      <div class="pr-meta">Generated ${esc(fmtDT(A.data.generated_at))}
+        · all classes: ${esc(sourceLine(students))}</div>${summary}${evalMatrix}</div>`;
   }
 
   /* ════════ PEOPLE & LINKS ════════ */
@@ -446,6 +853,14 @@ WA.renderAdmin = async function (view, me) {
           <td style="white-space:nowrap">
             <button type="button" class="btn btn-sm" data-copy="${esc(p.token)}" title="Copy this person's private link">Copy link</button>
             <button type="button" class="btn btn-sm" data-edit="${esc(p.id)}">Edit</button>
+            ${kind === "instructor" && p.active
+              ? `<button type="button" class="btn btn-sm" data-editprop="${esc(p.id)}"
+                   title="Open this instructor's recommendation form and fill it in on their behalf — every proposal is tagged 'entered by CO'"
+                   >&#9998; Enter proposals as…</button>` : ""}
+            ${kind === "student" && p.active
+              ? `<button type="button" class="btn btn-sm" data-editrec="${esc(p.id)}"
+                   title="Open this student's form and enter data on their behalf — every entry is tagged 'entered by CO'"
+                   >&#9998; Edit record</button>` : ""}
             <button type="button" class="btn btn-sm" data-regen="${esc(p.id)}" title="New token — the old link stops working">Regenerate</button>
             ${p.role === "admin" ? "" : (p.active
               ? `<button type="button" class="btn btn-sm btn-danger" data-revoke="${esc(p.id)}" title="Deactivate the link">Revoke</button>`
@@ -565,43 +980,86 @@ WA.renderAdmin = async function (view, me) {
     return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate());
   }
 
+  /* NOTE (round-4 W3c): no "Evals" column — the count converges to eight for
+     everyone and ranks nobody; the per-evaluation grade columns below are the
+     comparison. "Record entered by" says whether the CO filled it in. */
   function exportSummaryCSV() {
     const rows = [["MN", "Rank", "Last name", "First name", "Class",
-      "Evals", "Mean grade", "Solos", "NFS", "SMS", "FAIL", "Almost Good", "Airsickness",
-      "Progress tests", "Aptitude exams", "Pending items",
-      "W Fighters", "W Helicopters", "W Transport-FF",
-      "1st F", "1st H", "1st T-FF", "Proposals in", "Instructors total", "Self-report updated"]];
+      "Solos", "NFS", "SMS", "FAIL", "Almost Good", "Airsickness",
+      "FPC", "CEF", "Pending items", "Incomplete imported entries",
+      "Record entered by", "CO-entered entries"]
+      .concat(WA.EVALUATIONS.map((d) => d.id))
+      .concat(["W Fighters", "W Helicopters", "W Transport-FF",
+        "1st F", "1st H", "1st T-FF", "Proposals in", "Instructors total", "Self-report updated"])];
     for (const s of A.data.students) {
       const st = s._stats, ag = s.aggregates;
       rows.push([s.person.mn, s.person.rank, s.person.last_name, s.person.first_name, s.person.class,
-        st.evals, st.evalMean === null ? "" : st.evalMean, st.solos, st.nfs, st.sms, st.fail,
-        st.almost_good, st.airsickness, st.progress, st.aptitude, st.pending,
-        ag.fighters.weighted, ag.helicopters.weighted, ag.transport_ff.weighted,
-        (ag.fighters.by_rank["1"] || []).length, (ag.helicopters.by_rank["1"] || []).length,
-        (ag.transport_ff.by_rank["1"] || []).length,
-        s.completion.proposals_in, s.completion.instructors_total,
-        s.completion.has_record ? fmtDT(s.last_update) : "not submitted"]);
+        st.solos, st.nfs, st.sms, st.fail,
+        st.almost_good, st.airsickness, st.fpc, st.cef, st.pending, st.legacy,
+        /* "CO" = every entry is the CO's · "self" = the owner's record, and
+           the next column says how many entries of it the CO added */
+        s.completion.has_record || s._src.any ? s._src.word : "", s._src.n]
+        .concat(WA.EVALUATIONS.map((d) => {
+          const r = WA.evalLatest(s._evals, d.id);
+          return r && r.grade !== null ? r.grade : "";
+        }))
+        .concat([ag.fighters.weighted, ag.helicopters.weighted, ag.transport_ff.weighted,
+          (ag.fighters.by_rank["1"] || []).length, (ag.helicopters.by_rank["1"] || []).length,
+          (ag.transport_ff.by_rank["1"] || []).length,
+          s.completion.proposals_in, s.completion.instructors_total,
+          s.completion.has_record ? fmtDT(s.last_update) : "not submitted"]));
     }
-    download("wingsahead-summary-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
+    download("wings-ahead-summary-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
+  }
+
+  /* every dated entry of every student, one row each — the raw record on paper */
+  function exportEntriesCSV() {
+    const rows = [["Student", "Class", "Section", "Date", "Detail", "Flight code",
+      "Items", "With whom", "Grade", "Pending", "Incomplete import", "Entered by"]];
+    const add = (s, sec, e, detail, code, items, who, grade, pend, date) =>
+      rows.push([WA.personName(s.person, true), s.person.class, WA.secLabel(sec),
+        fmtD(date === undefined ? e.date : date), detail, code || "", items || "", who || "",
+        grade === null || grade === undefined ? "" : grade, pend ? "yes" : "",
+        e.legacy ? "yes" : "", WA.coWord(e)]);
+    for (const s of A.data.students) {
+      const r = s.record;
+      (r.nfs || []).forEach((e) => add(s, "nfs", e, e.note || "", "", "", "", null, false));
+      (r.sms || []).forEach((e) => add(s, "sms", e,
+        e.exit_date ? "exit " + fmtD(e.exit_date) : "still open", "", "", "", null, false, e.entrance_date));
+      (r.airsickness || []).forEach((e) => add(s, "airsickness", e, e.phase || "", "", "", e.instructor, null, false));
+      for (const k of ["fail", "almost_good"]) {
+        (r[k] || []).forEach((e) => add(s, k, e, WA.itemCatLabel(e.category),
+          e.flight_code, (e.items || []).join(" | "), e.instructor, e.grade, e.pending));
+      }
+      (r.evaluations || []).forEach((e) => add(s, "evaluations", e,
+        e.evaluation ? WA.evalLabel(e.evaluation) : "(not identified)", e.evaluation, "",
+        e.with, e.grade, e.pending));
+      (r.solo_flights || []).forEach((e) => add(s, "solo_flights", e,
+        e.ng ? "NG (non-graded)" : "graded", "", "", e.instructor, e.grade, false));
+      for (const k of ["fpc", "cef"]) {
+        (r[k] || []).forEach((e) => add(s, k, e, e.result || "", "", "", e.by, e.grade, e.pending));
+      }
+    }
+    download("wings-ahead-entries-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
   }
 
   function exportProposalsCSV() {
     const rows = [["Student", "Class", "Instructor", "Duty", "Leadership", "Status",
-      "Fighters", "Helicopters", "Transport-FF", "Flew with", "Comment", "Updated"]];
+      "Fighters", "Helicopters", "Transport-FF", "Flew with", "Comment", "Updated", "Entered by"]];
     for (const s of A.data.students) for (const p of s.proposals) {
       rows.push([WA.personName(s.person, true), s.person.class,
         (p.rank ? p.rank + " " : "") + p.last_name, p.duty, p.leadership, p.status,
         p.ranks.fighters ? RW[p.ranks.fighters] : "", p.ranks.helicopters ? RW[p.ranks.helicopters] : "",
         p.ranks.transport_ff ? RW[p.ranks.transport_ff] : "",
-        p.flew_with ? "yes" : "no", p.comment || "", fmtDT(p.updated_at)]);
+        p.flew_with ? "yes" : "no", p.comment || "", fmtDT(p.updated_at), WA.coWord(p)]);
     }
-    download("wingsahead-proposals-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
+    download("wings-ahead-proposals-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
   }
 
   async function exportJSON() {
     try {
       const full = await rpc("admin_export", { p_token: WA.token });
-      download("wingsahead-export-" + stamp() + ".json", "application/json", JSON.stringify(full, null, 2));
+      download("wings-ahead-export-" + stamp() + ".json", "application/json", JSON.stringify(full, null, 2));
     } catch (e) {
       toast("Export failed: " + e.message, true);
     }
@@ -618,12 +1076,23 @@ WA.renderAdmin = async function (view, me) {
       render();
       return;
     }
+    /* ENTER ON BEHALF — checked BEFORE data-goto, because the button lives
+       inside a row whose click opens the analysis */
+    const erec = t.closest("[data-editrec]");
+    if (erec) { editAs("rec", erec.dataset.editrec); return; }
+    const eprop = t.closest("[data-editprop]");
+    if (eprop) { editAs("prop", eprop.dataset.editprop); return; }
+
     const goto = t.closest("[data-goto]");
     if (goto) { A.sel = Number(goto.dataset.goto); A.tab = "students"; render(); return; }
     const nav = t.closest("[data-nav]");
     if (nav) { navStudent(Number(nav.dataset.nav)); return; }
     const met = t.closest("[data-metric]");
     if (met) { A.metric = met.dataset.metric; render(); return; }
+    const pc = t.closest("[data-plotcat]");
+    if (pc) { A.plotCat = pc.dataset.plotcat; A.hi = null; render(); return; }
+    const pt = t.closest("[data-pt]");
+    if (pt) { highlightRow(pt.dataset.pt); return; }
     const rs = t.closest("[data-ranksel]");
     if (rs) { A.rankSel = Number(rs.dataset.ranksel); render(); return; }
 
@@ -632,6 +1101,7 @@ WA.renderAdmin = async function (view, me) {
       const a = act.dataset.act;
       if (a === "print") { buildPrint(); window.print(); }
       else if (a === "csv-summary") exportSummaryCSV();
+      else if (a === "csv-entries") exportEntriesCSV();
       else if (a === "csv-proposals") exportProposalsCSV();
       else if (a === "json-export") exportJSON();
       else if (a === "add-student") openPersonModal("student", null);
@@ -716,6 +1186,20 @@ WA.renderAdmin = async function (view, me) {
   adm.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") $("adm-veil").classList.add("hidden");
   });
+
+  /* the evaluation selector of the per-evaluation comparison */
+  adm.addEventListener("change", (ev) => {
+    if (ev.target.id === "evalsel") { A.evalSel = ev.target.value; render(); }
+  });
+
+  /* a plot point → the matching row of the summary table */
+  function highlightRow(key) {
+    A.hi = key;
+    for (const tr of adm.querySelectorAll("[data-sumrow]"))
+      tr.classList.toggle("is-hi", tr.dataset.sumrow === key);
+    const row = adm.querySelector(`[data-sumrow="${key}"]`);
+    if (row) row.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
 
   function navStudent(step) {
     const n = A.data && A.data.students.length;

@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   WingsAhead — configuration. THE ONLY FILE YOU EDIT.
+   Wings Ahead — configuration. THE ONLY FILE YOU EDIT.
    ──────────────────────────────────────────────────────────────────────────
    Two paste operations (both values are on supabase.com →  your project →
    Settings → API):

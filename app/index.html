@@ -1,25 +1,26 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="obsidian" data-mode="dark">
+<html lang="en" data-theme="slate" data-mode="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>WingsAhead</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Ctext%20y='0.9em'%20font-size='90'%3E%E2%9C%88%3C/text%3E%3C/svg%3E">
+<title>Wings Ahead &mdash; Student utilization</title>
+<link rel="icon" href="assets/364mea-240.png">
 <link rel="stylesheet" href="styles.css">
 <script>
 /* Palette before first paint — no flash of the default theme on reload.
-   Mirrors app.js (PALETTES / apply): same keys. app.js re-applies it. */
+   Mirrors app.js (PALETTES / apply): same keys, same default (DEFAULT_PAL).
+   DEFAULT = Slate (light) — round 2 decision; a stored choice always wins. */
 (function () {
   try {
     var d = document.documentElement,
         id = localStorage.getItem("wa-palette"),
         mode = localStorage.getItem("wa-palmode");
-    if (!id) { id = "obsidian"; mode = "dark"; }
+    if (!id) { id = "slate"; mode = "light"; }
     d.setAttribute("data-theme", id);
-    d.setAttribute("data-mode", mode === "light" ? "light" : "dark");
+    d.setAttribute("data-mode", mode === "dark" ? "dark" : "light");
     d.classList.add("pal-" + id);
-    if (mode === "light") d.classList.add("light");
+    if (mode !== "dark") d.classList.add("light");
   } catch (e) {}
 })();
 </script>
@@ -27,9 +28,10 @@
 <body>
 <header class="topbar">
   <div class="brand">
-    <span class="brand-icon" aria-hidden="true">&#9992;</span>
+    <img class="brand-icon" src="assets/364mea-240.png" width="26" height="40"
+         alt="364 MEA" onerror="this.style.display='none'">
     <div>
-      <h1>WingsAhead</h1>
+      <h1>Wings Ahead</h1>
       <div class="tagline">Student utilization &mdash; Wing Commander brief</div>
     </div>
   </div>
@@ -46,6 +48,7 @@
   &mdash; no personal data, no links. Personal links are private: do not forward them.
 </footer>
 <script src="config.js"></script>
+<script src="items-catalog.js"></script>
 <script src="app.js"></script>
 <script src="student.js"></script>
 <script src="instructor.js"></script>
