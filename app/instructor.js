@@ -76,8 +76,12 @@ WA.renderInstructor = async function (view, me, opts) {
       (slots.extras.length ? ` · <span class="k">${slots.extras.length} imported, not identified</span>` : "");
     const soLine = `<span class="k">${doneSlots} of ${nSlots} syllabus solos flown${
       solos.length > doneSlots ? " · " + (solos.length - doneSlots) + " additional" : ""}</span>` +
+      /* ROUND 6 — every flown solo names its instructor, NG included (on an NG
+         row that is the one who AUTHORISED it), so the card names them too */
       (solos.length ? " — " + solos.map((e) => esc(fmtD(e.date)) +
-          (e.ng ? ` — <span class="k">NG</span>` : ` — <b>${WA.pct(e.grade)}</b>`) + WA.coTag(e)).join(" · ") : "");
+          (e.ng ? ` — <span class="k">NG</span>` : ` — <b>${WA.pct(e.grade)}</b>`) +
+          " " + WA.soloWhoPhrase(e) +
+          WA.coTag(e)).join(" · ") : "");
     /* one line per entry — items inside an entry are separated by · , so the
        entries themselves must not be, or a multi-item FAIL reads as three */
     const failLine = ["fail", "almost_good"].map((k) => {
@@ -85,7 +89,7 @@ WA.renderInstructor = async function (view, me, opts) {
       if (!list.length) return "";
       return `<div class="line">${esc(WA.secLabel(k))}:` + list.map((e) =>
         `<div class="sub">${esc(fmtD(e.date))}${e.flight_code ? " <b>" + WA.sortieCell(e.category, e.flight_code) + "</b>" : ""}
-          ${esc(WA.itemsLabel(e))}${WA.itemsCountHTML(e)}${
+          ${WA.itemsLabelHTML(e)}${WA.itemsCountHTML(e)}${
           e.grade === null || e.grade === undefined ? "" : ` <b>${WA.pct(e.grade)}</b>`}
           ${e.instructor ? `<span class="k">w/ ${esc(e.instructor)}</span>` : ""}
           ${e.pending ? "⏳" : ""}${WA.coTag(e)}</div>`).join("") + `</div>`;

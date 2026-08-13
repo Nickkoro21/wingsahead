@@ -23,7 +23,8 @@ WA.renderStudent = async function (view, me, opts) {
   const S = { data: null, lastUpdate: null, dirty: false, enteredBy: null };
   const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ""));
   const txt = (v) => String(v === null || v === undefined ? "" : v).trim();
-  const CUSTOM = "__custom__";
+  /* ROUND 6: there is no CUSTOM item sentinel any more — the FAIL / ALMOST
+     GOOD item list ends where the printed gradesheet ends. */
   const backBtn = `<button type="button" class="btn btn-sm" data-coback>&#8592; Back to the dashboard</button>`;
 
   let INS = [], who = me || {};
@@ -45,23 +46,54 @@ WA.renderStudent = async function (view, me, opts) {
     return;
   }
 
-  /* ── is this entry complete enough to stop being a legacy leftover? ── */
+  /* ── is this entry complete enough to stop being a legacy leftover? ──
+     ROUND 6 adds four conditions to this one table, and every "please fix it
+     first" in the form comes back to them: an airsickness row that still
+     carries the retired phase note needs its FLIGHT, a FAIL / ALMOST GOOD row
+     needs SYLLABUS items only, every flown solo needs its instructor (NG
+     included — somebody authorised it), and an FPC needs an evaluator that is
+     one of the two appointments. */
   const COMPLETE = {
     nfs: (e) => isDate(e.date) && !!WA.nfsReason(e.reason) &&
       (e.reason !== "other" || !!txt(e.note)),
     sms: (e) => isDate(e.entrance_date),
-    airsickness: (e) => isDate(e.date),
-    fail: (e) => isDate(e.date) && !!WA.itemCat(e.category) && (e.items || []).length > 0,
-    almost_good: (e) => isDate(e.date) && !!WA.itemCat(e.category) && (e.items || []).length > 0,
+    airsickness: (e) => isDate(e.date) && (!txt(e.phase) || !!txt(e.flight_code)),
+    fail: (e) => isDate(e.date) && !!WA.itemCat(e.category) &&
+      (e.items || []).length > 0 && !WA.itemsLegacy(e).length,
+    almost_good: (e) => isDate(e.date) && !!WA.itemCat(e.category) &&
+      (e.items || []).length > 0 && !WA.itemsLegacy(e).length,
     /* a fixed slot nobody has flown yet is complete BY BEING EMPTY */
     evaluations: (e) => WA.slotEmpty("evaluations", e) ||
       (isDate(e.date) && !!WA.evalById(e.evaluation)),
     solo_flights: (e) => WA.slotEmpty("solo_flights", e) || (isDate(e.date) &&
-      (e.ng ? true : (isFinite(Number(e.grade)) && e.grade !== null && e.grade !== "" && !!txt(e.instructor)))),
-    fpc: (e) => isDate(e.date),
+      !!txt(e.instructor) &&
+      (e.ng ? true : (isFinite(Number(e.grade)) && e.grade !== null && e.grade !== ""))),
+    fpc: (e) => isDate(e.date) && WA.fpcEvaluatorOK(e.evaluator),
     cef: (e) => isDate(e.date),
   };
   const stillLegacy = (sec, e) => !!e.legacy && !COMPLETE[sec](e);
+
+  /* ── DOES THIS ROW BLOCK THE SAVE? (round 6) ──────────────────────────────
+     The legacy flag has always meant "keep it, ask for it": a row the OLD form
+     never asked a question of still saves, incomplete, so nothing is lost
+     while the student works through it. The five round-6 rules are stricter by
+     the user's ruling — the row stays READABLE everywhere, and the record
+     REFUSES TO BE SAVED until it is corrected. The two must not be confused on
+     screen, so each row says which of the two it is, and this is the one
+     function that decides. MIRROR: the refusals in buildPayload, and the
+     server's in wa.validate_record. */
+  function blocksSave(sec, e) {
+    if (sec === "fail" || sec === "almost_good") return WA.itemsLegacy(e).length > 0;
+    if (sec === "airsickness") return !!txt(e.phase) && !txt(e.flight_code);
+    if (sec === "solo_flights") {
+      return !WA.slotEmpty("solo_flights", e) && !txt(e.instructor);
+    }
+    if (sec === "fpc") return !WA.fpcEvaluatorOK(e.evaluator);
+    if (sec === "evaluations") {
+      return !WA.slotEmpty("evaluations", e) && !!e.evaluation && !!evalBlocker(e.evaluation);
+    }
+    return false;
+  }
 
   /* ── THE FIXED SYLLABUS ROWS (round 5) ────────────────────────────────────
      The eight solos the stage prescribes and the eight stage checkrides are
@@ -112,15 +144,20 @@ WA.renderStudent = async function (view, me, opts) {
   /* ── field builders ───────────────────────────────────────────────────── */
   const F = (sec, i, field, extra) =>
     `data-sec="${esc(sec)}" data-idx="${i}" data-field="${esc(field)}"${extra || ""}`;
+  /* `off` freezes a box the rules do not allow to be filled YET — round 6 uses
+     it for a checkride whose predecessor is still pending. It is never used to
+     freeze a box that already holds something: a value must always be
+     correctable, or the form becomes a trap. */
+  const off = (lock) => (lock ? " disabled" : "");
 
-  const dateF = (sec, i, field, val, label, req) => `
-    <label class="f"><span>${esc(label)}${req ? " *" : ""}</span>
-      <input type="date" value="${esc(val || "")}" ${F(sec, i, field)}></label>`;
+  const dateF = (sec, i, field, val, label, req, lock) => `
+    <label class="f${lock ? " is-off" : ""}"><span>${esc(label)}${req ? " *" : ""}</span>
+      <input type="date" value="${esc(val || "")}" ${F(sec, i, field)}${off(lock)}></label>`;
 
-  const textF = (sec, i, field, val, label, ph, list) => `
-    <label class="f"><span>${esc(label)}</span>
+  const textF = (sec, i, field, val, label, ph, list, lock) => `
+    <label class="f${lock ? " is-off" : ""}"><span>${esc(label)}</span>
       <input type="text" value="${esc(val || "")}" placeholder="${esc(ph || "")}"
-             ${list ? `list="${esc(list)}" autocomplete="off"` : ""} ${F(sec, i, field)}></label>`;
+             ${list ? `list="${esc(list)}" autocomplete="off"` : ""} ${F(sec, i, field)}${off(lock)}></label>`;
 
   /* GRADES ARE WHOLE NUMBERS (round 5). step=1 on every grade box, and a
      fractional value is never silently rounded: the row says the value is not
@@ -140,13 +177,13 @@ WA.renderStudent = async function (view, me, opts) {
       <button type="button" class="btn btn-sm" data-round="${esc(sec)}:${i}:${esc(field)}"
         >Round to ${esc(Math.round(n))}%</button>`;
   }
-  const gradeF = (sec, i, field, val, label, req) => {
+  const gradeF = (sec, i, field, val, label, req, lock) => {
     const fx = fixnoteHTML(sec, i, field, val);
     return `
-    <label class="f"><span>${esc(label)}${req ? " *" : ""}</span>
+    <label class="f${lock ? " is-off" : ""}"><span>${esc(label)}${req ? " *" : ""}</span>
       <input type="number" min="0" max="100" step="1" inputmode="numeric" placeholder="0-100"
              value="${val === null || val === undefined || val === "" ? "" : esc(val)}"
-             ${F(sec, i, field)}>
+             ${F(sec, i, field)}${off(lock)}>
       ${fx ? `<span class="fixnote">${fx}</span>` : ""}</label>`;
   };
 
@@ -225,6 +262,18 @@ WA.renderStudent = async function (view, me, opts) {
         otherLabel: "Other… (type the code)", freePh: "e.g. C4590" });
   }
 
+  /* AIRSICKNESS — THE FLIGHT IT HAPPENED ON (round 6). Airsickness does not
+     respect the syllabus, so the picker offers EVERY sortie of the stage, the
+     four tracks grouped, plus the same "Other…" escape the other pickers have.
+     The phase-of-flight note it replaces is gone from the form: what is
+     already stored is shown greyed under the row, as legacy information. */
+  function airFlightF(i, e) {
+    return pickerF("airsickness", i, e, "flight_code", "Flight",
+      TRIGGER_GROUPS,
+      { free: true, ph: "— on which flight? —",
+        otherLabel: "Other… (type the code)", freePh: "e.g. C4302" });
+  }
+
   /* which sortie of THIS Training Section was flown solo (the syllabus names
      the candidates; free text stays open because reality does too) */
   function soloSortieF(i, e, slot) {
@@ -245,7 +294,8 @@ WA.renderStudent = async function (view, me, opts) {
       >${flown ? "flown" : "pending — not flown yet"}</span>`;
   }
 
-  /* who conducted it: DO · Squadron CO · the squadron's instructors · typed */
+  /* CEF — who conducted it: DO · Squadron CO · the squadron's instructors ·
+     typed. A CEF is flown with a Squadron Evaluator, so the list stays open. */
   function evaluatorF(sec, i, e) {
     return pickerF(sec, i, e, "evaluator", "Evaluator",
       [{ label: "Appointment", items: WA.EVALUATOR_ROLES.map((v) => ({ v, t: v })) },
@@ -253,15 +303,40 @@ WA.renderStudent = async function (view, me, opts) {
       { free: true, ph: "— who conducted it? —", freePh: "surname or appointment" });
   }
 
-  const pendF = (sec, i, on) => `
-    <label class="ck pend"><input type="checkbox" ${on ? "checked" : ""} ${F(sec, i, "pending")}>
+  /* FPC — EXACTLY TWO OPTIONS (round 6): the Squadron CO or the DO. No
+     instructor surnames, no "Other…", no free text. A value stored before the
+     rule is not thrown away — it is named under the box and the row asks
+     which of the two it actually was, refusing to save until it is told. */
+  function fpcEvaluatorF(i, e) {
+    const bad = !WA.fpcEvaluatorOK(e.evaluator);
+    return pickerF("fpc", i, e, "evaluator", "Evaluator",
+      [{ items: WA.FPC_EVALUATORS.map((v) => ({ v, t: v })) }],
+      { ph: "— who conducted it? —",
+        note: bad
+          ? `<span class="warn-t" title="An FPC is conducted by the Squadron CO or the DO — the round-5 form also offered the instructors, and this entry kept one of those values">legacy evaluator &ldquo;${
+              esc(e.evaluator)}&rdquo; &mdash; an FPC is conducted by the Squadron CO or the DO: choose which one</span>`
+          : "An FPC is conducted by the Squadron CO or the DO." });
+  }
+
+  const pendF = (sec, i, on, lock) => `
+    <label class="ck pend${lock ? " is-off" : ""}"><input type="checkbox" ${on ? "checked" : ""} ${
+      F(sec, i, "pending")}${off(lock)}>
       pending</label>`;
 
   const rmB = (sec, i) =>
     `<button type="button" class="rm" data-rm="${esc(sec)}" data-idx="${i}">&#10005; remove</button>`;
 
-  const insF = (sec, i, field, val, label) =>
-    textF(sec, i, field, val, label, INS.length ? "choose or type" : "type the surname", "dl-ins");
+  const insF = (sec, i, field, val, label, lock) =>
+    textF(sec, i, field, val, label, INS.length ? "choose or type" : "type the surname", "dl-ins", lock);
+
+  /* ── EVALUATIONS FOLLOW THE SYLLABUS ORDER (round 6) ──────────────────────
+     Which checkride, if any, has to be recorded before this one may be. Read
+     from the live form state, so a date typed into C4590 opens C4790 on the
+     next redraw without a save.
+     MIRROR: WA.evalOrderState / the evaluations block of wa.validate_record. */
+  function evalBlocker(id) {
+    return WA.evalOrderState(S.data).blockedBy[id] || null;
+  }
 
   /* ── evaluation identity: the eight checkrides of the stage ── */
   const EV_GROUPS = WA.EVAL_CATS.filter((c) => c.id !== "fpc").map((c) => ({
@@ -292,6 +367,12 @@ WA.renderStudent = async function (view, me, opts) {
         </select></label>`;
   }
 
+  /* SYLLABUS ONLY (round 6) — the list ends where the printed gradesheet does.
+     The "Other… (type it yourself)" option is gone: an item nobody else can
+     have is an item nobody can compare, count across the class or look up in
+     the MIF, and every surface that shows items was quietly showing two kinds
+     of thing. Nothing was lost with it — what is already stored is READ,
+     marked, and asked to be replaced. */
   function itemOptions(catId, filter) {
     const cat = WA.itemCat(catId);
     if (!cat) return "";
@@ -301,34 +382,37 @@ WA.renderStudent = async function (view, me, opts) {
       it.name.toLowerCase().indexOf(q) >= 0 || String(it.n || "").indexOf(q) >= 0);
     return `<option value="" selected>&mdash; add an item &mdash;</option>` +
       list.map((it) => `<option value="${esc(it.name)}">${esc((it.n ? it.n + " — " : "") + it.name)}</option>`).join("") +
-      (q && !list.length ? `<option value="" disabled>no item matches &ldquo;${esc(filter)}&rdquo;</option>` : "") +
-      `<option value="${CUSTOM}">Other&hellip; (type it yourself)</option>`;
+      (q && !list.length ? `<option value="" disabled>no item matches &ldquo;${esc(filter)}&rdquo;</option>` : "");
   }
 
   /* the multi-select block of ONE row — re-rendered on its own so the
      filter box never loses what the student is typing */
   function msHTML(sec, i, e) {
-    const chips = (e.items || []).map((n, k) => `
-      <span class="mschip${WA.itemFind(e.category, n) ? "" : " is-custom"}"
-            title="${esc(WA.itemText(e.category, n))}">${esc(WA.itemText(e.category, n))}
+    const chips = (e.items || []).map((n, k) => {
+      const known = WA.itemKnown(e.category, n);
+      return `
+      <span class="mschip${known ? "" : " is-legacy"}"
+            title="${esc(known ? WA.itemText(e.category, n) : WA.ITEM_LEGACY_TIP)}">${
+        esc(WA.itemText(e.category, n))}${known ? "" : ` <span class="k">legacy</span>`}
         <button type="button" class="x" data-msrm="${esc(sec)}:${i}:${k}"
-                aria-label="Remove ${esc(n)}">&#10005;</button></span>`).join("");
+                aria-label="Remove ${esc(n)}">&#10005;</button></span>`;
+    }).join("");
+    const stale = WA.itemsLegacy(e).length;
     return `
       <div class="ms-chips">${WA.itemsN(e) > 1
           ? `<span class="ms-n">${esc(WA.itemsCount(e))}</span>` : ""}${
         chips || `<span class="ms-none">no item chosen yet</span>`}</div>
+      ${stale ? `<p class="ms-legacy">${stale === 1
+          ? "One item was typed by hand before the syllabus list existed"
+          : stale + " items were typed by hand before the syllabus list existed"}
+        &mdash; remove ${stale === 1 ? "it" : "them"} and choose the matching
+        ${esc(WA.itemCatLabel(e.category))} item${stale === 1 ? "" : "s"} below.
+        This entry cannot be saved until ${stale === 1 ? "it is" : "they are"} replaced.</p>` : ""}
       <input type="search" class="ms-q" placeholder="filter ${esc(WA.itemCatLabel(e.category))} items&hellip;"
              value="${esc(e._q || "")}" data-msq="${esc(sec)}:${i}" aria-label="Filter items">
       <select class="ms-add" data-msadd="${esc(sec)}:${i}" aria-label="Add an item">
         ${itemOptions(e.category, e._q)}
-      </select>
-      ${e._other ? `
-        <div class="ms-other">
-          <input type="text" placeholder="describe the item in your own words"
-                 value="${esc(e._otherText || "")}" data-msother="${esc(sec)}:${i}"
-                 aria-label="Custom item">
-          <button type="button" class="btn btn-sm" data-msaddother="${esc(sec)}:${i}">Add</button>
-        </div>` : ""}`;
+      </select>`;
   }
 
   function failRow(sec, i, e) {
@@ -377,15 +461,17 @@ WA.renderStudent = async function (view, me, opts) {
       blank: () => ({ entrance_date: "", exit_date: "" }) },
 
     { id: "airsickness",
-      hint: "One entry per airsickness event — when it happened and with whom, so the squadron can see the pattern.",
+      hint: "One entry per airsickness event — when it happened, on WHICH FLIGHT and with whom, so the squadron can see the pattern. (The free-text phase-of-flight note was replaced by the flight in round 6; a note already written is kept below the row as legacy information.)",
       row: (e, i) => `
         <div class="rgrid2">
           ${dateF("airsickness", i, "date", e.date, "Date", true)}
-          ${insF("airsickness", i, "instructor", e.instructor, "Instructor")}
+          ${airFlightF(i, e)}
         </div>
-        ${textF("airsickness", i, "phase", e.phase, "Phase of flight / note (optional)", "e.g. aerobatics, after the third spin")}
+        <div class="rgrid2">${insF("airsickness", i, "instructor", e.instructor, "Instructor")}<div></div></div>
+        ${txt(e.phase) ? `<p class="oldnote" title="The phase-of-flight note this form used to collect. It is kept as it was written; the squadron now records the FLIGHT instead.">
+          <span class="k">legacy note:</span> ${esc(e.phase)}</p>` : ""}
         <div class="rfoot">${rmB("airsickness", i)}</div>`,
-      blank: () => ({ date: "", instructor: "", phase: "" }) },
+      blank: () => ({ date: "", instructor: "", flight_code: "" }) },
 
     { id: "fail",
       hint: "One entry per FAIL: the track, the flight it happened on, the syllabus items that missed the desired performance, the instructor, the date and the grade.",
@@ -397,15 +483,27 @@ WA.renderStudent = async function (view, me, opts) {
       row: (e, i) => failRow("almost_good", i, e),
       blank: () => ({ date: "", category: "", flight_code: "", items: [], instructor: "", grade: null, pending: false }) },
 
-    /* ── FIXED SLOTS: the eight stage checkrides, always all eight ── */
+    /* ── FIXED SLOTS: the eight stage checkrides, always all eight ──
+       ROUND 6 — AND IN SYLLABUS ORDER. A slot whose predecessors have not been
+       flown is not merely discouraged: its boxes are DISABLED and it says
+       which checkride comes first. The order is WA.EVAL_ORDER, read off the
+       printed Training Flow Chart; the server refuses the same fill with the
+       same sentence, so the hint is a courtesy and not the guard. */
     { id: "evaluations", fixed: true,
-      hint: "The eight checkrides of the stage — every one of them is here from the first day and stays PENDING until you fly it. Fill in the date, the evaluator and the grade when it happens. Nothing can be added or removed: that is what lets the squadron compare you with your class on the same flight.",
+      hint: "The eight checkrides of the stage — every one of them is here from the first day and stays PENDING until you fly it. Fill in the date, the evaluator and the grade when it happens, IN SYLLABUS ORDER: a checkride cannot be recorded while an earlier one is still pending. Nothing can be added or removed: that is what lets the squadron compare you with your class on the same flight.",
       row: (e, i, meta) => {
         const m = meta || {};
         const flown = !WA.slotEmpty("evaluations", e);
+        const blocker = e.evaluation ? evalBlocker(e.evaluation) : null;
+        /* an already-filled row is never frozen — it must stay editable so it
+           can be corrected or cleared; only an empty one waits its turn */
+        const lock = !!blocker && !flown;
         const head = m.slot
           ? `<span class="slot-nm">${esc(WA.evalLabel(e.evaluation))}</span>
-             ${slotBadge("evaluations", i, flown)}`
+             ${slotBadge("evaluations", i, flown)}
+             ${blocker ? `<span class="badge badge-warn" title="${esc(
+               "Evaluations are flown and recorded in syllabus order — " + WA.EVAL_ORDER.join(" → ") +
+               ". " + esc(blocker) + " has not been flown yet.")}">complete ${esc(blocker)} first</span>` : ""}`
           : (e.evaluation
               ? `<span class="slot-nm">Earlier attempt &mdash; ${esc(WA.evalLabel(e.evaluation))}</span>
                  <span class="badge" title="A checkride flown more than once: the latest attempt is the one every comparison uses">superseded</span>
@@ -415,12 +513,19 @@ WA.renderStudent = async function (view, me, opts) {
         return `
         <div class="slot-h">${head}</div>
         ${m.slot ? "" : evalF(i, e.evaluation)}
+        ${blocker ? `<p class="ordnote${flown ? " warn-t" : ""}">${flown
+            ? `This checkride is recorded but <b>${esc(blocker)}</b> is still pending &mdash;
+               evaluations follow the syllabus order, so the record cannot be saved until
+               ${esc(blocker)} is filled in (or this row is cleared).`
+            : `Waiting for <b>${esc(blocker)}</b> &mdash; the checkrides are flown in syllabus
+               order (${esc(WA.EVAL_ORDER.join(" → "))}), so this one opens once ${esc(blocker)}
+               is recorded.`}</p>` : ""}
         <div class="rgrid2">
-          ${insF("evaluations", i, "with", e.with, "With (evaluator)")}
-          ${dateF("evaluations", i, "date", e.date, "Date", flown)}
+          ${insF("evaluations", i, "with", e.with, "With (evaluator)", lock)}
+          ${dateF("evaluations", i, "date", e.date, "Date", flown, lock)}
         </div>
-        <div class="rgrid2">${gradeF("evaluations", i, "grade", e.grade, "Grade (%)")}<div></div></div>
-        <div class="rfoot">${pendF("evaluations", i, e.pending)}</div>`;
+        <div class="rgrid2">${gradeF("evaluations", i, "grade", e.grade, "Grade (%)", false, lock)}<div></div></div>
+        <div class="rfoot">${pendF("evaluations", i, e.pending, lock)}</div>`;
       } },
 
     /* ── FIXED SLOTS: the solos the syllabus prescribes ── */
@@ -449,20 +554,29 @@ WA.renderStudent = async function (view, me, opts) {
             <button type="button" class="chip${e.ng ? " is-on" : ""}" data-ng="solo_flights:${i}:1"
                     aria-pressed="${e.ng ? "true" : "false"}">NG (non-graded)</button>
           </span></div>
-        ${e.ng ? `<p class="hint">Non-graded solo — no instructor and no grade are recorded.</p>` : `
-          <div class="rgrid2">
-            ${gradeF("solo_flights", i, "grade", e.grade, "Grade (%)", flown)}
-            ${insF("solo_flights", i, "instructor", e.instructor, "Evaluator / instructor" + (flown ? " *" : ""))}
-          </div>`}`;
+        ${/* ROUND 6 — THE INSTRUCTOR IS ON EVERY ROW, NG INCLUDED. NG removes
+             the GRADE, never the person: a student does not launch alone on
+             their own authority, so the row names whoever AUTHORISED the
+             flight even when nobody was in the other seat to score it. */ ""}
+        <div class="rgrid2">
+          ${e.ng
+            ? `<div class="f"><span>&nbsp;</span><span class="hint">Non-graded solo — no grade is
+                 recorded; the authorising instructor still is.</span></div>`
+            : gradeF("solo_flights", i, "grade", e.grade, "Grade (%)", flown)}
+          ${insF("solo_flights", i, "instructor", e.instructor,
+                 (e.ng ? "Authorising instructor" : "Evaluator / instructor") + (flown ? " *" : ""))}
+        </div>
+        ${e.ng ? `<p class="hint">He may not have flown along — he authorised the solo, and the
+          squadron records who did.</p>` : ""}`;
       },
       blank: () => ({ slot: null, sortie: "", date: "", ng: false, grade: null, instructor: "" }) },
 
     { id: "fpc",
-      hint: "One entry per FPC — which stage flight it followed, who conducted it and the result. Several FPC after the same flight are simply several entries. Tick pending while you are still waiting for the result.",
+      hint: "One entry per FPC — which stage flight it followed, who conducted it and the result. An FPC is conducted by the Squadron CO or the DO and by nobody else (round 6). Several FPC after the same flight are simply several entries. Tick pending while you are still waiting for the result.",
       row: (e, i) => `
         <div class="rgrid2">
           ${triggerF("fpc", i, e)}
-          ${evaluatorF("fpc", i, e)}
+          ${fpcEvaluatorF(i, e)}
         </div>
         <div class="rgrid2">
           ${dateF("fpc", i, "date", e.date, "Date", true)}
@@ -499,8 +613,10 @@ WA.renderStudent = async function (view, me, opts) {
     return `<div class="rrow${e.pending ? " is-pending" : ""}${leg ? " is-legacy" : ""}${
       co ? " is-co" : ""}${slot ? " is-slot" : ""}${
       slot && WA.slotEmpty(sec.id, e) ? " is-empty" : ""}" data-row="${esc(sec.id)}:${i}">
-      ${leg ? `<p class="legnote">Imported from the previous form &mdash; please complete
-        ${esc(missingOf(sec.id, e).join(", ") || "the missing details")}.</p>` : ""}
+      ${leg ? `<p class="legnote">Recorded on an earlier version of this form &mdash; please complete
+        ${esc(missingOf(sec.id, e).join(", ") || "the missing details")}. ${blocksSave(sec.id, e)
+          ? "It stays readable everywhere in the meantime, but the record cannot be saved again until this is done."
+          : "Nothing is lost in the meantime — the rest of the form saves as it is."}</p>` : ""}
       ${co ? `<p class="conote">${WA.coTag(e)} entered by the squadron CO
         ${asCO ? "" : "on your behalf"}</p>` : ""}
       ${sec.row(e, i, meta)}</div>`;
@@ -555,15 +671,28 @@ WA.renderStudent = async function (view, me, opts) {
     if (sec === "fail" || sec === "almost_good") {
       if (!WA.itemCat(e.category)) out.push("the track");
       if (!(e.items || []).length) out.push("at least one item");
+      const stale = WA.itemsLegacy(e);
+      if (stale.length) out.push(stale.length === 1
+        ? "a syllabus item in place of “" + stale[0] + "”"
+        : "syllabus items in place of the " + stale.length + " typed by hand");
     }
     if (sec === "nfs") {
       if (!WA.nfsReason(e.reason)) out.push("the reason");
       else if (e.reason === "other" && !txt(e.note)) out.push("the cause");
     }
+    /* ROUND 6 — the airsickness note became the flight it happened on */
+    if (sec === "airsickness" && txt(e.phase) && !txt(e.flight_code)) {
+      out.push("the flight it happened on (the phase note is kept as legacy information)");
+    }
     if (sec === "evaluations" && !WA.evalById(e.evaluation)) out.push("which checkride it was");
-    if (sec === "solo_flights" && !e.ng) {
-      if (!isFinite(Number(e.grade)) || e.grade === null || e.grade === "") out.push("the grade");
-      if (!txt(e.instructor)) out.push("the instructor");
+    if (sec === "solo_flights") {
+      if (!e.ng && (!isFinite(Number(e.grade)) || e.grade === null || e.grade === "")) out.push("the grade");
+      /* ROUND 6 — NG rows too: somebody authorised that solo */
+      if (!txt(e.instructor)) out.push(e.ng ? "the authorising instructor" : "the instructor");
+    }
+    /* ROUND 6 — an FPC is conducted by the Squadron CO or the DO */
+    if (sec === "fpc" && !WA.fpcEvaluatorOK(e.evaluator)) {
+      out.push("which of the two appointments conducted it (“" + e.evaluator + "” is not one of them)");
     }
     return out;
   }
@@ -763,13 +892,42 @@ WA.renderStudent = async function (view, me, opts) {
     const note = row.querySelector('[data-field="note"]');
     if (note && note.value === WA.NFS_IMPORT_NOTE) note.value = "";
   }
+  /* A ROW THAT IS STILL A LEFTOVER, BUT OF A DIFFERENT ONE (round 6). Replacing
+     one of two custom items leaves the row legacy and its note out of date, so
+     the note follows what is actually missing — in place, because the multi-
+     select must not be redrawn under the student's fingers. */
+  function refreshLegnote(secId, i, row) {
+    const el = row || form.querySelector(`.rrow[data-row="${secId}:${i}"]`);
+    if (!el) return;
+    const e = S.data[secId][i];
+    if (!stillLegacy(secId, e)) { unmarkLegacy(el); return; }
+    el.classList.add("is-legacy");
+    let n = el.querySelector(".legnote");
+    if (!n) {
+      n = document.createElement("p");
+      n.className = "legnote";
+      el.insertBefore(n, el.firstChild);
+    }
+    n.innerHTML = `Recorded on an earlier version of this form &mdash; please complete
+      ${esc(missingOf(secId, e).join(", ") || "the missing details")}. ${blocksSave(secId, e)
+        ? "It stays readable everywhere in the meantime, but the record cannot be saved again until this is done."
+        : "Nothing is lost in the meantime — the rest of the form saves as it is."}`;
+  }
   function showLegacyNote() {
-    let n = 0;
-    for (const sec of SECTIONS) for (const e of S.data[sec.id]) if (stillLegacy(sec.id, e)) n++;
+    let n = 0, blocking = 0;
+    for (const sec of SECTIONS) {
+      for (const e of S.data[sec.id]) {
+        if (stillLegacy(sec.id, e)) n++;
+        if (blocksSave(sec.id, e)) blocking++;
+      }
+    }
     $("stu-legacy").innerHTML = n
-      ? `<b>${n} ${n === 1 ? "entry was" : "entries were"} imported from the previous version of this
+      ? `<b>${n} ${n === 1 ? "entry was" : "entries were"} recorded on an earlier version of this
          form</b> and ${n === 1 ? "is" : "are"} missing a detail the squadron now asks for. They are
-         highlighted below — completing them takes a few seconds and nothing is lost in the meantime.`
+         highlighted below and they stay readable everywhere.${blocking
+           ? ` <b>${blocking} of them ${blocking === 1 ? "has" : "have"} to be corrected before this
+               record can be saved again</b> — each takes a few seconds.`
+           : " Completing them takes a few seconds and nothing is lost in the meantime."}`
       : "";
   }
   /* how much of this record was entered by the CO instead of its owner —
@@ -838,21 +996,17 @@ WA.renderStudent = async function (view, me, opts) {
     const msrm = ev.target.closest("[data-msrm]");
     if (msrm) {
       const [sec, i, k] = msrm.dataset.msrm.split(":");
-      S.data[sec][Number(i)].items.splice(Number(k), 1);
-      redrawMS(sec, Number(i));
-      markDirty();
-      return;
-    }
-    const other = ev.target.closest("[data-msaddother]");
-    if (other) {
-      const [sec, i] = other.dataset.msaddother.split(":");
       const e = S.data[sec][Number(i)];
-      const v = txt(e._otherText);
-      if (!v) { toast("Type the item first", true); return; }
-      if (!e.items.includes(v)) e.items.push(v);
-      e._other = false; e._otherText = "";
+      /* the row is looked up BEFORE the chips are redrawn: redrawMS replaces
+         the whole .ms box, which detaches this button from the document and
+         would make closest(".rrow") null — the round-5 bug that left a
+         corrected row still wearing its legacy note */
+      const row = msrm.closest(".rrow");
+      e.items.splice(Number(k), 1);
       redrawMS(sec, Number(i));
-      afterEdit(sec, e, other.closest(".rrow"));
+      /* removing the last custom leftover is what completes the row (round 6),
+         so the legacy flag has to be re-judged here too */
+      afterEdit(sec, e, row);
       return;
     }
     const ng = ev.target.closest("[data-ng]");
@@ -860,7 +1014,9 @@ WA.renderStudent = async function (view, me, opts) {
       const [sec, i, on] = ng.dataset.ng.split(":");
       const e = S.data[sec][Number(i)];
       e.ng = on === "1";
-      if (e.ng) { e.grade = null; e.instructor = ""; }
+      /* ROUND 6 — NG drops the GRADE and nothing else: the instructor who
+         authorised the solo stays on the row, because he authorised it */
+      if (e.ng) e.grade = null;
       dropLegacy(sec, e);
       redrawRow(sec, Number(i));
       showLegacyNote();
@@ -886,7 +1042,14 @@ WA.renderStudent = async function (view, me, opts) {
   function afterEdit(secId, entry, row) {
     const was = !!entry.legacy;
     dropLegacy(secId, entry);
-    if (was && !entry.legacy) { unmarkLegacy(row); showLegacyNote(); }
+    /* the note either goes (the row is complete) or says the NEXT thing that
+       is missing — replacing one of two custom items must not leave the row
+       naming the item that is already gone (round 6) */
+    if (was) {
+      const i = S.data[secId].indexOf(entry);
+      if (i >= 0) refreshLegnote(secId, i, row);
+      showLegacyNote();
+    }
     markDirty();
   }
 
@@ -902,24 +1065,22 @@ WA.renderStudent = async function (view, me, opts) {
       if (box) box.innerHTML = itemOptions(e.category, e._q);
       return;
     }
-    if (el.dataset.msother !== undefined) {
-      const [sec, i] = el.dataset.msother.split(":");
-      S.data[sec][Number(i)]._otherText = el.value;
-      return;
-    }
+    /* SYLLABUS ONLY (round 6): the only thing this select can add is a
+       catalogue item — there is no "Other…" option left to branch on */
     if (el.dataset.msadd !== undefined) {
       const [sec, i] = el.dataset.msadd.split(":");
       const e = S.data[sec][Number(i)];
       const v = el.value;
       if (!v) return;
-      if (v === CUSTOM) { e._other = true; }
-      else if (!e.items.includes(v)) e.items.push(v);
+      /* the row BEFORE the redraw — see the note on data-msrm above */
+      const row = el.closest(".rrow");
+      if (!e.items.includes(v)) e.items.push(v);
       const box = redrawMS(sec, Number(i));
       if (box) {
-        const focusOn = box.querySelector(e._other ? "[data-msother]" : ".ms-q");
+        const focusOn = box.querySelector(".ms-q");
         if (focusOn) focusOn.focus();
       }
-      afterEdit(sec, e, el.closest(".rrow"));
+      afterEdit(sec, e, row);
       return;
     }
 
@@ -955,6 +1116,12 @@ WA.renderStudent = async function (view, me, opts) {
       return;
     }
 
+    /* was this checkride RECORDED before the keystroke? Filling one opens the
+       next slot and clearing one closes it again, so the section is redrawn
+       the moment that state flips — the hints and the frozen boxes of every
+       OTHER row depend on this one (round 6). */
+    const wasRec = sec === "evaluations" && !WA.slotEmpty("evaluations", entry);
+
     if (el.type === "checkbox") {
       entry[f] = el.checked;
       if (f === "pending") el.closest(".rrow").classList.toggle("is-pending", el.checked);
@@ -971,7 +1138,7 @@ WA.renderStudent = async function (view, me, opts) {
        the change — keeping it is exactly the impossible pair this round
        removes — so it is dropped, out loud. */
     if (f === "category") {
-      entry._q = ""; entry._other = false;
+      entry._q = "";
       const code = WA.normCode(entry.flight_code);
       if (code && WA.codeTrack(code) !== entry.category) {
         entry.flight_code = ""; entry._o_flight_code = false;
@@ -1008,6 +1175,20 @@ WA.renderStudent = async function (view, me, opts) {
          completeness note has to follow what is typed into it */
       const wasE = form.querySelector(`.rrow[data-row="nfs:${i}"]`);
       if (wasE) wasE.classList.toggle("is-legacy", stillLegacy("nfs", entry));
+    } else if (sec === "evaluations" &&
+               wasRec !== !WA.slotEmpty("evaluations", entry)) {
+      /* this checkride has just become recorded (or stopped being): the
+         syllabus-order state of every LATER slot changed with it, so the whole
+         section is redrawn — the date box the student is in keeps the focus */
+      const at = document.activeElement;
+      const back = at && at.dataset ? at.dataset.field : null;
+      redraw(sec);
+      if (back) {
+        const el2 = form.querySelector(
+          `.rrow[data-row="evaluations:${i}"] [data-field="${back}"]`);
+        if (el2) el2.focus();
+      }
+      showLegacyNote();
     } else {
       if (wasLegacy && !entry.legacy) unmarkLegacy(el.closest(".rrow"));
       refreshSlotBadge(sec, i);
@@ -1076,10 +1257,19 @@ WA.renderStudent = async function (view, me, opts) {
       push("sms", { entrance_date: e.entrance_date || null,
                     exit_date: e.exit_date || null, note: txt(e.note) || null }, e);
     });
+    /* AIRSICKNESS — THE FLIGHT, NOT THE PHASE (round 6). The note the form no
+       longer collects is carried through untouched when the row already had
+       one (nothing is destroyed behind the owner's back), and such a row is
+       refused until the flight is chosen — the server says the same. */
     d.airsickness.forEach((e, i) => {
       if (!isDate(e.date) && !e.legacy) { need("airsickness", i, "the date is required"); return; }
+      if (txt(e.phase) && !txt(e.flight_code)) {
+        need("airsickness", i, "choose the FLIGHT this airsickness happened on — the phase-of-flight note is no longer collected, and this entry keeps its own as legacy information");
+        return;
+      }
       push("airsickness", { date: e.date || null, instructor: WA.normLine(e.instructor) || null,
-                            phase: txt(e.phase) || null }, e);
+                            flight_code: WA.normCode(e.flight_code) || null,
+                            ...(txt(e.phase) ? { phase: e.phase } : {}) }, e);
     });
     for (const k of ["fail", "almost_good"]) {
       d[k].forEach((e, i) => {
@@ -1097,6 +1287,18 @@ WA.renderStudent = async function (view, me, opts) {
             " track — this entry is filed under " + WA.itemCatLabel(e.category));
           return;
         }
+        /* SYLLABUS ONLY (round 6) — the custom item is gone, so a string the
+           chosen track's gradesheet does not print is a leftover to replace,
+           not a value to store. The server refuses it by name; the form says
+           so first, and names it too. */
+        const stale = WA.itemsLegacy(e);
+        if (stale.length) {
+          need(k, i, "“" + stale[0] + "” is not a syllabus item — FAIL / ALMOST GOOD items come " +
+            "from the printed " + WA.itemCatLabel(e.category) + " gradesheet only" +
+            (stale.length > 1 ? " (" + stale.length + " items on this entry)" : "") +
+            ": remove it and choose the matching item");
+          return;
+        }
         push(k, {
           date: e.date || null, category: e.category || null,
           flight_code: code || null,
@@ -1109,11 +1311,19 @@ WA.renderStudent = async function (view, me, opts) {
     /* THE EIGHT CHECKRIDES — fixed rows. One that has not been flown travels
        as its identity and nothing else: the server accepts a slot without a
        date, and counts it as nothing. */
+    /* EVALUATIONS FOLLOW THE SYLLABUS ORDER (round 6) — the same verdict the
+       server reaches, from the same order list, in the same words. */
+    const ordState = WA.evalOrderState(d);
     d.evaluations.forEach((e, i) => {
       const empty = WA.slotEmpty("evaluations", e);
       if (!e.legacy && !empty) {
         if (!WA.evalById(e.evaluation)) { need("evaluations", i, "choose which checkride it was"); return; }
         if (!isDate(e.date)) { need("evaluations", i, "the date is required once the checkride is flown"); return; }
+      }
+      if (!empty && WA.evalById(e.evaluation) && ordState.blockedBy[e.evaluation]) {
+        problems.push("evaluations follow the syllabus order — " + e.evaluation +
+          " cannot be recorded while " + ordState.blockedBy[e.evaluation] + " is pending");
+        return;
       }
       if (!intOK("evaluations", i, e, "grade", "the grade")) return;
       push("evaluations", {
@@ -1127,7 +1337,16 @@ WA.renderStudent = async function (view, me, opts) {
       if (!e.legacy && !empty) {
         if (!isDate(e.date)) { need("solo_flights", i, "the date is required once the solo is flown"); return; }
         if (!e.ng && gr(e.grade) === null) { need("solo_flights", i, "a graded solo needs its grade (or mark it NG)"); return; }
-        if (!e.ng && !txt(e.instructor)) { need("solo_flights", i, "a graded solo needs the evaluator or instructor"); return; }
+      }
+      /* ROUND 6 — EVERY flown solo names its instructor, NG included: NG
+         removes the grade, not the person who authorised the flight. Asked of
+         a legacy row too: the flag excuses what the old form never asked for,
+         never a rule of this round. */
+      if (!empty && !txt(e.instructor)) {
+        need("solo_flights", i, e.ng
+          ? "a non-graded (NG) solo still needs the AUTHORISING instructor — he may not have flown along, but he authorised it"
+          : "a graded solo needs the evaluator or instructor");
+        return;
       }
       if (!intOK("solo_flights", i, e, "grade", "the grade")) return;
       const sortie = WA.normCode(e.sortie);
@@ -1140,11 +1359,20 @@ WA.renderStudent = async function (view, me, opts) {
         sortie: sortie || null,
         date: e.date || null, ng: !!e.ng,
         grade: e.ng ? null : gr(e.grade),
-        instructor: e.ng ? null : (WA.normLine(e.instructor) || null) }, e);
+        /* NG drops the grade and NOTHING ELSE — the instructor rides on every
+           flown solo row, because somebody authorised it (round 6) */
+        instructor: WA.normLine(e.instructor) || null }, e);
     });
     for (const k of ["fpc", "cef"]) {
       d[k].forEach((e, i) => {
         if (!isDate(e.date) && !e.legacy) { need(k, i, "the date is required"); return; }
+        /* AN FPC IS CONDUCTED BY THE SQUADRON CO OR THE DO (round 6). CEF
+           keeps its open list — a CEF is flown with a Squadron Evaluator. */
+        if (k === "fpc" && !WA.fpcEvaluatorOK(e.evaluator)) {
+          need(k, i, "an FPC is conducted by the " + WA.FPC_EVALUATORS.join(" or the ") +
+            " and by nobody else — “" + e.evaluator + "” is not one of them");
+          return;
+        }
         if (!intOK(k, i, e, "grade", "the grade")) return;
         push(k, { date: e.date || null,
                   flight_code: WA.normCode(e.flight_code) || null,
@@ -1218,10 +1446,10 @@ WA.renderStudent = async function (view, me, opts) {
       st.textContent = "Saved ✓ " + fmtDT(S.lastUpdate) +
         (asCO ? " — " + coN + " of " + coTot + " entr" + (coTot === 1 ? "y" : "ies") +
           " tagged as entered by CO" : "") +
-        (leftovers.length ? " — " + leftovers.length + " imported entr" +
+        (leftovers.length ? " — " + leftovers.length + " earlier entr" +
           (leftovers.length === 1 ? "y is" : "ies are") + " still incomplete" : "");
       toast(leftovers.length
-        ? "Record saved — " + leftovers.length + " imported entries still need a detail"
+        ? "Record saved — " + leftovers.length + " earlier entries still need a detail"
         : (asCO ? "Record saved — " + coN + " entr" + (coN === 1 ? "y" : "ies") +
                   " tagged as entered by CO" : "Record saved"));
     } catch (e) {

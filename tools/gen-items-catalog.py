@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-gen-items-catalog.py — build app/items-catalog.js from the FDMS syllabus data.
+gen-items-catalog.py — build app/items-catalog.js from the FDMS syllabus data,
+and rewrite the GENERATED BLOCK of db/schema.sql from the same sources.
 
 SOURCES (read-only, NOT part of this repo):
     D:\\FDMS\\data\\observations\\master_index.json
@@ -9,6 +10,7 @@ SOURCES (read-only, NOT part of this repo):
       → items[] {item_id, item_name, mif_numbers}          → WA_ITEMS
     D:\\FDMS\\data\\flowchart2.json
     → sorties[] {id, track, band, name, checkride}         → WA_SORTIES
+    → sorties[] in FILE ORDER, checkride == true           → WA_EVAL_ORDER
     → groups[]  {id, sorties_solo, solo_candidate_sorties} → WA_SOLO_SLOTS
 
 The generated file is a plain <script> catalogue used by the FAIL /
@@ -18,12 +20,25 @@ the Solo flights section, whose rows are the FIXED syllabus solo slots
 (WA_SOLO_SLOTS) — one row per solo the stage prescribes, never a free list.
 No student data is involved — syllabus structure only.
 
+ROUND 6 — the two rules that need the catalogue ON THE SERVER as well:
+  · FAIL / ALMOST GOOD items[] may hold ONLY the printed items of the chosen
+    track (the custom "Other…" item is gone), so the validator needs the 117
+    item names → wa.item_names(category).
+  · Evaluations follow the SYLLABUS ORDER, and the definitive order of the
+    eight checkrides is the FILE ORDER of the sortie entries in
+    flowchart2.json — the order in which the printed Training Flow Chart lays
+    them out → wa.eval_ids(), whose array position IS the order.
+Both are written into db/schema.sql between the GENERATED-BLOCK markers, so
+the SQL mirror can never drift from the JS one: they come from one run of one
+script over one source.
+
 Usage (from the repo root):
     python tools/gen-items-catalog.py [master_index.json] [flowchart2.json]
 """
 
 import json
 import os
+import re
 import sys
 
 CATS = [
@@ -36,6 +51,65 @@ CATS = [
 DEFAULT_SRC = r"D:\FDMS\data\observations\master_index.json"
 DEFAULT_FLOW = r"D:\FDMS\data\flowchart2.json"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "items-catalog.js")
+OUT_SQL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "db", "schema.sql")
+
+SQL_BEGIN = "-- ▼▼ GENERATED BLOCK — tools/gen-items-catalog.py — DO NOT EDIT BY HAND ▼▼"
+SQL_END = "-- ▲▲ GENERATED BLOCK ▲▲"
+
+
+def sq(s):
+    """one SQL string literal, quotes doubled."""
+    return "'" + str(s).replace("'", "''") + "'"
+
+
+def sql_block(cats, evals, flow_generated, idx_generated):
+    """the wa.eval_ids() + wa.item_names() mirror, as SQL text."""
+    L = []
+    L.append(SQL_BEGIN)
+    L.append("-- Generated from the FDMS syllabus sources:")
+    L.append("--   flow chart      %s  (data/flowchart2.json)" % flow_generated)
+    L.append("--   syllabus items  %s  (data/observations/master_index.json)" % idx_generated)
+    L.append("-- MIRROR: app/items-catalog.js, written by the same run of the same script.")
+    L.append("")
+    L.append("-- THE EIGHT CHECKRIDES, IN SYLLABUS ORDER (round 6). The order is not a")
+    L.append("-- judgement call: it is the FILE ORDER of the sortie entries in")
+    L.append("-- flowchart2.json, which is the order the printed Training Flow Chart lays")
+    L.append("-- them out in. The ARRAY POSITION is therefore the syllabus position, and")
+    L.append("-- wa.eval_pos() reads it — an evaluation may not be recorded while an")
+    L.append("-- earlier one has not been flown.")
+    L.append("-- MIRROR: app/app.js → WA.EVALUATIONS (ordered by WA_EVAL_ORDER).")
+    L.append("create or replace function wa.eval_ids() returns text[]")
+    L.append("language sql immutable as $$")
+    L.append("  select array[%s]::text[]" % ",".join(sq(e) for e in evals))
+    L.append("$$;")
+    L.append("")
+    L.append("-- 1-based position of a checkride in the syllabus order · null when unknown")
+    L.append("create or replace function wa.eval_pos(p_id text) returns int")
+    L.append("language sql immutable as $$")
+    L.append("  select i from generate_subscripts(wa.eval_ids(), 1) i")
+    L.append("  where (wa.eval_ids())[i] = p_id")
+    L.append("$$;")
+    L.append("")
+    L.append("-- THE PRINTED GRADESHEET ITEMS OF ONE TRACK (round 6). FAIL / ALMOST GOOD")
+    L.append("-- items[] may hold ONLY these strings: the custom \"Other…\" item died with")
+    L.append("-- round 6, so an item that is not on the printed sheet of the chosen track")
+    L.append("-- is refused on write — by name, with the rule spelled out.")
+    L.append("-- 'other' is the migration-only placeholder category and has NO catalogue:")
+    L.append("-- a row still filed under it must be given a real track first.")
+    L.append("-- MIRROR: app/items-catalog.js → WA_ITEMS.categories[].items[].name")
+    L.append("create or replace function wa.item_names(p_cat text) returns text[]")
+    L.append("language sql immutable as $$")
+    L.append("  select case p_cat")
+    for cid, _label in CATS:
+        names = [it["name"] for it in next(c for c in cats if c["id"] == cid)["items"]]
+        L.append("    when %s then array[" % sq(cid))
+        for k, n in enumerate(names):
+            L.append("      %s%s" % (sq(n), "," if k < len(names) - 1 else ""))
+        L.append("    ]::text[]")
+    L.append("    else array[]::text[] end")
+    L.append("$$;")
+    L.append(SQL_END)
+    return "\n".join(L)
 
 
 def number_label(mifs):
@@ -94,6 +168,13 @@ def main():
                 "codes": codes,
             })
 
+    # ── THE SYLLABUS ORDER OF THE EIGHT CHECKRIDES (round 6) ─────────────
+    # NOT a judgement call and NOT date order: the FILE ORDER of the sortie
+    # entries in flowchart2.json, which is the order the printed Training Flow
+    # Chart lays the stage out in. A later evaluation may not be filled while
+    # an earlier one is still pending, so this list IS the rule.
+    eval_order = [s["id"] for s in fc["sorties"] if s.get("checkride")]
+
     # sortie codes per track — the FAIL / ALMOST GOOD "flight code" picker
     sorties, n_sorties = {}, 0
     for cid, _ in CATS:
@@ -137,6 +218,10 @@ def main():
     lines.append("     n/of  \u2014 which solo of that section (F4301-06 prescribes 2)")
     lines.append("     req   \u2014 the section REQUIRES the solo (C4790-91: the 1st SOLO)")
     lines.append("     codes \u2014 the sorties the syllabus names as its solo candidates")
+    lines.append("   WA_EVAL_ORDER[]  \u2014 the eight checkrides in SYLLABUS ORDER: the FILE")
+    lines.append("             ORDER of the sortie entries of flowchart2.json, i.e. the order")
+    lines.append("             of the printed Training Flow Chart. A later evaluation cannot")
+    lines.append("             be filled while an earlier one is still pending (round 6).")
     lines.append("")
     lines.append("   %d items, %d sortie codes and %d solo slots across %d categories,"
                  % (total, n_sorties, len(slots), len(out_cats)))
@@ -188,12 +273,37 @@ def main():
                      % ", ".join(json.dumps(c) for c in s["codes"]))
     lines.append("];")
     lines.append("")
+    lines.append("/* THE SYLLABUS ORDER OF THE EIGHT CHECKRIDES (round 6) \u2014 the FILE ORDER of")
+    lines.append("   the sortie entries in flowchart2.json, which is the order the printed")
+    lines.append("   Training Flow Chart lays the stage out in. Never date order: a later")
+    lines.append("   evaluation cannot be FILLED while an earlier one is still pending, on the")
+    lines.append("   client and on the server alike.")
+    lines.append("   MIRROR: db/schema.sql \u2192 wa.eval_ids() / wa.eval_pos(). */")
+    lines.append("var WA_EVAL_ORDER = [%s];"
+                 % ", ".join(json.dumps(c) for c in eval_order))
+    lines.append("")
 
     with open(OUT, "w", encoding="utf-8", newline="\n") as fh:
         fh.write("\n".join(lines))
+
+    # \u2500\u2500 the SQL mirror, spliced into db/schema.sql between its markers \u2500\u2500\u2500\u2500
+    block = sql_block(out_cats, eval_order, fc.get("generated", "?"),
+                      idx.get("generated_at", "?"))
+    with open(OUT_SQL, encoding="utf-8") as fh:
+        sql = fh.read()
+    if SQL_BEGIN not in sql or SQL_END not in sql:
+        raise SystemExit("db/schema.sql has no GENERATED BLOCK markers \u2014 aborting")
+    pat = re.compile(re.escape(SQL_BEGIN) + ".*?" + re.escape(SQL_END), re.S)
+    sql2 = pat.sub(lambda _m: block, sql, count=1)
+    with open(OUT_SQL, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(sql2)
+
     print("wrote %s \u2014 %d items, %d sortie codes, %d solo slots (%s)"
           % (os.path.normpath(OUT), total, n_sorties, len(slots),
              ", ".join(s["id"] for s in slots)))
+    print("wrote %s \u2014 GENERATED BLOCK: %d checkrides in syllabus order (%s), "
+          "%d item names" % (os.path.normpath(OUT_SQL), len(eval_order),
+                             " \u2192 ".join(eval_order), total))
 
 
 if __name__ == "__main__":

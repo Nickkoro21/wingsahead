@@ -17,6 +17,25 @@
 -- (wa.write_record / wa.write_proposal), and what they write is stamped
 -- entered_by='admin' server-side — the tag the whole UI renders as "CO".
 -- The owner saving their own form clears it.
+-- ROUND 6 — FIVE STRICTNESS RULES. Each of them replaces something the form
+-- used to accept out of politeness with the thing the squadron can actually
+-- use, and each keeps what is already stored READABLE while refusing to write
+-- it again until it is corrected ("keep it, ask for it"):
+--   1. AIRSICKNESS names the FLIGHT (any track), not a phase-of-flight note.
+--      The note survives as legacy information, can never be added again
+--      (wa.phase_count), and blocks the re-save of its own row until the
+--      flight is chosen.
+--   2. FAIL / ALMOST GOOD items[] are SYLLABUS ONLY — the custom item is gone.
+--      wa.item_names(category) is the closed list, generated from the printed
+--      gradesheets; anything else is refused by name.
+--   3. EVALUATIONS FOLLOW THE SYLLABUS ORDER — wa.eval_ids(), generated from
+--      the FILE ORDER of flowchart2.json (the printed Training Flow Chart):
+--      C4590 → C4790 → C5090 → C5490 → I4490 → I4890 → F4690 → N4690. A later
+--      checkride cannot be recorded while an earlier one is still pending.
+--   4. EVERY FLOWN SOLO NAMES ITS INSTRUCTOR, NG included — NG removes the
+--      grade, not the person who AUTHORISED the flight.
+--   5. AN FPC IS CONDUCTED BY THE SQUADRON CO OR THE DO (wa.fpc_evaluators())
+--      and by nobody else. CEF keeps its open evaluator list.
 -- ROUND 5b — THE NORMALISATION BOUNDARY: every string of a record is trimmed,
 -- its inner whitespace collapsed, and (for the code-shaped fields) upper-cased
 -- ONCE, before validation and as stored (wa.norm_record in wa.write_record) and
@@ -404,18 +423,194 @@ begin
   end loop;
 end $$;
 
--- the eight Phase II checkrides — the identity every evaluation carries.
--- MIRROR: app/app.js → WA.EVALUATIONS. Change one, change the other.
+-- the eight Phase II checkrides — the identity every evaluation carries — and
+-- the printed gradesheet items of every track. BOTH come straight from the
+-- FDMS syllabus sources through tools/gen-items-catalog.py, which writes the
+-- JS catalogue and the block below in ONE run: the two mirrors cannot drift,
+-- because nobody types either of them by hand.
+-- ▼▼ GENERATED BLOCK — tools/gen-items-catalog.py — DO NOT EDIT BY HAND ▼▼
+-- Generated from the FDMS syllabus sources:
+--   flow chart      2026-08-09  (data/flowchart2.json)
+--   syllabus items  2026-08-08T22:10:34  (data/observations/master_index.json)
+-- MIRROR: app/items-catalog.js, written by the same run of the same script.
+
+-- THE EIGHT CHECKRIDES, IN SYLLABUS ORDER (round 6). The order is not a
+-- judgement call: it is the FILE ORDER of the sortie entries in
+-- flowchart2.json, which is the order the printed Training Flow Chart lays
+-- them out in. The ARRAY POSITION is therefore the syllabus position, and
+-- wa.eval_pos() reads it — an evaluation may not be recorded while an
+-- earlier one has not been flown.
+-- MIRROR: app/app.js → WA.EVALUATIONS (ordered by WA_EVAL_ORDER).
 create or replace function wa.eval_ids() returns text[]
 language sql immutable as $$
   select array['C4590','C4790','C5090','C5490','I4490','I4890','F4690','N4690']::text[]
 $$;
+
+-- 1-based position of a checkride in the syllabus order · null when unknown
+create or replace function wa.eval_pos(p_id text) returns int
+language sql immutable as $$
+  select i from generate_subscripts(wa.eval_ids(), 1) i
+  where (wa.eval_ids())[i] = p_id
+$$;
+
+-- THE PRINTED GRADESHEET ITEMS OF ONE TRACK (round 6). FAIL / ALMOST GOOD
+-- items[] may hold ONLY these strings: the custom "Other…" item died with
+-- round 6, so an item that is not on the printed sheet of the chosen track
+-- is refused on write — by name, with the rule spelled out.
+-- 'other' is the migration-only placeholder category and has NO catalogue:
+-- a row still filed under it must be given a real track first.
+-- MIRROR: app/items-catalog.js → WA_ITEMS.categories[].items[].name
+create or replace function wa.item_names(p_cat text) returns text[]
+language sql immutable as $$
+  select case p_cat
+    when 'contact' then array[
+      'GROUND PROCEDURES',
+      'TAKE OFF',
+      'DEPARTURE / TRANSITION TO FLIGHT AREAS',
+      'AREA AWARENESS',
+      'BASIC A/C CONTROL',
+      'G –AWARENESS',
+      'SLOW FLIGHT',
+      'POWER ON / ELP STALLS',
+      'TRAFFIC PATTERN STALLS',
+      'SPIN PREVENTION /SPIN RECOVERY',
+      'UNUSUAL ATTITUDES RECOVERY',
+      'PRECISION - AEROBATIC MANEUVERS',
+      'DESCENT - TRAFFIC PATTERN ENTRY',
+      'AIRPORT TRAFFIC PATTERN',
+      'LANDING PATTERN (NORMAL, NO FLAP, FLAP T/O - AΟA)',
+      'LANDING (FLAPS LDG - FLAPS UP - FLAPS Τ/Ο - ELP - AΟA)',
+      'STRAIGHT-IN (FLAPS LDG, FLAPS UP, FLAPS Τ/Ο).',
+      'EMERGENCY LANDING PATTERN (ELP)',
+      'GO AROUND',
+      'CLOSED PATTERN',
+      'CLEARING',
+      'RADIO COMMUNICATION',
+      'AIRMANSHIP',
+      'EMERGENCY PROCEDURES',
+      'GENERAL KNOWLEDGE',
+      'SPECIAL REQUIREMENTS',
+      'CRM'
+    ]::text[]
+    when 'instrument' then array[
+      'GROUND PROCEDURES',
+      'TAKE OFF',
+      'STANDARD INSTRUMENT DEPARTURE (SID)',
+      'BASIC A/C CONTROL',
+      'STEEP TURNS',
+      'AIRSPEED CHANGES',
+      'CONSTANT AIRSPEED - CONSTANT RATE CLIMBS / DESCENTS AND VERTICAL "S"',
+      'UNUSUAL ATTITUDES RECOVERY',
+      'CONFIDENCE MANEUVERS',
+      'COURSE INTERCEPTS',
+      'MAINTAINING COURSE',
+      'ARC INTERCEPT',
+      'MAINTAINING ARC',
+      'POINT TO POINT',
+      'HOLDING',
+      'INSTRUMENT DESCENT (PENETRATION)',
+      'EN-ROUTE DESCENT',
+      'VOR / TACAN APPROACH',
+      'ILS APPROACH',
+      'LOCALIZER APPROACH',
+      'GCA APPROACH (ASR)',
+      'GCA APPROACH (PAR)',
+      'GCA APPROACH (GYRO OUT)',
+      'STANDBY INSTRUMENTS APPROACH',
+      'CIRCLING APPROACH',
+      'LANDING',
+      'MISSED APPROACH',
+      'RADIO COMMUNICATION, AIRMANSHIP, EMERGENCY PROCEDURES, GENERAL KNOWLEDGE.',
+      'SPECIAL REQUIREMENTS',
+      'CRM'
+    ]::text[]
+    when 'formation' then array[
+      'TAKE OFF (FORMATION - INTERVAL)',
+      'DEPARTURE',
+      'IN FLIGHT PLANNING / FORMATION CONSISTENCY',
+      'RETURN / DESCENT / TRAFFIC PATTERN ENTRY',
+      'FORMATION APPROACH',
+      'FORMATION TAKE OFF',
+      'INTERVAL TAKE OFF',
+      'TURNING REJOIN',
+      'STRAIGHT AHEAD REJOIN',
+      'OVERSHOOT',
+      'BREAK OUT',
+      'FORMATION APPROACH.',
+      'MISSION PLANNING / BRIEFING.',
+      'GROUND PROCEDURES.',
+      'PITCH OUT / SPACING',
+      'FINGERTIP',
+      'ROUTE / FIGHTING WING FORMATION',
+      'ECHELON TURN (AS WINGMAN)',
+      'CROSS UNDER',
+      'LEAD CHANGE',
+      'CLOSE TRAIL',
+      'EXTENDED TRAIL',
+      'TACTICAL FORMATION',
+      'TACTICAL TURNS DELAY 90°, DELAY 45°, IN PLACE, CROSS / HOOK / SHACKLE/ CHECK TURNS',
+      'BASIC A/C - FORMATION CONTROL',
+      'LANDING PATTERN',
+      'LANDING',
+      'VISUAL SIGNALS',
+      'CLEARING',
+      'RADIO COMMUNICATION',
+      'AIRMANSHIP',
+      'EMERGENCY PROCEDURES',
+      'GENERAL KNOWLEDGE',
+      'CRM'
+    ]::text[]
+    when 'vfr_navigation' then array[
+      'MISSION PLANNING / BRIEFING - DEBRIEFING',
+      'GROUND PROCEDURES',
+      'TAKEOFF',
+      'VFR DEPARTURE / SID',
+      'BASIC A/C CONTROL / WINGMAN CONSIDERATION',
+      'IN-FLIGHT PLANNING / FORMATION INTERGRITY',
+      'FINGERTIP',
+      'TACTICAL FORMATION',
+      'TACTICAL TURNS',
+      'MAINTAIN TRACK',
+      'MAP READING',
+      'PILOTAGE',
+      'NAVIGATION WITH GPS',
+      'VFR ARRIVAL / TRAFFIC PATTERN ENTRY',
+      'INSTRUMET PROCEDURES',
+      'FORMATION APPROACH',
+      'TRAFFIC PATTERN PROCEDURES',
+      'OVERHEAD PATTERN',
+      'LANDING',
+      'INSTRUMENT PROCEDURES',
+      'CLEARING',
+      'COMMUNICATION',
+      'AIRMANSHIP',
+      'EMERGENCY PROCEDURES',
+      'GENERAL KNOWLEDGE',
+      'CRM'
+    ]::text[]
+    else array[]::text[] end
+$$;
+-- ▲▲ GENERATED BLOCK ▲▲
 
 -- FAIL / ALMOST GOOD categories — the four syllabus tracks. 'other' is not
 -- offered by the form; it only carries v1 free-text rows through migration.
 create or replace function wa.item_cats() returns text[]
 language sql immutable as $$
   select array['contact','instrument','formation','vfr_navigation','other']::text[]
+$$;
+
+-- ── WHO MAY CONDUCT AN FPC (round 6) ──────────────────────────────────────
+-- An FPC is a Δοκιμή Προόδου flown for the squadron leadership, so it is
+-- conducted by ONE OF TWO APPOINTMENTS and by nobody else: the Squadron CO or
+-- the DO. The instructor surnames and the free-text "Other…" that round 5
+-- offered are gone from the FPC picker — an instructor's name in that box was
+-- always a mis-filed CEF or an ordinary debrief.
+-- CEF is untouched: an Εξέταση Καταλληλότητας is conducted by a Squadron
+-- Evaluator, and its evaluator list stays open.
+-- MIRROR: app/app.js → WA.FPC_EVALUATORS. Change one, change the other.
+create or replace function wa.fpc_evaluators() returns text[]
+language sql immutable as $$
+  select array['Squadron CO','DO']::text[]
 $$;
 
 -- ── NFS REASONS (round 5) — the printed causes of the ΦΜΠ ──────────────────
@@ -507,7 +702,13 @@ language sql immutable as $$
                                    'grade','pending','legacy','entered_by']
     when 'almost_good'  then array['date','category','flight_code','items','instructor',
                                    'grade','pending','legacy','entered_by']
-    when 'airsickness'  then array['date','instructor','phase','legacy','entered_by']
+    -- ROUND 6: an airsickness event names the FLIGHT it happened on, not a
+    -- phase-of-flight note. `phase` survives in this list as a READ-ONLY
+    -- LEGACY CARRIER — a note already written is never destroyed behind its
+    -- owner's back — but the form no longer draws the box, the write path
+    -- refuses to let the number of rows carrying one grow (wa.phase_count),
+    -- and such a row cannot be saved again until its flight is chosen.
+    when 'airsickness'  then array['date','instructor','flight_code','phase','legacy','entered_by']
     when 'evaluations'  then array['date','evaluation','with','grade','pending','legacy','entered_by']
     when 'solo_flights' then array['slot','sortie','date','ng','grade','instructor','legacy','entered_by']
     when 'fpc'          then array['date','flight_code','evaluator','result','grade','pending','legacy','entered_by']
@@ -556,7 +757,11 @@ declare
   f text;
   e jsonb;
   i int;
+  i2 int;
   w text;
+  pos int;
+  prev_id text;
+  done boolean[];
   allowed text[] := wa.sections();
 begin
   perform wa.chk(p is not null and jsonb_typeof(p) = 'object', 'root', 'payload must be an object');
@@ -628,14 +833,55 @@ begin
                                 wa.code_track(e->>'flight_code'), e->>'category'));
           perform wa.chk_str_list(e->'items', w || '.items',
                                   case when wa.is_legacy(e) then 0 else 1 end, 40, 300);
+          -- SYLLABUS ONLY (round 6). The custom "Other… (type it yourself)"
+          -- item is gone: an item that is not on the printed gradesheet of the
+          -- chosen track cannot be compared with anything, cannot be counted
+          -- across students and cannot be looked up in the MIF. items[] may
+          -- therefore hold ONLY the catalogue names of the entry's category —
+          -- and a row still filed under the migration placeholder 'other' has
+          -- no catalogue at all, so it must be given a real track first.
+          -- The legacy rows keep their custom strings (they are READ, marked
+          -- and shown), and this is the refusal that asks for them to be
+          -- replaced before the record is written again.
+          if jsonb_typeof(e->'items') = 'array' then
+            for i2 in 0 .. jsonb_array_length(e->'items') - 1 loop
+              perform wa.chk(
+                jsonb_typeof(e->'items'->i2) <> 'string'
+                or (e->>'category') is not null
+                   and (e->'items'->>i2) = any(wa.item_names(e->>'category')),
+                format('%s.items[%s]', w, i2),
+                case
+                  when (e->>'category') is null or (e->>'category') = 'other' then
+                    format('“%s” is not a syllabus item, and this entry has no track yet — choose the track first, then pick the item from its printed gradesheet (the custom item was removed in round 6)',
+                           e->'items'->>i2)
+                  else
+                    format('“%s” is not a syllabus item — FAIL / ALMOST GOOD items come from the printed %s gradesheet only (the custom item was removed in round 6): replace it with an item of that list',
+                           e->'items'->>i2, e->>'category')
+                end);
+            end loop;
+          end if;
           perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
           perform wa.chk_grade(e->'grade', w || '.grade', false);
           perform wa.chk_bool(e->'pending', w || '.pending');
 
         elsif k = 'airsickness' then
+          -- ROUND 6 — THE FLIGHT, NOT THE PHASE. An airsickness event is
+          -- attached to the sortie it happened on (any track: airsickness does
+          -- not respect the syllabus), and the free-text "phase of flight /
+          -- note" box is gone. A stored note is still READ — nothing is
+          -- destroyed behind its owner's back — but a row that carries one
+          -- cannot be written again until the flight has been chosen.
           perform wa.chk_entry_date(e, w);
           perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
+          perform wa.chk_text(e->'flight_code', w || '.flight_code', false, 40);
+          perform wa.chk((e->>'flight_code') is null
+                         or length(trim(e->>'flight_code')) > 0,
+                         w || '.flight_code', 'the flight cannot be blank');
           perform wa.chk_text(e->'phase', w || '.phase', false, 300);
+          perform wa.chk(nullif(trim(coalesce(e->>'phase', '')), '') is null
+                         or (e->>'flight_code') is not null,
+                         w || '.flight_code',
+                         'the phase-of-flight note is no longer collected — this entry keeps it as legacy information, but it cannot be saved again until you choose the FLIGHT the airsickness happened on');
 
         elsif k = 'evaluations' then
           -- FIXED SLOT RULE (round 5): the eight checkrides are always present.
@@ -673,16 +919,29 @@ begin
           perform wa.chk(not (e ? 'graded'), w || '.graded',
                          'replaced — send "ng": true for a non-graded solo');
           perform wa.chk_bool(e->'ng', w || '.ng');
+          -- THE INSTRUCTOR IS ON EVERY FLOWN SOLO ROW (round 6) — NG included.
+          -- A student never launches alone on their own authority: somebody
+          -- AUTHORISES the solo, signs for it and owns it. NG removes the
+          -- GRADE (there is nothing to score), never the person: on a
+          -- non-graded row the name is the AUTHORISING instructor, on a graded
+          -- one it is the instructor / evaluator who graded it.
           if not wa.slot_empty(k, e) then
             perform wa.chk_date(e->'date', w || '.date', not wa.is_legacy(e));
+            -- REQUIRED EVEN ON A LEGACY ROW. The legacy flag excuses what the
+            -- OLD form never asked for; it does not excuse a round-6 rule, or
+            -- the rule would be optional for exactly the rows that break it.
+            -- A row without the name is readable everywhere and refused on the
+            -- next save until it is supplied ("keep it, ask for it").
+            perform wa.chk_text(e->'instructor', w || '.instructor', true, 200);
             if coalesce(case when jsonb_typeof(e->'ng') = 'boolean'
                              then (e->>'ng')::boolean else false end, false) then
               perform wa.chk(e->'grade' is null or jsonb_typeof(e->'grade') = 'null',
                              w || '.grade', 'a non-graded (NG) solo carries no grade');
-              perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
+              perform wa.chk(nullif(trim(coalesce(e->>'instructor', '')), '') is not null,
+                             w || '.instructor',
+                             'a non-graded (NG) solo still names the AUTHORISING instructor — NG removes the grade, not the person who authorised the flight');
             else
               perform wa.chk_grade(e->'grade', w || '.grade', not wa.is_legacy(e));
-              perform wa.chk_text(e->'instructor', w || '.instructor', not wa.is_legacy(e), 200);
             end if;
           end if;
 
@@ -698,6 +957,18 @@ begin
                          or length(trim(e->>'flight_code')) > 0,
                          w || '.flight_code', 'the trigger flight cannot be blank');
           perform wa.chk_text(e->'evaluator', w || '.evaluator', false, 200);
+          -- AN FPC IS CONDUCTED BY THE SQUADRON CO OR THE DO — nobody else
+          -- (round 6). CEF keeps its open list: a CEF is flown with a Squadron
+          -- Evaluator. A stored value from before this rule is READ and shown,
+          -- and this refusal is what asks for it to be corrected.
+          if k = 'fpc' then
+            perform wa.chk((e->>'evaluator') is null
+                           or (e->>'evaluator') = any(wa.fpc_evaluators()),
+                           w || '.evaluator',
+                           format('an FPC is conducted by the %s and by nobody else — “%s” is not one of them',
+                                  array_to_string(wa.fpc_evaluators(), ' or the '),
+                                  e->>'evaluator'));
+          end if;
           perform wa.chk_text(e->'result', w || '.result', false, 300);
           perform wa.chk_grade(e->'grade', w || '.grade', false);
           perform wa.chk_bool(e->'pending', w || '.pending');
@@ -731,9 +1002,57 @@ begin
                           where jsonb_typeof(e2) = 'object' and (e2->>'slot') is not null) t),
                        k, 'each solo slot may appear only once — the solo rows are fixed');
       end if;
+
+      -- ── EVALUATIONS FOLLOW THE SYLLABUS ORDER (round 6) ─────────────────
+      -- The stage is flown in one order and the checkrides sit in it at fixed
+      -- points, so a later checkride cannot have been flown while an earlier
+      -- one has not: such a record is a typo in the identity picker, and it
+      -- silently corrupts every per-checkride comparison the CO makes.
+      -- THE ORDER IS THE SYLLABUS ORDER — wa.eval_ids(), generated from the
+      -- FILE ORDER of the sortie entries in flowchart2.json (the printed
+      -- Training Flow Chart): C4590 → C4790 → C5090 → C5490 → I4490 → I4890
+      -- → F4690 → N4690.
+      -- What is refused is a FILL out of order. A row that is still the empty
+      -- fixed slot is always allowed — that is the default state of all eight
+      -- from day one, and it is the state every predecessor starts in.
+      if k = 'evaluations' then
+        done := array_fill(false, array[array_length(wa.eval_ids(), 1)]);
+        for i in 0 .. coalesce(jsonb_array_length(p->k), 0) - 1 loop
+          e := p->k->i;
+          if jsonb_typeof(e) <> 'object' then continue; end if;
+          pos := wa.eval_pos(e->>'evaluation');
+          if pos is not null and not wa.slot_empty(k, e) then done[pos] := true; end if;
+        end loop;
+        for i in 1 .. array_length(wa.eval_ids(), 1) loop
+          if not done[i] then continue; end if;
+          for i2 in 1 .. i - 1 loop
+            if not done[i2] then
+              prev_id := (wa.eval_ids())[i2];
+              perform wa.chk(false, k || '[' || (wa.eval_ids())[i] || ']',
+                format('evaluations follow the syllabus order — %s cannot be recorded while %s is pending',
+                       (wa.eval_ids())[i], prev_id));
+            end if;
+          end loop;
+        end loop;
+      end if;
     end if;
   end loop;
 end $$;
+
+-- how many airsickness entries still carry the retired phase-of-flight note
+-- (round 6). Like the legacy flag, it may only ever be USED UP: the note is
+-- kept so nothing is destroyed behind its owner's back, but the count can
+-- never grow — the field is gone from the form, and it cannot come back
+-- through a hand-made payload either.
+create or replace function wa.phase_count(p jsonb) returns int
+language sql immutable as $$
+  select coalesce((
+    select count(*)::int
+    from jsonb_array_elements(
+      case when jsonb_typeof(p) = 'array' then p else '[]'::jsonb end) e
+    where jsonb_typeof(e) = 'object'
+      and nullif(trim(coalesce(e->>'phase', '')), '') is not null), 0)
+$$;
 
 -- how many entries of ONE section still carry the legacy escape hatch
 create or replace function wa.legacy_count(p jsonb) returns int
@@ -850,8 +1169,18 @@ begin
           if (e->>'category') is null then e := e || jsonb_build_object('category', 'other'); end if;
           e := e || jsonb_build_object('legacy', true);
         end if;
+        -- ROUND 6 — SYLLABUS ONLY. A row still naming an item the printed
+        -- gradesheet of its track does not carry (the custom "Other…" item of
+        -- rounds 2-5, or any item under the placeholder category 'other') is
+        -- READ with its strings intact, and flagged: the form marks the chips,
+        -- names them, and refuses to save the row until they are replaced.
         if not wa.is_iso_date(e->>'date') or (e->>'category') is null
-           or jsonb_array_length(coalesce(e->'items', '[]'::jsonb)) = 0 then
+           or jsonb_array_length(coalesce(e->'items', '[]'::jsonb)) = 0
+           or exists (select 1
+                      from jsonb_array_elements_text(
+                             case when jsonb_typeof(e->'items') = 'array'
+                                  then e->'items' else '[]'::jsonb end) it
+                      where not (it = any(wa.item_names(e->>'category')))) then
           e := e || jsonb_build_object('legacy', true);
         end if;
         arr := arr || jsonb_build_array(e);
@@ -860,13 +1189,21 @@ begin
     end if;
   end loop;
 
-  -- AIRSICKNESS — shape unchanged, only the missing-date flag
+  -- AIRSICKNESS — ROUND 6: the event names the FLIGHT it happened on, and the
+  -- free-text "phase of flight / note" is no longer collected. A stored note
+  -- is NOT thrown away: it is read, shown greyed as legacy information, and
+  -- the row is flagged so the form asks for the flight — the same "keep it,
+  -- ask for it" contract every other legacy row has.
   if jsonb_typeof(p->'airsickness') = 'array' then
     arr := '[]'::jsonb;
     for i in 0 .. jsonb_array_length(p->'airsickness') - 1 loop
       e := p->'airsickness'->i;
       if jsonb_typeof(e) <> 'object' then continue; end if;
-      if not wa.is_iso_date(e->>'date') then e := e || jsonb_build_object('legacy', true); end if;
+      if not wa.is_iso_date(e->>'date')
+         or (nullif(trim(coalesce(e->>'phase', '')), '') is not null
+             and (e->>'flight_code') is null) then
+        e := e || jsonb_build_object('legacy', true);
+      end if;
       arr := arr || jsonb_build_array(e);
     end loop;
     o := o || jsonb_build_object('airsickness', arr);
@@ -905,8 +1242,13 @@ begin
       end if;
       e := e - 'graded';
       if (e->>'ng')::boolean then e := e || jsonb_build_object('grade', null); end if;
+      -- ROUND 6 — the INSTRUCTOR is on every flown solo row, NG included: the
+      -- authorising instructor may not fly along, but he authorises. A row
+      -- recorded before that rule (an NG solo with nobody's name on it) is
+      -- read, stays readable, and is flagged so the form asks who authorised it.
       if not wa.slot_empty('solo_flights', e)
          and (not wa.is_iso_date(e->>'date')
+              or nullif(trim(coalesce(e->>'instructor', '')), '') is null
               or (not (e->>'ng')::boolean and coalesce(jsonb_typeof(e->'grade'), '-') <> 'number')) then
         e := e || jsonb_build_object('legacy', true);
       end if;
@@ -968,8 +1310,15 @@ begin
                                     then jsonb_build_object('evaluator', dts->'by')
                                     else '{}'::jsonb end;
       end if;
+      -- ROUND 6 — an FPC is conducted by the Squadron CO or the DO. A stored
+      -- FPC naming anybody else (an instructor surname, a free-text
+      -- appointment) is READ and shown, flagged so the form asks which of the
+      -- two it actually was. CEF is untouched — its evaluator list stays open.
       e := e || jsonb_build_array(
-        case when wa.is_iso_date(dts->>'date') then dts
+        case when wa.is_iso_date(dts->>'date')
+                  and (k <> 'fpc' or (dts->>'evaluator') is null
+                       or (dts->>'evaluator') = any(wa.fpc_evaluators()))
+             then dts
              else dts || jsonb_build_object('legacy', true) end);
     end loop;
     o := o || jsonb_build_object(k, e);
@@ -1214,6 +1563,13 @@ begin
     perform wa.chk(wa.legacy_count(pl->k) <= wa.legacy_count(old->k),
                    k, 'entries imported from the previous form cannot be added, only completed');
   end loop;
+
+  -- THE RETIRED AIRSICKNESS NOTE, same contract (round 6): a stored
+  -- phase-of-flight note may be kept or dropped, never ADDED. The form has no
+  -- box for it any more, so a payload that grows the count is a hand-made one.
+  perform wa.chk(wa.phase_count(pl->'airsickness') <= wa.phase_count(old->'airsickness'),
+                 'airsickness',
+                 'the phase-of-flight note was replaced by the flight code — an existing note is kept as legacy information, but a new one cannot be added');
 
   -- THE STAMP (round 4b) — the CO's save is diffed against what is stored, so
   -- only what he actually wrote carries his name; the owner's save reclaims

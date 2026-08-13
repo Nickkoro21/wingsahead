@@ -302,6 +302,32 @@ input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent);
 .tbl tbody tr.is-unflown td { color: var(--muted); }
 .tbl td.items { min-width: 220px; }
 
+/* ── round 6: the five strictness rules, on screen ────────────────────────
+   Everything here says the same thing in two registers: what is stored is
+   READABLE (greyed, never hidden), and what has to change before the record
+   can be saved again is WARNED (the warn colour, never silently). */
+/* a box the rules do not allow to be filled YET — a checkride whose
+   predecessor is still pending. Never used on a box that already holds a
+   value: a value must always be correctable. */
+.f.is-off > span, .ck.is-off { opacity: 0.55; }
+.f.is-off input, .f.is-off select { opacity: 0.6; cursor: not-allowed; }
+input:disabled, select:disabled { background: var(--panel); }
+/* the syllabus-order note under a checkride row */
+.ordnote {
+  font-size: 11.5px; color: var(--muted); line-height: 1.5; margin: 6px 0 0;
+}
+.ordnote.warn-t { color: var(--warn); }
+.ordnote b { color: var(--text); }
+/* the retired airsickness phase-of-flight note, kept as legacy information */
+.oldnote {
+  font-size: 11.5px; color: var(--muted); line-height: 1.5; margin: 6px 0 0;
+  padding: 5px 8px; border-left: 2px solid var(--line); background: var(--panel);
+  border-radius: 0 6px 6px 0;
+}
+/* a FAIL / ALMOST GOOD item typed by hand before the syllabus list existed */
+.ms-legacy { font-size: 11.5px; color: var(--warn); line-height: 1.5; margin: 4px 0 6px; }
+.itlegacy { color: var(--muted); cursor: help; text-decoration: underline dotted; }
+
 /* the ⓘ that carries a terminology tooltip next to a section header */
 .tipdot {
   color: var(--accent); font-size: 13px; cursor: help; line-height: 1;
@@ -369,15 +395,19 @@ input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent);
   border-radius: 999px; padding: 3px 6px 3px 10px; font-size: 11.5px; line-height: 1.35;
   overflow-wrap: anywhere;
 }
-.mschip.is-custom { background: var(--warn-soft); border-color: rgba(var(--warn-rgb), 0.5); }
+/* ROUND 6 — a chip typed by hand before the syllabus list existed. It is kept
+   and shown (nothing is deleted behind its owner's back), greyed so it never
+   reads as a syllabus item, and it blocks the re-save of its own entry. */
+.mschip.is-legacy {
+  background: var(--panel); border-color: rgba(var(--warn-rgb), 0.5);
+  border-style: dashed; color: var(--muted);
+}
 .mschip .x {
   background: transparent; border: 0; color: var(--muted); cursor: pointer;
   font-size: 12px; padding: 0 4px; line-height: 1; flex: 0 0 auto;
 }
 .mschip .x:hover { color: var(--bad); }
 .ms-q { min-height: 34px; font-size: 13px; }
-.ms-other { display: flex; gap: 6px; align-items: center; }
-.ms-other input { flex: 1 1 auto; }
 .rrow .rm {
   background: transparent; border: 1px solid var(--line); color: var(--muted);
   border-radius: 7px; padding: 4px 10px; font-size: 12px; cursor: pointer; justify-self: start;
@@ -617,6 +647,10 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
   /* a grade shown rounded (the raw value is fractional) keeps its marker */
   .rnd { border-bottom: 1px dotted #000; }
   .offcat { color: #000; font-weight: 700; }
+  /* ROUND 6 — a FAIL / ALMOST GOOD item typed by hand before the syllabus
+     list existed. Colour is not available on paper, so it is said in words
+     (WA.itemsLabel appends "(legacy)") and set in italic here. */
+  .itlegacy { font-style: italic; color: #333; text-decoration: none; }
   /* the CO tag on paper — monochrome like everything else, still unmistakable */
   .cotag {
     color: #000 !important; background: #ffffff !important; border: 1px solid #000 !important;

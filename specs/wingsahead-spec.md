@@ -286,6 +286,92 @@ did. The wording now lives in one helper (`WA.itemsN` / `WA.itemsCount` /
 `WA.itemsCountHTML`) that every surface calls, print included — a new surface
 cannot drift from the others.
 
+## 4e. Round 6 (2026-08-13) — five strictness rules
+
+The second hands-on review round. Each of the five replaces something the form
+accepted out of politeness with the thing the squadron can actually use, and
+each keeps what is already stored **readable everywhere** while **refusing to
+write it again** until it is corrected — the "keep it, ask for it" contract the
+legacy rows have had since round 3, now applied to rules the old form never
+asked about. The old contract is not weakened: a row the OLD form never
+questioned (an NFS with no date) still saves, incomplete, so nothing is lost
+while the student works through the rest. Which of the two a row is, the row
+itself says — `blocksSave()` in the form is the single function behind the
+row's note, the banner's count and the refusal alike.
+
+**1 · AIRSICKNESS NAMES THE FLIGHT.** The entry is `{date*, flight_code,
+instructor}` — a picker over **every sortie of the stage** (airsickness does not
+respect the syllabus track) with the round-5 "Other…" free-text escape. The
+free-text *phase of flight / note* is gone: the form draws no box for it, and
+the admin table / brief / print / CSV columns say **Flight**. A note already
+written is **not destroyed**: it is read, rendered greyed as "legacy note" on
+every surface, and its row is refused on the next save until the flight is
+chosen. `wa.phase_count` additionally refuses any payload that GROWS the number
+of rows carrying one, so the retired field cannot come back through a hand-made
+payload either — the same "may only be used up" rule the legacy flag has.
+
+**2 · FAIL / ALMOST GOOD ITEMS ARE SYLLABUS ONLY.** The custom
+"Other… (type it yourself)" item **dies**. `items[]` may hold only the printed
+gradesheet names of the entry's own category — `wa.item_names(category)`,
+generated from the same source as the JS catalogue — and anything else is
+refused **by name**, with the rule spelled out. A row still filed under the
+migration placeholder `other` has no catalogue at all and must be given a real
+track first. Student and CO share one validation path, so the option is gone
+from every surface at once. Legacy custom strings survive: greyed chips marked
+*legacy*, a per-row note naming what to replace, and the entry is refused until
+every one of them is.
+
+**3 · EVALUATIONS FOLLOW THE SYLLABUS ORDER.** A later checkride cannot be
+FILLED while an earlier one is still pending. **The order is not a judgement
+call**: `tools/gen-items-catalog.py` reads the **FILE ORDER of the sortie
+entries in `data/flowchart2.json`** — the order of the printed Training Flow
+Chart — and writes it into `WA_EVAL_ORDER` and `wa.eval_ids()` in the same run,
+so the two mirrors cannot drift. The definitive sequence is
+**C4590 → C4790 → C5090 → C5490 → I4490 → I4890 → F4690 → N4690**. The client
+DISABLES the boxes of a slot whose predecessors are unflown and says
+*"complete C4590 first"*; the server refuses the same fill with
+*"evaluations follow the syllabus order — C4790 cannot be recorded while C4590
+is pending"*. An empty fixed slot is always allowed — it is the state all eight
+start in, and the pending tick alone still owes its date (round 5, unchanged),
+so "recorded" means "flown". A row that is ALREADY filled out of order is never
+frozen (a value must stay correctable): it is marked, and the save is refused
+until the predecessor is filled or the row is cleared.
+
+**4 · EVERY FLOWN SOLO NAMES ITS INSTRUCTOR — NG INCLUDED.** A student does not
+launch alone on their own authority: somebody authorises the solo and signs for
+it. **NG removes the GRADE, never the person.** The label follows the row —
+*"Authorising instructor"* on an NG row, *"Evaluator / instructor"* on a graded
+one — and the name is required on both sides. It is asked of legacy rows too:
+the flag excuses what the old form never asked for, never a rule of this round.
+Migration flags a stored NG solo with nobody's name, and every surface prints
+"not recorded" instead of an empty cell (`WA.soloWho` / `WA.soloWhoHTML` /
+`WA.soloWhoPhrase` — one helper, so table, brief, card, print and CSV cannot
+drift).
+
+**5 · AN FPC IS CONDUCTED BY THE SQUADRON CO OR THE DO.** The FPC evaluator
+picker loses the instructor surnames and the free-text "Other…": exactly two
+options (`wa.fpc_evaluators()` ↔ `WA.FPC_EVALUATORS`). An instructor's name in
+that box was always a mis-filed CEF or an ordinary debrief. **CEF is untouched**
+— an Εξέταση Καταλληλότητας is flown with a Squadron Evaluator and keeps its
+open list (DO · Squadron CO · the instructors · typed). A stored value from
+before the rule is read, named under the box, marked in the CO's table, and
+refused on the next save.
+
+**GENERATION.** `tools/gen-items-catalog.py` now writes BOTH mirrors in one run
+over one source: `app/items-catalog.js` (+ `WA_EVAL_ORDER`) and the
+**GENERATED BLOCK** of `db/schema.sql` (`wa.eval_ids` / `wa.eval_pos` /
+`wa.item_names`, 117 item names). Nobody types either list, so they cannot
+disagree.
+
+**DEMO DATA.** The seed violated rule 3 (Georgiou had I4490/F4690 over empty
+C5090/C5490/I4890; Papadopoulos C5090 over an empty C4790 and I4490 over an
+empty C5490); the gaps were filled with the flights they must have been, in
+date order. One seeded item read "FORMATION TAKEOFF" where the printed sheet
+says "FORMATION TAKE OFF", and was corrected. Everything else was left exactly
+as it was, so the seed still carries **one legacy row per new rule**: two
+airsickness phase notes, three hand-typed items, two NG solos with no name and
+one FPC conducted by an instructor.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /

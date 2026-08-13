@@ -345,18 +345,33 @@ const PALETTES = [
    (wa.eval_ids). Change one, change the other.
      id     — stored in evaluations[i].evaluation (= the sortie code)
      cat    — syllabus track, for the per-category plot
-     order  — syllabus order (the x axis of the category plot)
+     order  — SYLLABUS ORDER, and since round 6 a RULE and not only an axis:
+              it is the position of the checkride in WA_EVAL_ORDER, which the
+              generator reads off the FILE ORDER of the sortie entries in
+              flowchart2.json — the order of the printed Training Flow Chart.
+              A later evaluation cannot be FILLED while an earlier one is
+              still pending, on this side and on the server's alike.
    ══════════════════════════════════════════════════════════════════════════ */
+WA.EVAL_ORDER = (typeof WA_EVAL_ORDER !== "undefined" && Array.isArray(WA_EVAL_ORDER))
+  ? WA_EVAL_ORDER.slice()
+  : ["C4590", "C4790", "C5090", "C5490", "I4490", "I4890", "F4690", "N4690"];
 WA.EVALUATIONS = [
-  { id: "C4590", cat: "contact",        order: 1, name: "Contact checkride" },
-  { id: "C4790", cat: "contact",        order: 2, name: "Contact checkride for SOLO" },
-  { id: "C5090", cat: "contact",        order: 3, name: "Contact checkride" },
-  { id: "C5490", cat: "contact",        order: 4, name: "Final Contact checkride" },
-  { id: "I4490", cat: "instrument",     order: 5, name: "Instrument checkride" },
-  { id: "I4890", cat: "instrument",     order: 6, name: "Final Instruments checkride" },
-  { id: "F4690", cat: "formation",      order: 7, name: "Final Formation checkride" },
-  { id: "N4690", cat: "vfr_navigation", order: 8, name: "Final Navigation checkride" },
-];
+  { id: "C4590", cat: "contact",        name: "Contact checkride" },
+  { id: "C4790", cat: "contact",        name: "Contact checkride for SOLO" },
+  { id: "C5090", cat: "contact",        name: "Contact checkride" },
+  { id: "C5490", cat: "contact",        name: "Final Contact checkride" },
+  { id: "I4490", cat: "instrument",     name: "Instrument checkride" },
+  { id: "I4890", cat: "instrument",     name: "Final Instruments checkride" },
+  { id: "F4690", cat: "formation",      name: "Final Formation checkride" },
+  { id: "N4690", cat: "vfr_navigation", name: "Final Navigation checkride" },
+]
+  /* the ORDER is not typed here: it comes from the generated catalogue, and
+     the list is sorted by it so no view can draw a different sequence */
+  .map((d) => ({ ...d, order: WA.EVAL_ORDER.indexOf(d.id) + 1 }))
+  .sort((a, b) => a.order - b.order);
+/* 1-based syllabus position · 0 when the id is not one of the eight.
+   MIRROR: db/schema.sql → wa.eval_pos. */
+WA.evalPos = function (id) { return WA.EVAL_ORDER.indexOf(id) + 1; };
 
 /* ══════════════════════════════════════════════════════════════════════════
    NFS REASONS — the printed causes of the ΦΜΠ (round 5).
@@ -425,19 +440,32 @@ WA.evalsOfCat = function (cat) {
    SECTION VOCABULARY — one place for the label + the tooltip that sits on
    every section header (round-2 R6 · round-3 W5 renames).
    ══════════════════════════════════════════════════════════════════════════ */
-/* who may conduct an FPC / CEF, before the squadron's own instructors: the
-   two standing appointments of the unit (round 5). Free text stays accepted. */
+/* who may conduct a CEF, before the squadron's own instructors: the two
+   standing appointments of the unit (round 5). Free text stays accepted —
+   a CEF is flown with a Squadron Evaluator, who may be any of them. */
 WA.EVALUATOR_ROLES = ["DO", "Squadron CO"];
+
+/* ── WHO MAY CONDUCT AN FPC (round 6) — EXACTLY TWO, and nothing else ──────
+   A Δοκιμή Προόδου is flown for the squadron leadership: the Squadron CO or
+   the DO conducts it. The instructor surnames and the free-text "Other…" that
+   round 5 offered are gone from the FPC picker — a surname in that box was
+   always a mis-filed CEF or an ordinary debrief. A stored value from before
+   the rule stays READABLE and the form asks which of the two it was.
+   MIRROR: db/schema.sql → wa.fpc_evaluators(). Change one, change the other. */
+WA.FPC_EVALUATORS = ["Squadron CO", "DO"];
+WA.fpcEvaluatorOK = function (v) {
+  return v === null || v === undefined || v === "" || WA.FPC_EVALUATORS.indexOf(v) >= 0;
+};
 
 WA.SECTIONS_META = {
   nfs:          { label: "NFS", tip: "NFS = Φύλλο μη Πτήσης (ΦΜΠ) — one dated entry per event, with the reason printed on form Α0473 (3-01 ΚΕΦ.9): failed questionnaire / failed pre-flight briefing / failed flight / failed F/S / illness / other cause. The count is derived." },
   sms:          { label: "SMS", tip: "SMS = Safety Management System — one entry per entrance, with the exit date when it closes." },
-  airsickness:  { label: "Airsickness", tip: "One dated entry per airsickness event — with whom it happened and, optionally, the phase of flight." },
-  fail:         { label: "FAIL", tip: "FAIL = a syllabus item graded below the desired performance — the flight, the items, the instructor and the grade." },
-  almost_good:  { label: "ALMOST GOOD", tip: "ALMOST GOOD = an item that only just reached the desired performance — same detail as a FAIL." },
-  evaluations:  { label: "Evaluations", tip: "The eight checkrides of the stage — fixed rows, present from day one and pending until flown, so every student is compared on the same flight." },
-  solo_flights: { label: "Solo flights", tip: "The solos the syllabus prescribes — eight fixed slots (F4301-06 carries two), pending until flown. A flown solo is graded 0-100 % or NG (non-graded). An unforeseen solo is recorded as an additional solo." },
-  fpc:          { label: "FPC", tip: "FPC = Δοκιμή Προόδου (flight progress check) — flown after failures, so fewer is better. Each entry names the stage flight that triggered it and the evaluator who conducted it." },
+  airsickness:  { label: "Airsickness", tip: "One dated entry per airsickness event — the FLIGHT it happened on and with whom, so the squadron can see the pattern. (Round 6 replaced the free-text phase-of-flight note with the flight code; a note already written is kept as legacy information.)" },
+  fail:         { label: "FAIL", tip: "FAIL = a syllabus item graded below the desired performance — the flight, the items, the instructor and the grade. The items are the printed gradesheet items of the chosen track and nothing else (round 6)." },
+  almost_good:  { label: "ALMOST GOOD", tip: "ALMOST GOOD = an item that only just reached the desired performance — same detail as a FAIL, and the same syllabus-only item list." },
+  evaluations:  { label: "Evaluations", tip: "The eight checkrides of the stage — fixed rows, present from day one and pending until flown, so every student is compared on the same flight. They are filled in SYLLABUS ORDER: a later checkride cannot be recorded while an earlier one is still pending (round 6)." },
+  solo_flights: { label: "Solo flights", tip: "The solos the syllabus prescribes — eight fixed slots (F4301-06 carries two), pending until flown. A flown solo is graded 0-100 % or NG (non-graded), and EVERY flown row names its instructor: on an NG row that is the authorising instructor. An unforeseen solo is recorded as an additional solo." },
+  fpc:          { label: "FPC", tip: "FPC = Δοκιμή Προόδου (flight progress check) — flown after failures, so fewer is better. Each entry names the stage flight that triggered it and the evaluator: the Squadron CO or the DO, and nobody else (round 6)." },
   cef:          { label: "CEF", tip: "CEF = Εξέταση Καταλληλότητας (evaluation with a Squadron Evaluator) — flown after failures, so fewer is better. Each entry names the stage flight that triggered it and the evaluator who conducted it." },
 };
 WA.secLabel = function (k) { return (WA.SECTIONS_META[k] || {}).label || k; };
@@ -555,12 +583,39 @@ WA.itemText = function (catId, name) {
   const hit = WA.itemFind(catId, name);
   return (hit && hit.n ? hit.n + " — " : "") + String(name || "");
 };
+/* ── SYLLABUS ONLY (round 6) ───────────────────────────────────────────────
+   The custom "Other…" item is gone: items[] may name only the printed
+   gradesheet items of the entry's own track, because an item nobody else can
+   have is an item nobody can compare, count or look up in the MIF. What is
+   already stored is NOT rewritten — a custom string is read, shown marked
+   "legacy", and its row is refused on the next save until it is replaced.
+   MIRROR: db/schema.sql → wa.item_names / the items[] check in
+   wa.validate_record. */
+WA.itemKnown = function (catId, name) { return !!WA.itemFind(catId, name); };
+WA.itemsLegacy = function (entry) {
+  const e = entry || {};
+  return (Array.isArray(e.items) ? e.items : []).filter((n) => !WA.itemKnown(e.category, n));
+};
+WA.ITEM_LEGACY_TIP =
+  "Legacy — a custom item typed before round 6. Replace it with an item of the printed gradesheet; the entry cannot be saved again until you do.";
 /* the whole items[] of one FAIL / ALMOST GOOD entry, for tables and print */
 WA.itemsLabel = function (entry) {
   const e = entry || {};
   const list = Array.isArray(e.items) ? e.items : [];
   if (!list.length) return "—";
-  return list.map((n) => WA.itemText(e.category, n)).join(" · ");
+  return list.map((n) => WA.itemText(e.category, n) +
+    (WA.itemKnown(e.category, n) ? "" : " (legacy)")).join(" · ");
+};
+/* the same list as HTML, with the custom leftovers greyed and explained —
+   the CO's tables, the brief and the instructor card all call this one */
+WA.itemsLabelHTML = function (entry) {
+  const e = entry || {};
+  const list = Array.isArray(e.items) ? e.items : [];
+  if (!list.length) return "—";
+  return list.map((n) => WA.itemKnown(e.category, n)
+    ? esc(WA.itemText(e.category, n))
+    : `<span class="itlegacy" title="${esc(WA.ITEM_LEGACY_TIP)}">${esc(n)} <span class="k">(legacy)</span></span>`
+  ).join(" · ");
 };
 /* HOW MANY items one FAIL / ALMOST GOOD entry names. The list itself is
    rendered by WA.itemsLabel; the COUNT belongs beside it on every surface that
@@ -703,7 +758,12 @@ WA.ENTRY_KEYS = {
   sms:          ["entrance_date", "exit_date", "note", "legacy", "entered_by"],
   fail:         ["date", "category", "flight_code", "items", "instructor", "grade", "pending", "legacy", "entered_by"],
   almost_good:  ["date", "category", "flight_code", "items", "instructor", "grade", "pending", "legacy", "entered_by"],
-  airsickness:  ["date", "instructor", "phase", "legacy", "entered_by"],
+  /* ROUND 6: the FLIGHT, not a phase-of-flight note. `phase` stays in the list
+     as a READ-ONLY legacy carrier — an already-written note is never destroyed
+     — but the form draws no box for it, the server refuses to let the number
+     of rows carrying one grow, and such a row cannot be saved again until its
+     flight is chosen. */
+  airsickness:  ["date", "instructor", "flight_code", "phase", "legacy", "entered_by"],
   evaluations:  ["date", "evaluation", "with", "grade", "pending", "legacy", "entered_by"],
   solo_flights: ["slot", "sortie", "date", "ng", "grade", "instructor", "legacy", "entered_by"],
   fpc:          ["date", "flight_code", "evaluator", "result", "grade", "pending", "legacy", "entered_by"],
@@ -792,13 +852,24 @@ WA.migrateRecord = function (rec) {
         if (!o.category) o.category = "other";
         o.legacy = true;
       }
-      if (!isDate(o.date) || !o.category || !o.items.length) o.legacy = true;
+      /* ROUND 6 — SYLLABUS ONLY. A row still naming an item its track's
+         printed gradesheet does not carry keeps the string, and is flagged:
+         the form marks the chip, names it and refuses to save the row until
+         it is replaced. MIRROR: db/schema.sql → wa.migrate_record. */
+      if (!isDate(o.date) || !o.category || !o.items.length ||
+          WA.itemsLegacy(o).length) o.legacy = true;
       return o;
     });
   }
 
+  /* AIRSICKNESS — ROUND 6: the event names the FLIGHT it happened on. A row
+     that still carries the retired phase-of-flight note keeps it (nothing is
+     destroyed behind its owner's back), is shown with it greyed as legacy
+     information, and is flagged so the form asks for the flight.
+     MIRROR: db/schema.sql → wa.migrate_record (airsickness). */
   out.airsickness = (arr(src.airsickness) || []).map((e) =>
-    isDate(e.date) ? e : { ...e, legacy: true });
+    (isDate(e.date) && !(String(e.phase || "").trim() && !e.flight_code))
+      ? e : { ...e, legacy: true });
 
   /* EVALUATIONS — v1 rows carry no identity; they stay, flagged, until the
      student says which of the eight checkrides they were. An identified
@@ -817,8 +888,13 @@ WA.migrateRecord = function (rec) {
     if (typeof o.ng !== "boolean") o.ng = !o.graded;
     delete o.graded;
     if (o.ng) o.grade = null;
+    /* ROUND 6 — every flown solo names its instructor, NG included: the
+       authorising instructor may not fly along, but he authorises. A row
+       recorded before that rule is read, stays readable, and is flagged so
+       the form asks who authorised it. */
     if (!WA.slotEmpty("solo_flights", o) &&
-        (!isDate(o.date) || (!o.ng && !isFinite(Number(o.grade))))) o.legacy = true;
+        (!isDate(o.date) || !String(o.instructor || "").trim() ||
+         (!o.ng && !isFinite(Number(o.grade))))) o.legacy = true;
     return o;
   });
   /* ROUND 5 — the solos ARE the syllabus slots. A solo recorded before this
@@ -855,7 +931,11 @@ WA.migrateRecord = function (rec) {
         if (o.evaluator === null || o.evaluator === undefined || o.evaluator === "") o.evaluator = o.by;
         delete o.by;
       }
-      return isDate(o.date) ? o : { ...o, legacy: true };
+      /* ROUND 6 — an FPC is conducted by the Squadron CO or the DO. A stored
+         FPC naming anybody else is READ and shown, flagged so the form asks
+         which of the two it was. CEF is untouched. */
+      if (!isDate(o.date) || (k === "fpc" && !WA.fpcEvaluatorOK(o.evaluator))) o.legacy = true;
+      return o;
     });
   }
 
@@ -932,6 +1012,68 @@ WA.evalRows = function (rec) {
     };
   });
 };
+/* ══════════════════════════════════════════════════════════════════════════
+   WHO IS ON A SOLO ROW (round 6) — one helper, every surface.
+   A student never launches alone on their own authority: somebody AUTHORISES
+   the solo and signs for it. NG removes the GRADE, never the person, so every
+   flown solo names an instructor — the one who graded it, or (on an NG row)
+   the one who authorised it. A row recorded before the rule has nobody's name,
+   and says so rather than showing an empty cell.
+   MIRROR: the solo_flights block of wa.validate_record. */
+WA.soloWho = function (e) {
+  const who = String((e && e.instructor) || "").trim();
+  if (!who) return "not recorded";
+  return who + (e && e.ng ? " (authorising)" : "");
+};
+WA.SOLO_WHO_TIP =
+  "Every solo is authorised by somebody — this row was recorded before round 6 asked for the name, and the record cannot be saved again until it is supplied";
+WA.soloWhoHTML = function (e) {
+  const who = String((e && e.instructor) || "").trim();
+  if (!who) {
+    return `<span class="badge badge-bad" title="${esc(WA.SOLO_WHO_TIP)}">not recorded</span>`;
+  }
+  return esc(who) + (e && e.ng
+    ? ` <span class="k" title="A non-graded solo: this is the instructor who AUTHORISED the flight">(authorising)</span>`
+    : "");
+};
+/* the same fact as a PHRASE, for the running lines of the brief and the
+   instructor card, where a bare "w/" in front of "not recorded" reads wrong */
+WA.soloWhoPhrase = function (e) {
+  const who = String((e && e.instructor) || "").trim();
+  if (!who) {
+    return `<span class="k" title="${esc(WA.SOLO_WHO_TIP)}">instructor not recorded</span>`;
+  }
+  return `<span class="k">${e && e.ng ? "auth." : "w/"} ${esc(who)}</span>`;
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   EVALUATIONS FOLLOW THE SYLLABUS ORDER (round 6).
+   The stage is flown in one order and the checkrides sit in it at fixed
+   points, so a later checkride cannot have been flown while an earlier one
+   has not: such a record is a slip of the identity picker, and it corrupts
+   every per-checkride comparison the CO makes without ever looking wrong.
+   THE ORDER IS WA.EVAL_ORDER — the file order of flowchart2.json, i.e. the
+   printed Training Flow Chart. What is refused is a FILL out of order; an
+   empty fixed slot is always allowed, because that is the state all eight
+   start in.
+     → { recorded:{id:bool}, blockedBy:{id:firstMissingPredecessorId} }
+   MIRROR: db/schema.sql → the evaluations block of wa.validate_record. */
+WA.evalOrderState = function (rec) {
+  const list = (rec && Array.isArray(rec.evaluations)) ? rec.evaluations : [];
+  const recorded = {};
+  for (const e of list) {
+    if (!e || !WA.evalById(e.evaluation)) continue;
+    if (!WA.slotEmpty("evaluations", e)) recorded[e.evaluation] = true;
+  }
+  const blockedBy = {};
+  WA.EVAL_ORDER.forEach((id, k) => {
+    for (let j = 0; j < k; j++) {
+      if (!recorded[WA.EVAL_ORDER[j]]) { blockedBy[id] = WA.EVAL_ORDER[j]; break; }
+    }
+  });
+  return { recorded, blockedBy };
+};
+
 /* THE EIGHT CHECKRIDES AS FIXED ROWS (round 5) — always all eight, in
    syllabus order, whatever the record holds. `row` is the attempt that
    occupies the slot (the latest one, which is what every comparison uses),
