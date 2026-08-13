@@ -67,10 +67,10 @@ gh repo create wingsahead --public --source=. --push
 Μετά ενεργοποίησε το GitHub Pages (σερβίρει από το main branch):
 
 ```powershell
-gh api -X POST repos/{owner}/wingsahead/pages --input - <<< '{"source":{"branch":"main","path":"/"}}'
+'{"source":{"branch":"main","path":"/"}}' | gh api -X POST repos/Nickkoro21/wingsahead/pages --input -
 ```
 
-> Αν το παραπάνω δώσει σφάλμα (παλιότερο gh), κάν' το από το site:
+> Αν δώσει σφάλμα, κάν' το από το site (ίδιο αποτέλεσμα, 10 δευτερόλεπτα):
 > github.com → wingsahead → **Settings → Pages → Branch: main / (root) → Save**.
 
 Περίμενε 1–2 λεπτά. Η σελίδα σου είναι:
