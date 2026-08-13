@@ -17,6 +17,11 @@
 -- (wa.write_record / wa.write_proposal), and what they write is stamped
 -- entered_by='admin' server-side — the tag the whole UI renders as "CO".
 -- The owner saving their own form clears it.
+-- ROUND 5: the NFS reason (the printed causes of the ΦΜΠ, form Α0473),
+-- whole-number grades, category⇄flight-code agreement, FIXED SYLLABUS SLOTS
+-- for the solos and the eight checkrides (pending until flown — an unflown
+-- slot is a placeholder that counts for nothing and is never stamped), and
+-- the FPC/CEF trigger flight + evaluator (ex "by").
 -- ROUND 4b — WHAT they write, not what they submit: a CO save is DIFFED
 -- against the stored record (wa.stamp_record_diff), so adding one line to a
 -- student's 17 self-reported entries stamps that one line and leaves the other
@@ -239,6 +244,12 @@ begin
   perform wa.chk(jsonb_typeof(v) = 'boolean', p_where, 'must be true/false');
 end $$;
 
+-- GRADES ARE WHOLE NUMBERS (round 5). The gradesheet is scored in whole
+-- percentage points, so 62.5 is a typo or a half-remembered average, not a
+-- grade — and two students can only be compared on the same scale. Records
+-- written before this rule keep their fractional value (nothing is rewritten
+-- behind the owner's back); they are RENDERED rounded with the raw value in
+-- the tooltip, and the form asks for a whole number the next time it is saved.
 create or replace function wa.chk_grade(v jsonb, p_where text, p_required boolean)
 returns void language plpgsql immutable as $$
 declare n numeric;
@@ -250,6 +261,10 @@ begin
   perform wa.chk(jsonb_typeof(v) = 'number', p_where, 'grade must be a number');
   n := (v #>> '{}')::numeric;
   perform wa.chk(n >= 0 and n <= 100, p_where, 'grade out of range 0-100');
+  perform wa.chk(n = trunc(n), p_where,
+                 format('grades are whole numbers — %s is not accepted (round it, e.g. %s)',
+                        trim(trailing '.' from trim(trailing '0' from n::text)),
+                        round(n)::text));
 end $$;
 
 -- a row that came from a v1 record and could not be completed by the read-time
@@ -306,6 +321,64 @@ language sql immutable as $$
   select array['contact','instrument','formation','vfr_navigation','other']::text[]
 $$;
 
+-- ── NFS REASONS (round 5) — the printed causes of the ΦΜΠ ──────────────────
+-- Form Α0473 «ΦΥΛΛΟ ΜΗ ΠΤΗΣΗΣ ΜΑΘΗΤΗ – ΕΚΠΑΙΔΕΥΟΜΕΝΟΥ», 3-01/2025 ΔΑΕ
+-- ΚΕΦ.9, PDF page 219 (printed page 201): the six-line table «ΑΙΤΙΑ ΦΥΛΛΟΥ ΜΗ
+-- ΠΤΗΣΗΣ» — 1. ΑΠΟΤΥΧΙΑ ΣΕ ΕΡΩΤΗΜΑΤΟΛΟΓΙΟ · 2. ΑΠΟΤΥΧΙΑ ΣΕ ΠΡΟ ΠΤΗΣΗΣ
+-- ΕΝΗΜΕΡΩΣΗ · 3. ΑΠΟΤΥΧΙΑ ΣΕ ΠΤΗΣΗ · 4. ΑΠΟΤΥΧΙΑ ΣΕ F/S · 5. ΑΣΘΕΝΕΙΑ ·
+-- 6. ΑΛΛΗ ΑΙΤΙΑ (a blank line on the form → the free-text note here).
+-- MIRROR: app/app.js → WA.NFS_REASONS. Change one, change the other.
+create or replace function wa.nfs_reasons() returns text[]
+language sql immutable as $$
+  select array['questionnaire','briefing','flight','fs','illness','other']::text[]
+$$;
+
+-- one NFS entry, given the reason it did not use to carry. A row written
+-- before round 5 has only a free-text note — which is exactly the form's
+-- «6. ΑΛΛΗ ΑΙΤΙΑ:» line, so it becomes reason 'other' with the note kept
+-- verbatim. A row with neither reason nor note is flagged legacy: the form
+-- asks which of the six causes it was and nothing is guessed for it.
+create or replace function wa.nfs_reason_fix(e jsonb) returns jsonb
+language sql immutable as $$
+  select case
+    when jsonb_typeof(e) <> 'object' then e
+    when (e->>'reason') = any(wa.nfs_reasons()) then e
+    when (e->>'reason') is not null
+      then (e - 'reason') || jsonb_build_object('reason', null, 'legacy', true)
+    when nullif(trim(coalesce(e->>'note', '')), '') is not null
+      then e || jsonb_build_object('reason', 'other')
+    else e || jsonb_build_object('legacy', true)
+  end
+$$;
+
+-- ── THE FIXED SOLO SLOTS (round 5) ────────────────────────────────────────
+-- One slot per solo the stage prescribes — flow-chart Training Sections whose
+-- printed duration block says SOLO SORTIES > 0. F4301-06 prescribes TWO, so it
+-- carries two distinct slots. Solos are not a free list: the form draws exactly
+-- these rows, pending until flown, and nothing can add or remove one. An
+-- unforeseen extra solo is a slot-LESS entry (the "additional solo" path).
+-- MIRROR: app/items-catalog.js → WA_SOLO_SLOTS (generated from flowchart2.json).
+create or replace function wa.solo_slots() returns text[]
+language sql immutable as $$
+  select array['C4790-91-S1','C4801-04-S1','C4901-05-S1','C5201-04-S1',
+               'C5301-04-S1','F4301-06-S1','F4301-06-S2','F4501-03-S1']::text[]
+$$;
+
+-- the track a Phase II sortie code belongs to, from its letter — B/C contact,
+-- I instrument, F formation, N navigation (verified against all 133 codes of
+-- flowchart2.json). null = not a syllabus-shaped code, i.e. free text.
+-- This is what makes "category Instrument + flight C4302" impossible: the
+-- letter IS the track, so the pair contradicts itself and is refused.
+create or replace function wa.code_track(p_code text) returns text
+language sql immutable as $$
+  select case
+    when p_code is null or upper(p_code) !~ '^[BCIFN][0-9]{4}$' then null
+    when left(upper(p_code), 1) in ('B', 'C') then 'contact'
+    when left(upper(p_code), 1) = 'I' then 'instrument'
+    when left(upper(p_code), 1) = 'F' then 'formation'
+    else 'vfr_navigation' end
+$$;
+
 -- the nine sections of a v2 record, in form order.
 -- MIRROR: app/app.js → WA.COUNTED.
 create or replace function wa.sections() returns text[]
@@ -331,7 +404,7 @@ $$;
 create or replace function wa.entry_keys(p_sec text) returns text[]
 language sql immutable as $$
   select case p_sec
-    when 'nfs'          then array['date','note','legacy','entered_by']
+    when 'nfs'          then array['date','reason','note','legacy','entered_by']
     when 'sms'          then array['entrance_date','exit_date','note','legacy','entered_by']
     when 'fail'         then array['date','category','flight_code','items','instructor',
                                    'grade','pending','legacy','entered_by']
@@ -339,10 +412,33 @@ language sql immutable as $$
                                    'grade','pending','legacy','entered_by']
     when 'airsickness'  then array['date','instructor','phase','legacy','entered_by']
     when 'evaluations'  then array['date','evaluation','with','grade','pending','legacy','entered_by']
-    when 'solo_flights' then array['date','ng','grade','instructor','legacy','entered_by']
-    when 'fpc'          then array['date','by','result','grade','pending','legacy','entered_by']
-    when 'cef'          then array['date','by','result','grade','pending','legacy','entered_by']
+    when 'solo_flights' then array['slot','sortie','date','ng','grade','instructor','legacy','entered_by']
+    when 'fpc'          then array['date','flight_code','evaluator','result','grade','pending','legacy','entered_by']
+    when 'cef'          then array['date','flight_code','evaluator','result','grade','pending','legacy','entered_by']
     else array[]::text[] end
+$$;
+
+-- ── AN EMPTY FIXED SLOT (round 5) ─────────────────────────────────────────
+-- Solo flights and evaluations are FIXED syllabus rows: the eight solos the
+-- stage prescribes and the eight stage checkrides are present from the first
+-- day, pending until they are flown. A slot nobody has flown yet is a
+-- PLACEHOLDER, not an entry — it must not be counted, must not be stamped as
+-- "entered by the CO", and must not demand a date it cannot have.
+create or replace function wa.slot_empty(p_sec text, e jsonb) returns boolean
+language sql immutable as $$
+  select case
+    when jsonb_typeof(e) <> 'object' then false
+    when p_sec = 'solo_flights' then
+      (e->>'slot') is not null and (e->>'date') is null and (e->>'grade') is null
+      and (e->>'instructor') is null and (e->>'sortie') is null
+      and coalesce((case when jsonb_typeof(e->'ng') = 'boolean'
+                         then (e->>'ng')::boolean else false end), false) = false
+    when p_sec = 'evaluations' then
+      (e->>'evaluation') is not null and (e->>'date') is null and (e->>'grade') is null
+      and (e->>'with') is null
+      and coalesce((case when jsonb_typeof(e->'pending') = 'boolean'
+                         then (e->>'pending')::boolean else false end), false) = false
+    else false end
 $$;
 
 -- one entry, reduced to the keys its section allows (read-time repair)
@@ -392,7 +488,17 @@ begin
 
         if k = 'nfs' then
           perform wa.chk_date(e->'date', w || '.date', not wa.is_legacy(e));
+          -- the REASON is the printed cause of the ΦΜΠ (form Α0473, 3-01 ΚΕΦ.9)
+          perform wa.chk_text(e->'reason', w || '.reason', not wa.is_legacy(e), 40);
+          perform wa.chk(e->>'reason' is null or (e->>'reason') = any(wa.nfs_reasons()),
+                         w || '.reason',
+                         format('unknown NFS reason — the form prints %s',
+                                array_to_string(wa.nfs_reasons(), ' / ')));
           perform wa.chk_text(e->'note', w || '.note', false, 300);
+          perform wa.chk((e->>'reason') is distinct from 'other'
+                         or nullif(trim(coalesce(e->>'note', '')), '') is not null,
+                         w || '.note',
+                         'reason "Other" needs the cause written out (the ΑΛΛΗ ΑΙΤΙΑ line of the form)');
 
         elsif k = 'sms' then
           -- SMS entries can never be pending (round-3 ruling)
@@ -408,6 +514,21 @@ begin
           perform wa.chk(e->>'category' is null or (e->>'category') = any(wa.item_cats()),
                          w || '.category', 'unknown category');
           perform wa.chk_text(e->'flight_code', w || '.flight_code', false, 40);
+          -- CATEGORY ⇄ FLIGHT CODE (round 5). The picker only ever offers the
+          -- chosen track's sorties, so this can only arrive through free text
+          -- (or a hand-made payload). A syllabus-SHAPED code whose letter
+          -- contradicts the category is provably wrong — refused, by name.
+          -- A code the catalogue does not know (a re-numbered sortie, a
+          -- one-off) is accepted and shown marked "off-catalogue": the
+          -- syllabus data may lag reality, and a record must never become
+          -- unstorable because of it.
+          perform wa.chk(wa.code_track(e->>'flight_code') is null
+                         or (e->>'category') is null or (e->>'category') = 'other'
+                         or wa.code_track(e->>'flight_code') = (e->>'category'),
+                         w || '.flight_code',
+                         format('flight %s belongs to the %s track but this entry is filed under %s — choose the code from the chosen track''s list',
+                                upper(e->>'flight_code'),
+                                wa.code_track(e->>'flight_code'), e->>'category'));
           perform wa.chk_str_list(e->'items', w || '.items',
                                   case when wa.is_legacy(e) then 0 else 1 end, 40, 300);
           perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
@@ -420,7 +541,14 @@ begin
           perform wa.chk_text(e->'phase', w || '.phase', false, 300);
 
         elsif k = 'evaluations' then
-          perform wa.chk_entry_date(e, w);
+          -- FIXED SLOT RULE (round 5): the eight checkrides are always present.
+          -- A checkride that has not been flown yet is an identity and nothing
+          -- else — it cannot carry the date it does not have. The moment it
+          -- carries anything (a date, a grade, an evaluator, a pending tick)
+          -- it is a flown evaluation and the date is required again.
+          perform wa.chk_bool(e->'legacy', w || '.legacy');
+          perform wa.chk_date(e->'date', w || '.date',
+                              not wa.is_legacy(e) and not wa.slot_empty(k, e));
           perform wa.chk_text(e->'evaluation', w || '.evaluation', not wa.is_legacy(e), 20);
           perform wa.chk(e->>'evaluation' is null or (e->>'evaluation') = any(wa.eval_ids()),
                          w || '.evaluation', 'unknown evaluation — expected one of the eight checkrides');
@@ -429,23 +557,50 @@ begin
           perform wa.chk_bool(e->'pending', w || '.pending');
 
         elsif k = 'solo_flights' then
-          perform wa.chk_entry_date(e, w);
+          -- FIXED SLOT RULE (round 5): the solos of the stage are the syllabus
+          -- slots, present from day one and pending until flown. `slot` names
+          -- which one; a slot-LESS entry is the "additional solo" escape hatch
+          -- for a solo the syllabus did not foresee.
+          perform wa.chk_bool(e->'legacy', w || '.legacy');
+          perform wa.chk_text(e->'slot', w || '.slot', false, 40);
+          perform wa.chk((e->>'slot') is null or (e->>'slot') = any(wa.solo_slots()),
+                         w || '.slot',
+                         'unknown solo slot — the solo rows are the fixed slots of the syllabus');
+          perform wa.chk_text(e->'sortie', w || '.sortie', false, 20);
+          perform wa.chk((e->>'sortie') is null or wa.code_track(e->>'sortie') is not null,
+                         w || '.sortie', 'the solo sortie must be a syllabus code (e.g. C4802)');
+          perform wa.chk((e->>'sortie') is null or (e->>'slot') is null
+                         or left(upper(e->>'sortie'), 1) = left(e->>'slot', 1),
+                         w || '.sortie',
+                         'this sortie does not belong to the Training Section of that solo slot');
           perform wa.chk(not (e ? 'graded'), w || '.graded',
                          'replaced — send "ng": true for a non-graded solo');
           perform wa.chk_bool(e->'ng', w || '.ng');
-          if coalesce(case when jsonb_typeof(e->'ng') = 'boolean'
-                           then (e->>'ng')::boolean else false end, false) then
-            perform wa.chk(e->'grade' is null or jsonb_typeof(e->'grade') = 'null',
-                           w || '.grade', 'a non-graded (NG) solo carries no grade');
-            perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
-          else
-            perform wa.chk_grade(e->'grade', w || '.grade', not wa.is_legacy(e));
-            perform wa.chk_text(e->'instructor', w || '.instructor', not wa.is_legacy(e), 200);
+          if not wa.slot_empty(k, e) then
+            perform wa.chk_date(e->'date', w || '.date', not wa.is_legacy(e));
+            if coalesce(case when jsonb_typeof(e->'ng') = 'boolean'
+                             then (e->>'ng')::boolean else false end, false) then
+              perform wa.chk(e->'grade' is null or jsonb_typeof(e->'grade') = 'null',
+                             w || '.grade', 'a non-graded (NG) solo carries no grade');
+              perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
+            else
+              perform wa.chk_grade(e->'grade', w || '.grade', not wa.is_legacy(e));
+              perform wa.chk_text(e->'instructor', w || '.instructor', not wa.is_legacy(e), 200);
+            end if;
           end if;
 
         elsif k in ('fpc', 'cef') then
+          -- round 5: the person is the EVALUATOR (DO / Squadron CO / an
+          -- instructor), and the entry names the STAGE FLIGHT that triggered it.
+          perform wa.chk(not (e ? 'by'), w || '.by',
+                         'renamed — the person who conducted it is the evaluator, send it as "evaluator"');
           perform wa.chk_entry_date(e, w);
-          perform wa.chk_text(e->'by', w || '.by', false, 200);
+          perform wa.chk_text(e->'flight_code', w || '.flight_code', false, 40);
+          perform wa.chk((e->>'flight_code') is null
+                         or wa.code_track(e->>'flight_code') is not null
+                         or length(trim(e->>'flight_code')) > 0,
+                         w || '.flight_code', 'the trigger flight cannot be blank');
+          perform wa.chk_text(e->'evaluator', w || '.evaluator', false, 200);
           perform wa.chk_text(e->'result', w || '.result', false, 300);
           perform wa.chk_grade(e->'grade', w || '.grade', false);
           perform wa.chk_bool(e->'pending', w || '.pending');
@@ -468,6 +623,17 @@ begin
                    k, array_to_string(wa.entry_keys(k), ', ')));
         end loop;
       end loop;
+
+      -- ONE ROW PER SOLO SLOT. The section is a fixed list; two rows claiming
+      -- the same slot would make "the C4801-04 solo" ambiguous and let the
+      -- fixed list grow through the back door.
+      if k = 'solo_flights' then
+        perform wa.chk((select count(*) = count(distinct t.slot) from (
+                          select e2->>'slot' as slot
+                          from jsonb_array_elements(p->k) e2
+                          where jsonb_typeof(e2) = 'object' and (e2->>'slot') is not null) t),
+                       k, 'each solo slot may appear only once — the solo rows are fixed');
+      end if;
     end if;
   end loop;
 end $$;
@@ -500,6 +666,10 @@ declare
   cnt int;
   dts jsonb;
   k text;
+  taken text[];
+  freeslots text[];
+  ord int[];
+  idx int;
 begin
   if p is null or jsonb_typeof(p) <> 'object' then return '{}'::jsonb; end if;
 
@@ -510,6 +680,7 @@ begin
     for i in 0 .. jsonb_array_length(p->'nfs') - 1 loop
       e := p->'nfs'->i;
       if jsonb_typeof(e) <> 'object' then continue; end if;
+      e := wa.nfs_reason_fix(e);
       if not wa.is_iso_date(e->>'date') then e := e || jsonb_build_object('legacy', true); end if;
       arr := arr || jsonb_build_array(e);
     end loop;
@@ -522,13 +693,14 @@ begin
     n := 0;
     for i in 0 .. jsonb_array_length(dts) - 1 loop
       if wa.is_iso_date(dts->>i) then
-        arr := arr || jsonb_build_array(jsonb_build_object('date', dts->i));
+        arr := arr || jsonb_build_array(
+          wa.nfs_reason_fix(jsonb_build_object('date', dts->i)));
         n := n + 1;
       end if;
     end loop;
     while n < cnt loop
       arr := arr || jsonb_build_array(jsonb_build_object(
-        'date', null, 'legacy', true,
+        'date', null, 'legacy', true, 'reason', 'other',
         'note', 'imported from the old NFS counter — the date was never recorded'));
       n := n + 1;
     end loop;
@@ -603,7 +775,11 @@ begin
       if (e->>'evaluation') is null or not ((e->>'evaluation') = any(wa.eval_ids())) then
         e := e - 'evaluation' || jsonb_build_object('evaluation', null, 'legacy', true);
       end if;
-      if not wa.is_iso_date(e->>'date') then e := e || jsonb_build_object('legacy', true); end if;
+      -- an identified checkride with nothing in it is a FIXED SLOT nobody has
+      -- flown yet (round 5) — not an imported entry missing its date
+      if not wa.is_iso_date(e->>'date') and not wa.slot_empty('evaluations', e) then
+        e := e || jsonb_build_object('legacy', true);
+      end if;
       arr := arr || jsonb_build_array(e);
     end loop;
     o := o || jsonb_build_object('evaluations', arr);
@@ -622,11 +798,36 @@ begin
       end if;
       e := e - 'graded';
       if (e->>'ng')::boolean then e := e || jsonb_build_object('grade', null); end if;
-      if not wa.is_iso_date(e->>'date')
-         or (not (e->>'ng')::boolean and coalesce(jsonb_typeof(e->'grade'), '-') <> 'number') then
+      if not wa.slot_empty('solo_flights', e)
+         and (not wa.is_iso_date(e->>'date')
+              or (not (e->>'ng')::boolean and coalesce(jsonb_typeof(e->'grade'), '-') <> 'number')) then
         e := e || jsonb_build_object('legacy', true);
       end if;
       arr := arr || jsonb_build_array(e);
+    end loop;
+
+    -- ROUND 5 — SOLOS BECOME THE SYLLABUS SLOTS. A solo recorded before this
+    -- rule names no slot, so it is placed by the only ordering the syllabus
+    -- gives: the solo slots come in stage order (1st SOLO → C48XX → C49XX →
+    -- C52XX → C53XX → F43XX ×2 → F45XX), so the earliest recorded solo takes
+    -- the earliest free slot. Deterministic (same record → same placement),
+    -- and the student can move any of them with the slot's sortie picker.
+    -- A solo beyond the eight, or one with no date to order it by, stays
+    -- slot-less: the "additional solo" path, which is exactly what it is.
+    taken := coalesce(array(select e2->>'slot' from jsonb_array_elements(arr) e2
+                            where (e2->>'slot') is not null), array[]::text[]);
+    freeslots := array(select s from unnest(wa.solo_slots()) s where not (s = any(taken)));
+    ord := coalesce(array(
+      select (t.ord - 1)::int
+      from jsonb_array_elements(arr) with ordinality t(e2, ord)
+      where (t.e2->>'slot') is null and wa.is_iso_date(t.e2->>'date')
+      order by (t.e2->>'date'), t.ord), array[]::int[]);
+    n := 0;
+    foreach idx in array ord loop
+      exit when n >= coalesce(array_length(freeslots, 1), 0);
+      n := n + 1;
+      arr := jsonb_set(arr, array[idx::text],
+                       (arr->idx) || jsonb_build_object('slot', freeslots[n]));
     end loop;
     o := o || jsonb_build_object('solo_flights', arr);
   end if;
@@ -652,9 +853,17 @@ begin
     e := '[]'::jsonb;
     for i in 0 .. jsonb_array_length(arr) - 1 loop
       if jsonb_typeof(arr->i) <> 'object' then continue; end if;
+      dts := arr->i;
+      -- round 5: "by" → "evaluator" (DO / Squadron CO / an instructor). The
+      -- superseded key is read for ever; nothing is written under it again.
+      if (dts ? 'by') then
+        dts := (dts - 'by') || case when (dts->>'evaluator') is null
+                                    then jsonb_build_object('evaluator', dts->'by')
+                                    else '{}'::jsonb end;
+      end if;
       e := e || jsonb_build_array(
-        case when wa.is_iso_date(arr->i->>'date') then arr->i
-             else arr->i || jsonb_build_object('legacy', true) end);
+        case when wa.is_iso_date(dts->>'date') then dts
+             else dts || jsonb_build_object('legacy', true) end);
     end loop;
     o := o || jsonb_build_object(k, e);
   end loop;
@@ -703,6 +912,7 @@ language sql immutable as $$
 $$;
 
 -- how many entries of a record were entered BY THE CO on the owner's behalf
+-- (an unflown fixed slot is a placeholder, not an entry — round 5)
 create or replace function wa.co_entry_count(p jsonb) returns int
 language sql immutable as $$
   select coalesce((
@@ -710,13 +920,17 @@ language sql immutable as $$
     from jsonb_each(coalesce(p, '{}'::jsonb)) s(key, val)
     cross join lateral jsonb_array_elements(
       case when jsonb_typeof(val) = 'array' then val else '[]'::jsonb end) e
-    where jsonb_typeof(e) = 'object' and (e->>'entered_by') = 'admin'), 0)
+    where jsonb_typeof(e) = 'object' and (e->>'entered_by') = 'admin'
+      and not wa.slot_empty(s.key, e)), 0)
 $$;
 
 -- how many entries the record carries in total — the DENOMINATOR behind
 -- "17 self-reported + 1 entered by the CO". Without it the dashboard cannot
 -- tell a record the CO wrote from a record the CO merely added one line to
 -- (round-4b: the two used to look identical, and both read as "CO record").
+-- ROUND 5: a fixed slot nobody has flown yet counts for nothing here either —
+-- otherwise every record would arrive carrying 16 "entries" it does not have,
+-- and "1 of 18 entered by the CO" would stop being true.
 create or replace function wa.entry_count(p jsonb) returns int
 language sql immutable as $$
   select coalesce((
@@ -724,7 +938,7 @@ language sql immutable as $$
     from jsonb_each(coalesce(p, '{}'::jsonb)) s(key, val)
     cross join lateral jsonb_array_elements(
       case when jsonb_typeof(val) = 'array' then val else '[]'::jsonb end) e
-    where jsonb_typeof(e) = 'object'), 0)
+    where jsonb_typeof(e) = 'object' and not wa.slot_empty(s.key, e)), 0)
 $$;
 
 -- ── the RECORD-level stamp is DERIVED, never authored (round 4b) ───────────
@@ -840,6 +1054,11 @@ begin
         used[hit + 1] := true;
         e := case when (od->hit->>'entered_by') is null then e - 'entered_by'
                   else e || jsonb_build_object('entered_by', od->hit->'entered_by') end;
+      elsif wa.slot_empty(k, e) then
+        -- an unflown fixed slot is a placeholder the FORM draws, not something
+        -- the CO "entered". Stamping it would tag the eight checkrides and the
+        -- eight solos of every record the CO ever opens (round 5).
+        e := e - 'entered_by';
       else
         e := e || jsonb_build_object('entered_by', 'admin');
       end if;

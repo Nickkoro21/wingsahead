@@ -62,24 +62,31 @@ WA.renderInstructor = async function (view, me, opts) {
        CO" is only true when ALL of it was; one CO addition to a student's own
        record is an addition, and the badge says so */
     const src = WA.coSource(rec, s.entered_by);
-    const evals = WA.evalRows(rec).slice().sort((a, b) => a.order - b.order);
-    const solos = Array.isArray(rec.solo_flights) ? rec.solo_flights : [];
-    const evLine = evals.length
-      ? evals.map((e) => `${esc(WA.evalShort(e.id))} <b>${WA.pct(e.grade)}</b>` +
-          (e.date ? ` (${esc(fmtD(e.date))})` : "") + (e.pending ? " ⏳" : "") + WA.coTag(e)).join(" · ")
-      : "none reported";
-    const soLine = solos.length
-      ? solos.map((e) => esc(fmtD(e.date)) +
-          (e.ng ? ` — <span class="k">NG</span>` : ` — <b>${WA.pct(e.grade)}</b>`) + WA.coTag(e)).join(" · ")
-      : "none reported";
+    /* ROUND 5 — the eight checkrides and the eight solos are FIXED syllabus
+       rows: the card shows every checkride, saying which are not flown yet,
+       and counts the solos against the slots the syllabus prescribes. */
+    const slots = WA.evalSlotRows(rec);
+    const solos = WA.filled("solo_flights", rec.solo_flights);
+    const nSlots = WA.soloSlots().length;
+    const doneSlots = solos.filter((e) => e.slot && WA.soloSlot(e.slot)).length;
+    const evLine = slots.slots.map((sl) => sl.row
+      ? `${esc(sl.def.id)} <b>${WA.pct(sl.row.grade)}</b>` +
+        (sl.row.date ? ` (${esc(fmtD(sl.row.date))})` : "") + (sl.row.pending ? " ⏳" : "") + WA.coTag(sl.row)
+      : `<span class="k">${esc(sl.def.id)} —</span>`).join(" · ") +
+      (slots.extras.length ? ` · <span class="k">${slots.extras.length} imported, not identified</span>` : "");
+    const soLine = `<span class="k">${doneSlots} of ${nSlots} syllabus solos flown${
+      solos.length > doneSlots ? " · " + (solos.length - doneSlots) + " additional" : ""}</span>` +
+      (solos.length ? " — " + solos.map((e) => esc(fmtD(e.date)) +
+          (e.ng ? ` — <span class="k">NG</span>` : ` — <b>${WA.pct(e.grade)}</b>`) + WA.coTag(e)).join(" · ") : "");
     /* one line per entry — items inside an entry are separated by · , so the
        entries themselves must not be, or a multi-item FAIL reads as three */
     const failLine = ["fail", "almost_good"].map((k) => {
       const list = Array.isArray(rec[k]) ? rec[k] : [];
       if (!list.length) return "";
       return `<div class="line">${esc(WA.secLabel(k))}:` + list.map((e) =>
-        `<div class="sub">${esc(fmtD(e.date))}${e.flight_code ? " <b>" + esc(e.flight_code) + "</b>" : ""}
-          ${esc(WA.itemsLabel(e))}${e.grade === null || e.grade === undefined ? "" : ` <b>${WA.pct(e.grade)}</b>`}
+        `<div class="sub">${esc(fmtD(e.date))}${e.flight_code ? " <b>" + WA.sortieCell(e.category, e.flight_code) + "</b>" : ""}
+          ${esc(WA.itemsLabel(e))}${(e.items || []).length > 1 ? ` <span class="k">(${(e.items || []).length} items)</span>` : ""}${
+          e.grade === null || e.grade === undefined ? "" : ` <b>${WA.pct(e.grade)}</b>`}
           ${e.instructor ? `<span class="k">w/ ${esc(e.instructor)}</span>` : ""}
           ${e.pending ? "⏳" : ""}${WA.coTag(e)}</div>`).join("") + `</div>`;
     }).join("");

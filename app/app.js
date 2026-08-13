@@ -358,6 +358,43 @@ WA.EVALUATIONS = [
   { id: "N4690", cat: "vfr_navigation", order: 8, name: "Final Navigation checkride" },
 ];
 
+/* ══════════════════════════════════════════════════════════════════════════
+   NFS REASONS — the printed causes of the ΦΜΠ (round 5).
+   SOURCE: 3-01/2025 ΔΑΕ, ΚΕΦ.9, form **Α0473 «ΦΥΛΛΟ ΜΗ ΠΤΗΣΗΣ ΜΑΘΗΤΗ –
+   ΕΚΠΑΙΔΕΥΟΜΕΝΟΥ»**, PDF page 219 = printed page 201 — the table headed
+   «Α/Α ΑΙΤΙΑ ΦΥΛΛΟΥ ΜΗ ΠΤΗΣΗΣ / Check (√)». Six printed lines, in order;
+   line 6 is a blank «ΑΛΛΗ ΑΙΤΙΑ:» which is the free-text note here.
+   (The form is listed in the ΚΕΦ.9 forms table, PDF 182 / printed 164, and
+   the obligation to raise one is 3-01 ΚΕΦ.2 §11, PDF 39 / printed 21 —
+   digitised as fail-83 in FDMS data/requirements/failure_procedures.json.)
+   MIRROR: db/schema.sql → wa.nfs_reasons(). Change one, change the other.
+     id — stored in nfs[i].reason      el — the printed Greek, verbatim
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.NFS_REASONS = [
+  { id: "questionnaire", label: "Failed a written questionnaire", el: "ΑΠΟΤΥΧΙΑ ΣΕ ΕΡΩΤΗΜΑΤΟΛΟΓΙΟ" },
+  { id: "briefing", label: "Failed the pre-flight briefing", el: "ΑΠΟΤΥΧΙΑ ΣΕ ΠΡΟ ΠΤΗΣΗΣ ΕΝΗΜΕΡΩΣΗ" },
+  { id: "flight", label: "Failed the flight", el: "ΑΠΟΤΥΧΙΑ ΣΕ ΠΤΗΣΗ" },
+  { id: "fs", label: "Failed the simulator (F/S)", el: "ΑΠΟΤΥΧΙΑ ΣΕ F/S" },
+  { id: "illness", label: "Illness", el: "ΑΣΘΕΝΕΙΑ" },
+  { id: "other", label: "Other cause…", el: "ΑΛΛΗ ΑΙΤΙΑ" },
+];
+WA.nfsReason = function (id) {
+  return WA.NFS_REASONS.find((r) => r.id === id) || null;
+};
+/* the reason on its own — for a table that prints the note in its own column */
+WA.nfsReasonShort = function (e) {
+  const r = WA.nfsReason(e && e.reason);
+  return r ? r.label : "—";
+};
+/* the reason as one phrase — for a line that has no room for a note column:
+   "Other cause…" alone says nothing, so the written cause replaces it */
+WA.nfsReasonLabel = function (e) {
+  const r = WA.nfsReason(e && e.reason);
+  if (!r) return "—";
+  const note = String((e && e.note) || "").trim();
+  return r.id === "other" ? (note || r.label) : r.label;
+};
+
 /* the chips of the per-category plot — the four tracks + the FPC section */
 WA.EVAL_CATS = [
   { id: "contact", label: "Contact" },
@@ -388,16 +425,20 @@ WA.evalsOfCat = function (cat) {
    SECTION VOCABULARY — one place for the label + the tooltip that sits on
    every section header (round-2 R6 · round-3 W5 renames).
    ══════════════════════════════════════════════════════════════════════════ */
+/* who may conduct an FPC / CEF, before the squadron's own instructors: the
+   two standing appointments of the unit (round 5). Free text stays accepted. */
+WA.EVALUATOR_ROLES = ["DO", "Squadron CO"];
+
 WA.SECTIONS_META = {
-  nfs:          { label: "NFS", tip: "NFS = Not Fit to Solo / Δεν πέταξε ως προγραμματίστηκε — one dated entry per event; the count is derived." },
+  nfs:          { label: "NFS", tip: "NFS = Φύλλο μη Πτήσης (ΦΜΠ) — one dated entry per event, with the reason printed on form Α0473 (3-01 ΚΕΦ.9): failed questionnaire / failed pre-flight briefing / failed flight / failed F/S / illness / other cause. The count is derived." },
   sms:          { label: "SMS", tip: "SMS = Safety Management System — one entry per entrance, with the exit date when it closes." },
   airsickness:  { label: "Airsickness", tip: "One dated entry per airsickness event — with whom it happened and, optionally, the phase of flight." },
   fail:         { label: "FAIL", tip: "FAIL = a syllabus item graded below the desired performance — the flight, the items, the instructor and the grade." },
   almost_good:  { label: "ALMOST GOOD", tip: "ALMOST GOOD = an item that only just reached the desired performance — same detail as a FAIL." },
-  evaluations:  { label: "Evaluations", tip: "The eight checkrides of the stage — each entry names which checkride it was, so students can be compared on the same flight." },
-  solo_flights: { label: "Solo flights", tip: "One dated entry per solo. A solo is either graded (0-100 %) or NG — non-graded." },
-  fpc:          { label: "FPC", tip: "FPC = Δοκιμή Προόδου (flight progress check) — flown after failures, so fewer is better." },
-  cef:          { label: "CEF", tip: "CEF = Εξέταση Καταλληλότητας (evaluation with a Squadron Evaluator) — flown after failures, so fewer is better." },
+  evaluations:  { label: "Evaluations", tip: "The eight checkrides of the stage — fixed rows, present from day one and pending until flown, so every student is compared on the same flight." },
+  solo_flights: { label: "Solo flights", tip: "The solos the syllabus prescribes — eight fixed slots (F4301-06 carries two), pending until flown. A flown solo is graded 0-100 % or NG (non-graded). An unforeseen solo is recorded as an additional solo." },
+  fpc:          { label: "FPC", tip: "FPC = Δοκιμή Προόδου (flight progress check) — flown after failures, so fewer is better. Each entry names the stage flight that triggered it and the evaluator who conducted it." },
+  cef:          { label: "CEF", tip: "CEF = Εξέταση Καταλληλότητας (evaluation with a Squadron Evaluator) — flown after failures, so fewer is better. Each entry names the stage flight that triggered it and the evaluator who conducted it." },
 };
 WA.secLabel = function (k) { return (WA.SECTIONS_META[k] || {}).label || k; };
 WA.secTip = function (k) { return (WA.SECTIONS_META[k] || {}).tip || ""; };
@@ -417,7 +458,22 @@ WA.tipDot = function (k) {
 WA.pct = function (v) {
   if (v === null || v === undefined || v === "") return "—";
   const n = Number(v);
-  return isFinite(n) ? esc(v) + "%" : "—";
+  if (!isFinite(n)) return "—";
+  /* ROUND 5 — grades are whole numbers. A fractional grade can only be a
+     record written before that rule: it is shown ROUNDED, and the raw value
+     stays one hover away. Nothing is rewritten in storage behind the owner's
+     back; the form asks for a whole number the next time it is saved. */
+  if (n !== Math.round(n)) {
+    const tip = "Stored as " + n + "% — grades are whole numbers, so it is shown rounded";
+    return `<span class="rnd" title="${esc(tip)}">${esc(Math.round(n))}%</span>`;
+  }
+  return esc(n) + "%";
+};
+/* the same grade for CSV / plain text: the RAW stored value, never rounded */
+WA.pctRaw = function (v) {
+  if (v === null || v === undefined || v === "") return "";
+  const n = Number(v);
+  return isFinite(n) ? n : "";
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -447,7 +503,7 @@ WA.coWord = function (e) { return WA.isCO(e) ? "CO" : "self"; };
 WA.coSource = function (rec, stamp) {
   const r = rec || {};
   let total = 0;
-  for (const k of WA.COUNTED) total += (Array.isArray(r[k]) ? r[k] : []).length;
+  for (const k of WA.COUNTED) total += WA.filled(k, r[k]).length;
   const n = WA.coEntries(r).length;   /* the one place CO entries are counted */
   const all = total > 0 ? n === total : stamp === "admin";
   const some = n > 0 && !all;
@@ -510,11 +566,87 @@ WA.sorties = function (catId) {
   const s = (typeof WA_SORTIES === "object" && WA_SORTIES) ? WA_SORTIES[catId] : null;
   return Array.isArray(s) ? s : [];
 };
+/* every stage sortie, syllabus order per track — the FPC / CEF trigger picker */
+WA.TRACKS = ["contact", "instrument", "formation", "vfr_navigation"];
+WA.allSorties = function () {
+  if (WA._allSorties) return WA._allSorties;
+  const out = [];
+  for (const t of WA.TRACKS) for (const s of WA.sorties(t)) out.push({ ...s, t });
+  WA._allSorties = out;
+  return out;
+};
+WA.sortieOf = function (code) {
+  if (!code) return null;
+  if (!WA._sortieIx) {
+    WA._sortieIx = {};
+    for (const s of WA.allSorties()) WA._sortieIx[s.c] = s;
+  }
+  return WA._sortieIx[String(code).toUpperCase()] || null;
+};
+/* the track a syllabus code belongs to, from its letter (B/C contact,
+   I instrument, F formation, N navigation) — null for free text.
+   MIRROR: db/schema.sql → wa.code_track. This is what makes the pair
+   "category Instrument + flight C4302" impossible instead of merely unlikely. */
+WA.codeTrack = function (code) {
+  const c = String(code || "").toUpperCase();
+  if (!/^[BCIFN]\d{4}$/.test(c)) return null;
+  return { B: "contact", C: "contact", I: "instrument", F: "formation", N: "vfr_navigation" }[c[0]];
+};
+/* is this code one the generated catalogue knows? (an unknown code is
+   accepted — the syllabus data can lag reality — but it is shown marked) */
+WA.sortieKnown = function (catId, code) {
+  if (!code) return true;
+  const c = String(code).toUpperCase();
+  return catId ? WA.sorties(catId).some((s) => s.c === c) : !!WA.sortieOf(c);
+};
 /* "C4302 — Contact — advanced handling (simulator)" · free text as typed */
 WA.sortieLabel = function (catId, code) {
   if (!code) return "—";
-  const hit = WA.sorties(catId).find((s) => s.c === code);
-  return hit ? hit.c + " — " + hit.n + (hit.b === "fs" ? " (simulator)" : "") : String(code);
+  const hit = (catId ? WA.sorties(catId).find((s) => s.c === code) : null) || WA.sortieOf(code);
+  return hit ? hit.c + " — " + hit.n + (hit.b === "fs" ? " (simulator)" : "") +
+                 (hit.k ? " — checkride" : "")
+             : String(code) + " (not in the syllabus catalogue)";
+};
+/* the flight-code cell every table prints: the code, its full name in the
+   tooltip, and a marker when the catalogue does not know it */
+WA.sortieCell = function (catId, code) {
+  if (!code) return "—";
+  const known = WA.sortieKnown(catId, code);
+  return `<span title="${esc(WA.sortieLabel(catId, code))}">${esc(code)}</span>` +
+    (known ? "" : `<span class="offcat" title="This code is not in the syllabus catalogue — typed as free text">*</span>`);
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE FIXED SOLO SLOTS (round 5) — one row per solo the stage prescribes.
+   WA_SOLO_SLOTS is generated from the FDMS flow chart: every Training Section
+   whose printed duration block says SOLO SORTIES > 0 contributes that many
+   slots, so F4301-06 (SORTIES/HOURS SOLO: 2/2,4) carries TWO. The Solo
+   section renders exactly these, always, pending until flown — there is no
+   + Add and no remove. A solo the syllabus did not foresee is recorded as a
+   slot-LESS "additional solo".
+   MIRROR: db/schema.sql → wa.solo_slots().
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.soloSlots = function () {
+  return (typeof WA_SOLO_SLOTS !== "undefined" && Array.isArray(WA_SOLO_SLOTS)) ? WA_SOLO_SLOTS : [];
+};
+WA.soloSlot = function (id) {
+  return WA.soloSlots().find((s) => s.id === id) || null;
+};
+/* "C4801-04 — solo" · "C4790-91 — 1st SOLO (C4791)" · "F4301-06 — solo 2 of 2" */
+WA.soloSlotLabel = function (id) {
+  const s = WA.soloSlot(id);
+  if (!s) return id ? String(id) : "Additional solo";
+  const one = s.codes.length === 1 ? " (" + s.codes[0] + ")" : "";
+  return s.sec + " — " + (s.req ? "1st SOLO" : "solo") +
+         (s.of > 1 ? " " + s.n + " of " + s.of : "") + one;
+};
+WA.soloSlotTip = function (id) {
+  const s = WA.soloSlot(id);
+  if (!s) return "A solo the syllabus does not prescribe — recorded as an additional solo";
+  return "Training Section " + s.sec + " — " + s.name +
+         " · the syllabus prescribes " + s.of + " solo" + (s.of === 1 ? "" : "s") +
+         " here" + (s.req ? " (required)" : "") +
+         " · candidate sortie" + (s.codes.length === 1 ? "" : "s") + ": " + s.codes.join(", ");
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -534,19 +666,43 @@ WA.NFS_IMPORT_NOTE = "imported from the old NFS counter — the date was never r
    instead of stored, and a flag the form cannot show ("pending" on an NFS row)
    can never enter the record (round-4 W3a). */
 WA.ENTRY_KEYS = {
-  nfs:          ["date", "note", "legacy", "entered_by"],
+  nfs:          ["date", "reason", "note", "legacy", "entered_by"],
   sms:          ["entrance_date", "exit_date", "note", "legacy", "entered_by"],
   fail:         ["date", "category", "flight_code", "items", "instructor", "grade", "pending", "legacy", "entered_by"],
   almost_good:  ["date", "category", "flight_code", "items", "instructor", "grade", "pending", "legacy", "entered_by"],
   airsickness:  ["date", "instructor", "phase", "legacy", "entered_by"],
   evaluations:  ["date", "evaluation", "with", "grade", "pending", "legacy", "entered_by"],
-  solo_flights: ["date", "ng", "grade", "instructor", "legacy", "entered_by"],
-  fpc:          ["date", "by", "result", "grade", "pending", "legacy", "entered_by"],
-  cef:          ["date", "by", "result", "grade", "pending", "legacy", "entered_by"],
+  solo_flights: ["slot", "sortie", "date", "ng", "grade", "instructor", "legacy", "entered_by"],
+  fpc:          ["date", "flight_code", "evaluator", "result", "grade", "pending", "legacy", "entered_by"],
+  cef:          ["date", "flight_code", "evaluator", "result", "grade", "pending", "legacy", "entered_by"],
 };
 /* only these sections may carry `pending` — exactly where the form draws the
    tick box, so a pending badge on the CO's dashboard can always be cleared */
 WA.PENDING_SECTIONS = ["fail", "almost_good", "evaluations", "fpc", "cef"];
+
+/* ── AN EMPTY FIXED SLOT (round 5) ─────────────────────────────────────────
+   The eight solos and the eight checkrides are rows the SYLLABUS puts in the
+   record, not events the student reported. Until one is flown it is a
+   placeholder: it is never counted, never exported as an entry and never
+   stamped "entered by the CO".
+   MIRROR: db/schema.sql → wa.slot_empty. */
+WA.slotEmpty = function (sec, e) {
+  if (!e || typeof e !== "object") return false;
+  const empty = (v) => v === null || v === undefined || v === "";
+  if (sec === "solo_flights") {
+    return !empty(e.slot) && empty(e.date) && empty(e.grade) &&
+           empty(e.instructor) && empty(e.sortie) && !e.ng;
+  }
+  if (sec === "evaluations") {
+    return !empty(e.evaluation) && empty(e.date) && empty(e.grade) &&
+           empty(e.with) && !e.pending;
+  }
+  return false;
+};
+/* the entries of one section that actually happened (slots excluded) */
+WA.filled = function (sec, list) {
+  return (Array.isArray(list) ? list : []).filter((e) => !WA.slotEmpty(sec, e));
+};
 
 WA.migrateRecord = function (rec) {
   const src = (rec && typeof rec === "object") ? rec : {};
@@ -555,14 +711,32 @@ WA.migrateRecord = function (rec) {
   const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ""));
 
   /* NFS — v1 { count, dates[] } → dated entries + one placeholder per
-     counted-but-undated event (nothing is lost, nothing is re-typed). */
+     counted-but-undated event (nothing is lost, nothing is re-typed).
+     ROUND 5: every entry also carries the printed REASON of the ΦΜΠ. A row
+     written before that has only a note — which is the form's «ΑΛΛΗ ΑΙΤΙΑ»
+     line — so it becomes reason "other" with the note kept verbatim; a row
+     with neither is flagged and the form asks which of the six causes it was.
+     MIRROR: db/schema.sql → wa.nfs_reason_fix. */
+  const reasonFix = (e) => {
+    const o = { ...e };
+    if (WA.nfsReason(o.reason)) return o;
+    if (o.reason !== null && o.reason !== undefined && o.reason !== "") {
+      o.reason = null; o.legacy = true; return o;
+    }
+    if (String(o.note || "").trim()) { o.reason = "other"; return o; }
+    o.legacy = true;
+    return o;
+  };
   if (Array.isArray(src.nfs)) {
-    out.nfs = arr(src.nfs).map((e) => (isDate(e.date) ? e : { ...e, legacy: true }));
+    out.nfs = arr(src.nfs).map(reasonFix)
+      .map((e) => (isDate(e.date) ? e : { ...e, legacy: true }));
   } else if (src.nfs && typeof src.nfs === "object") {
     const dates = Array.isArray(src.nfs.dates) ? src.nfs.dates.filter(isDate) : [];
     const cnt = Math.max(0, Math.floor(num(src.nfs.count)));
-    out.nfs = dates.map((d) => ({ date: d }));
-    while (out.nfs.length < cnt) out.nfs.push({ date: "", legacy: true, note: WA.NFS_IMPORT_NOTE });
+    out.nfs = dates.map((d) => reasonFix({ date: d }));
+    while (out.nfs.length < cnt) {
+      out.nfs.push({ date: "", legacy: true, reason: "other", note: WA.NFS_IMPORT_NOTE });
+    }
   } else out.nfs = [];
 
   /* SMS — the pending flag is gone; if it was set, keep the fact as a note */
@@ -594,11 +768,13 @@ WA.migrateRecord = function (rec) {
     isDate(e.date) ? e : { ...e, legacy: true });
 
   /* EVALUATIONS — v1 rows carry no identity; they stay, flagged, until the
-     student says which of the eight checkrides they were. */
+     student says which of the eight checkrides they were. An identified
+     checkride with nothing in it is a FIXED SLOT nobody has flown yet
+     (round 5) — a placeholder, not an incomplete import. */
   out.evaluations = (arr(src.evaluations) || []).map((e) => {
     const o = { ...e };
     if (!WA.evalById(o.evaluation)) { o.evaluation = null; o.legacy = true; }
-    if (!isDate(o.date)) o.legacy = true;
+    if (!isDate(o.date) && !WA.slotEmpty("evaluations", o)) o.legacy = true;
     return o;
   });
 
@@ -608,9 +784,27 @@ WA.migrateRecord = function (rec) {
     if (typeof o.ng !== "boolean") o.ng = !o.graded;
     delete o.graded;
     if (o.ng) o.grade = null;
-    if (!isDate(o.date) || (!o.ng && !isFinite(Number(o.grade)))) o.legacy = true;
+    if (!WA.slotEmpty("solo_flights", o) &&
+        (!isDate(o.date) || (!o.ng && !isFinite(Number(o.grade))))) o.legacy = true;
     return o;
   });
+  /* ROUND 5 — the solos ARE the syllabus slots. A solo recorded before this
+     rule names none, so it takes the earliest free slot in date order: the
+     slots come in stage order (1st SOLO → C48XX → C49XX → C52XX → C53XX →
+     F43XX ×2 → F45XX), so the k-th solo flown is the k-th solo prescribed.
+     Deterministic, and the student can move any of them with the picker.
+     A ninth solo, or one with no date to order it by, stays slot-less — the
+     "additional solo" path, which is exactly what it is.
+     MIRROR: db/schema.sql → wa.migrate_record (solo_flights). */
+  {
+    const taken = out.solo_flights.map((e) => e.slot).filter(Boolean);
+    const free = WA.soloSlots().map((s) => s.id).filter((id) => taken.indexOf(id) < 0);
+    out.solo_flights
+      .map((e, i) => ({ e, i }))
+      .filter((x) => !x.e.slot && isDate(x.e.date))
+      .sort((a, b) => String(a.e.date).localeCompare(String(b.e.date)) || (a.i - b.i))
+      .forEach((x, k) => { if (k < free.length) x.e.slot = free[k]; });
+  }
 
   /* PROGRESS TESTS → FPC · APTITUDE EXAMS → CEF.
      The superseded storage keys ("progress_tests" from v1 and the transposed
@@ -620,7 +814,16 @@ WA.migrateRecord = function (rec) {
   for (const k of ["fpc", "cef"]) {
     let list = arr(src[k]);
     for (const alt of ren[k]) if (!list) list = arr(src[alt]);
-    out[k] = (list || []).map((e) => (isDate(e.date) ? e : { ...e, legacy: true }));
+    out[k] = (list || []).map((e) => {
+      const o = { ...e };
+      /* round 5: "by" → "evaluator" (DO / Squadron CO / an instructor).
+         The superseded key is read for ever; nothing is written under it. */
+      if (Object.prototype.hasOwnProperty.call(o, "by")) {
+        if (o.evaluator === null || o.evaluator === undefined || o.evaluator === "") o.evaluator = o.by;
+        delete o.by;
+      }
+      return isDate(o.date) ? o : { ...o, legacy: true };
+    });
   }
 
   /* FINAL PASS — per-section key whitelist (mirror of wa.strip_entry): a key
@@ -650,7 +853,10 @@ WA.COUNTED = ["nfs", "sms", "fail", "almost_good", "airsickness",
 
 WA.recStats = function (rec) {
   const r = rec || {};
-  const n = (k) => Array.isArray(r[k]) ? r[k].length : 0;
+  /* ROUND 5 — FILLED SLOTS ONLY. The solo and evaluation sections always
+     carry their fixed syllabus rows; a slot nobody has flown yet is not a
+     solo the student flew, so it counts for nothing anywhere. */
+  const n = (k) => WA.filled(k, r[k]).length;
   return {
     nfs: n("nfs"), sms: n("sms"), fail: n("fail"), almost_good: n("almost_good"),
     airsickness: n("airsickness"), solos: n("solo_flights"),
@@ -668,14 +874,16 @@ WA.coEntries = function (rec) {
   const r = rec || {};
   const out = [];
   for (const k of WA.COUNTED) {
-    (Array.isArray(r[k]) ? r[k] : []).forEach((e, i) => {
+    WA.filled(k, r[k]).forEach((e, i) => {
       if (WA.isCO(e)) out.push(WA.secLabel(k) + " #" + (i + 1));
     });
   }
   return out;
 };
 
-/* every evaluation of one record, normalised for the plot and the table */
+/* every evaluation of one record, normalised for the plot and the table.
+   ROUND 5: `flown` separates a real attempt from a fixed slot nobody has
+   flown yet — the latter is a placeholder the syllabus put there. */
 WA.evalRows = function (rec) {
   const list = (rec && Array.isArray(rec.evaluations)) ? rec.evaluations : [];
   return list.map((e, i) => {
@@ -686,9 +894,32 @@ WA.evalRows = function (rec) {
       cat: def ? def.cat : null, order: def ? def.order : 99,
       grade: (e.grade === null || e.grade === undefined || e.grade === "" || !isFinite(g)) ? null : g,
       with: e.with || "", date: e.date || "", pending: !!e.pending, legacy: !def,
+      flown: !WA.slotEmpty("evaluations", e),
       entered_by: e.entered_by || null,
     };
   });
+};
+/* THE EIGHT CHECKRIDES AS FIXED ROWS (round 5) — always all eight, in
+   syllabus order, whatever the record holds. `row` is the attempt that
+   occupies the slot (the latest one, which is what every comparison uses),
+   `earlier` the superseded attempts of the same checkride, `extras` the
+   imported evaluations nobody has identified yet. */
+WA.evalSlotRows = function (rec) {
+  const rows = WA.evalRows(rec).filter((r) => r.flown || !r.id);
+  const later = (a, b) => {
+    const da = String(a.date || ""), db = String(b.date || "");
+    if (da && db && da !== db) return da > db;
+    if (da && !db) return true;
+    if (!da && db) return false;
+    return a.i >= b.i;
+  };
+  const slots = WA.EVALUATIONS.map((d) => {
+    const mine = rows.filter((r) => r.id === d.id);
+    let row = null;
+    for (const r of mine) if (!row || later(r, row)) row = r;
+    return { def: d, row, earlier: mine.filter((r) => r !== row) };
+  });
+  return { slots, extras: rows.filter((r) => !r.id) };
 };
 /* the FPC entries as plot rows — an FPC has no syllabus position, so they are
    ordered chronologically and numbered #1, #2 … */
@@ -701,10 +932,36 @@ WA.fpcRows = function (rec) {
       return {
         i: x.i, id: "fpc#" + (k + 1), def: null, cat: "fpc", order: k + 1,
         grade: (x.e.grade === null || x.e.grade === undefined || x.e.grade === "" || !isFinite(g)) ? null : g,
-        with: x.e.by || "", date: x.e.date || "", pending: !!x.e.pending,
+        with: x.e.evaluator || "", date: x.e.date || "", pending: !!x.e.pending,
+        trigger: x.e.flight_code || "", flown: true,
         result: x.e.result || "", legacy: !!x.e.legacy, entered_by: x.e.entered_by || null,
       };
     });
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FPC / CEF — one line, everywhere (round 5): the section, the STAGE FLIGHT
+   that triggered it, the EVALUATOR who conducted it and the date.
+     "FPC (C4590) — DO — 12/08/2026"
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.checkTitle = function (sec, e) {
+  const x = e || {};
+  return WA.secLabel(sec) + (x.flight_code ? " (" + x.flight_code + ")" : "");
+};
+WA.checkLine = function (sec, e) {
+  const x = e || {};
+  const bits = [WA.checkTitle(sec, x)];
+  if (x.evaluator) bits.push(String(x.evaluator));
+  bits.push(fmtD(x.date));
+  return bits.join(" — ");
+};
+/* the same line as HTML, with the trigger flight's full name in the tooltip */
+WA.checkLineHTML = function (sec, e) {
+  const x = e || {};
+  const head = x.flight_code
+    ? esc(WA.secLabel(sec)) + " (" + WA.sortieCell(null, x.flight_code) + ")"
+    : esc(WA.secLabel(sec));
+  return head + " &mdash; " + esc(x.evaluator || "—") + " &mdash; " + esc(fmtD(x.date));
 };
 
 /* this student's value on ONE evaluation identity: the LATEST graded attempt
@@ -736,8 +993,10 @@ WA.pendingItems = function (rec) {
   walk("almost_good", (e) => WA.itemsLabel(e) + on(e));
   walk("evaluations", (e) => WA.evalShort(e.evaluation) +
        (e.with ? " with " + e.with : "") + on(e));
-  walk("fpc", (e) => (e.date ? fmtD(e.date) : "entry") + (e.by ? " by " + e.by : ""));
-  walk("cef", (e) => (e.date ? fmtD(e.date) : "entry") + (e.by ? " by " + e.by : ""));
+  walk("fpc", (e) => (e.flight_code ? "(" + e.flight_code + ") " : "") +
+       (e.date ? fmtD(e.date) : "entry") + (e.evaluator ? " — " + e.evaluator : ""));
+  walk("cef", (e) => (e.flight_code ? "(" + e.flight_code + ") " : "") +
+       (e.date ? fmtD(e.date) : "entry") + (e.evaluator ? " — " + e.evaluator : ""));
   return out;
 };
 
@@ -747,7 +1006,7 @@ WA.legacyItems = function (rec) {
   const r = rec || {};
   const out = [];
   for (const k of WA.COUNTED) {
-    (Array.isArray(r[k]) ? r[k] : []).forEach((e, i) => {
+    WA.filled(k, r[k]).forEach((e, i) => {
       if (e && e.legacy) out.push(WA.secLabel(k) + " #" + (i + 1));
     });
   }

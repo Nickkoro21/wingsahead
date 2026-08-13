@@ -17,8 +17,14 @@
    WA_SORTIES[categoryId][]
      c     — sortie code (e.g. C4302)      n — printed sortie name
      b     — band: 'flights' | 'fs' (simulator)   k — checkride?
+   WA_SOLO_SLOTS[]  — the FIXED solo rows of the stage
+     id    — slot id, stored in solo_flights[].slot (e.g. C4801-04-S1)
+     sec   — Training Section        track — syllabus track
+     n/of  — which solo of that section (F4301-06 prescribes 2)
+     req   — the section REQUIRES the solo (C4790-91: the 1st SOLO)
+     codes — the sorties the syllabus names as its solo candidates
 
-   117 items and 133 sortie codes across 4 categories,
+   117 items, 133 sortie codes and 8 solo slots across 4 categories,
    generated from master_index 2026-08-08T22:10:34 / flow chart 2026-08-09.
    ════════════════════════════════════════════════════════════════════════ */
 var WA_ITEMS = {
@@ -298,3 +304,34 @@ var WA_SORTIES = {
     { c: "N4690", n: "Final Navigation Checkride", b: "flights", k: true },
   ]
 };
+
+/* The FIXED solo slots of the stage — one row per solo the syllabus
+   prescribes (flow chart groups with SOLO SORTIES > 0). The Solo flights
+   section renders exactly these, always, and nothing can add or remove one.
+   MIRROR: db/schema.sql → wa.solo_slots(). Change one, change the other. */
+var WA_SOLO_SLOTS = [
+  { id: "C4790-91-S1", sec: "C4790-91", track: "contact", n: 1, of: 1, req: true,
+    name: "Contact checkride for SOLO (C4790) and 1st SOLO (C4791)",
+    codes: ["C4791"] },
+  { id: "C4801-04-S1", sec: "C4801-04", track: "contact", n: 1, of: 1, req: false,
+    name: "Contact – Basic/Advanced Maneuvers",
+    codes: ["C4802", "C4803"] },
+  { id: "C4901-05-S1", sec: "C4901-05", track: "contact", n: 1, of: 1, req: false,
+    name: "Contact – Basic/Advanced Maneuvers",
+    codes: ["C4902", "C4903", "C4904"] },
+  { id: "C5201-04-S1", sec: "C5201-04", track: "contact", n: 1, of: 1, req: false,
+    name: "Contact – Basic/Advanced Maneuvers",
+    codes: ["C5202", "C5203"] },
+  { id: "C5301-04-S1", sec: "C5301-04", track: "contact", n: 1, of: 1, req: false,
+    name: "Contact – Basic/Advanced Maneuvers",
+    codes: ["C5302", "C5303"] },
+  { id: "F4301-06-S1", sec: "F4301-06", track: "formation", n: 1, of: 2, req: false,
+    name: "Two-ship Formation",
+    codes: ["F4301", "F4302", "F4303", "F4304", "F4305"] },
+  { id: "F4301-06-S2", sec: "F4301-06", track: "formation", n: 2, of: 2, req: false,
+    name: "Two-ship Formation",
+    codes: ["F4301", "F4302", "F4303", "F4304", "F4305"] },
+  { id: "F4501-03-S1", sec: "F4501-03", track: "formation", n: 1, of: 1, req: false,
+    name: "Two-ship Formation (Closed and Tactical)",
+    codes: ["F4501", "F4502"] },
+];

@@ -9,10 +9,13 @@ SOURCES (read-only, NOT part of this repo):
       → items[] {item_id, item_name, mif_numbers}          → WA_ITEMS
     D:\\FDMS\\data\\flowchart2.json
     → sorties[] {id, track, band, name, checkride}         → WA_SORTIES
+    → groups[]  {id, sorties_solo, solo_candidate_sorties} → WA_SOLO_SLOTS
 
 The generated file is a plain <script> catalogue used by the FAIL /
 ALMOST GOOD rows: category select → multi-select of that category's syllabus
-items (WA_ITEMS) and a searchable flight-code picker (WA_SORTIES).
+items (WA_ITEMS) and a per-category flight-code SELECT (WA_SORTIES), and by
+the Solo flights section, whose rows are the FIXED syllabus solo slots
+(WA_SOLO_SLOTS) — one row per solo the stage prescribes, never a free list.
 No student data is involved — syllabus structure only.
 
 Usage (from the repo root):
@@ -67,6 +70,30 @@ def main():
         total += len(rows)
         out_cats.append({"id": cid, "label": clabel, "items": rows})
 
+    # ── SOLO SLOTS — the FIXED rows of the Solo flights section ───────────
+    # Every group (Training Section) whose printed duration block prescribes
+    # SOLO SORTIES > 0 contributes exactly that many slots, in syllabus order.
+    # A section that prescribes TWO solos (F4301-06) gets TWO distinct slots.
+    # `codes` are the sorties the syllabus names as the solo candidates of that
+    # section: where it names exactly one (C4791 — the 1st SOLO), the slot is
+    # that sortie; where it names several, the student picks which one they flew.
+    slots = []
+    for g in sorted(fc["groups"], key=lambda x: str(x.get("id"))):
+        n_solo = int(g.get("sorties_solo") or 0)
+        if n_solo <= 0:
+            continue
+        codes = list(g.get("solo_candidate_sorties") or [])
+        for k in range(n_solo):
+            slots.append({
+                "id": "%s-S%d" % (g["id"], k + 1),   # stable, stored in records
+                "sec": g["id"],                       # Training Section id
+                "track": g.get("track") or "",
+                "name": g.get("name") or "",
+                "n": k + 1, "of": n_solo,
+                "req": bool(g.get("solo_required")),
+                "codes": codes,
+            })
+
     # sortie codes per track — the FAIL / ALMOST GOOD "flight code" picker
     sorties, n_sorties = {}, 0
     for cid, _ in CATS:
@@ -104,9 +131,15 @@ def main():
     lines.append("   WA_SORTIES[categoryId][]")
     lines.append("     c     \u2014 sortie code (e.g. C4302)      n \u2014 printed sortie name")
     lines.append("     b     \u2014 band: 'flights' | 'fs' (simulator)   k \u2014 checkride?")
+    lines.append("   WA_SOLO_SLOTS[]  \u2014 the FIXED solo rows of the stage")
+    lines.append("     id    \u2014 slot id, stored in solo_flights[].slot (e.g. C4801-04-S1)")
+    lines.append("     sec   \u2014 Training Section        track \u2014 syllabus track")
+    lines.append("     n/of  \u2014 which solo of that section (F4301-06 prescribes 2)")
+    lines.append("     req   \u2014 the section REQUIRES the solo (C4790-91: the 1st SOLO)")
+    lines.append("     codes \u2014 the sorties the syllabus names as its solo candidates")
     lines.append("")
-    lines.append("   %d items and %d sortie codes across %d categories,"
-                 % (total, n_sorties, len(out_cats)))
+    lines.append("   %d items, %d sortie codes and %d solo slots across %d categories,"
+                 % (total, n_sorties, len(slots), len(out_cats)))
     lines.append("   generated from master_index %s / flow chart %s."
                  % (idx.get("generated_at", "?"), fc.get("generated", "?")))
     lines.append("   " + "\u2550" * 72 + " */")
@@ -141,11 +174,26 @@ def main():
         lines.append("  ]" + ("," if ci < len(CATS) - 1 else ""))
     lines.append("};")
     lines.append("")
+    lines.append("/* The FIXED solo slots of the stage \u2014 one row per solo the syllabus")
+    lines.append("   prescribes (flow chart groups with SOLO SORTIES > 0). The Solo flights")
+    lines.append("   section renders exactly these, always, and nothing can add or remove one.")
+    lines.append("   MIRROR: db/schema.sql \u2192 wa.solo_slots(). Change one, change the other. */")
+    lines.append("var WA_SOLO_SLOTS = [")
+    for s in slots:
+        lines.append("  { id: %s, sec: %s, track: %s, n: %d, of: %d, req: %s,"
+                     % (json.dumps(s["id"]), json.dumps(s["sec"]), json.dumps(s["track"]),
+                        s["n"], s["of"], "true" if s["req"] else "false"))
+        lines.append("    name: %s," % json.dumps(s["name"], ensure_ascii=False))
+        lines.append("    codes: [%s] },"
+                     % ", ".join(json.dumps(c) for c in s["codes"]))
+    lines.append("];")
+    lines.append("")
 
     with open(OUT, "w", encoding="utf-8", newline="\n") as fh:
         fh.write("\n".join(lines))
-    print("wrote %s \u2014 %d items, %d sortie codes"
-          % (os.path.normpath(OUT), total, n_sorties))
+    print("wrote %s \u2014 %d items, %d sortie codes, %d solo slots (%s)"
+          % (os.path.normpath(OUT), total, n_sorties, len(slots),
+             ", ".join(s["id"] for s in slots)))
 
 
 if __name__ == "__main__":

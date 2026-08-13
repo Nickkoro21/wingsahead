@@ -265,6 +265,43 @@ input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent);
 .ck { display: flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; user-select: none; }
 .ck.pend { color: var(--warn); }
 
+/* ── round 5: the shared picker, the fixed slots, the marked values ── */
+/* the free-text box a picker reveals when "Other…" is chosen */
+.freein { margin-top: 4px; }
+/* the small line under a field: the Greek printed on the ΦΜΠ, an
+   off-catalogue warning, the raw value behind a rounded grade */
+.fnote { font-size: 11px; color: var(--muted); line-height: 1.4; }
+.fnote .warn-t { cursor: help; }
+.fixnote {
+  font-size: 11px; color: var(--warn); line-height: 1.5; display: flex;
+  align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 3px;
+}
+.fixnote b { color: var(--text); }
+/* the header of a FIXED syllabus row (a solo slot, a stage checkride) */
+.slot-h {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding-bottom: 6px; border-bottom: 1px dashed var(--line);
+}
+.slot-h .slot-nm { font-size: 12.5px; font-weight: 600; }
+.slot-h .rm { margin-left: auto; }
+.rrow.is-slot { border-left-color: var(--accent); }
+.rrow.is-slot.is-empty { border-left-color: var(--line); opacity: 0.86; background: var(--panel); }
+.rrow.is-slot.is-empty:hover, .rrow.is-slot.is-empty:focus-within { opacity: 1; }
+.subhead {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--muted); margin: 14px 0 6px; padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.subhead .hint { text-transform: none; letter-spacing: 0; }
+.addrow { margin-top: 8px; }
+/* a flight code the generated syllabus catalogue does not know */
+.offcat { color: var(--warn); font-weight: 700; cursor: help; margin-left: 1px; }
+/* a grade shown rounded because the stored value is fractional */
+.rnd { border-bottom: 1px dotted var(--warn); cursor: help; }
+/* a fixed slot nobody has flown yet, in the CO's tables and on paper */
+.tbl tbody tr.is-unflown td { color: var(--muted); }
+.tbl td.items { min-width: 220px; }
+
 /* the ⓘ that carries a terminology tooltip next to a section header */
 .tipdot {
   color: var(--accent); font-size: 13px; cursor: help; line-height: 1;
@@ -569,6 +606,12 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
   .pr-bullets { margin: 0 0 3mm 6mm; font-size: 11px; line-height: 1.5; }
   .pr-none { font-size: 11px; color: #333; margin-bottom: 3mm; font-style: italic; }
   .pr-src { font-size: 11px; color: #000; margin: 0 0 2mm; }
+  /* a fixed syllabus slot nobody has flown yet — printed, and printed as
+     unflown: the brief must show the whole stage, not only what happened */
+  .pr-t tr.is-unflown td { color: #444; font-style: italic; }
+  /* a grade shown rounded (the raw value is fractional) keeps its marker */
+  .rnd { border-bottom: 1px dotted #000; }
+  .offcat { color: #000; font-weight: 700; }
   /* the CO tag on paper — monochrome like everything else, still unmistakable */
   .cotag {
     color: #000 !important; background: #ffffff !important; border: 1px solid #000 !important;

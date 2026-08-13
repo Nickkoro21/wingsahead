@@ -52,21 +52,32 @@ server rejects a payload that carries one (`nfs` as an object, or a `count`
 key inside any entry). `pending` («εκκρεμεί») stays where waiting for a result
 is a real state — **never on SMS** (round-3 ruling).
 
-- **NFS**: [{date*, note?}]  ← *was* count + optional dates
+- **NFS**: [{date*, reason* (round 5 — one of the six causes printed on form
+  Α0473), note? (required when the reason is "other")}]  ← *was* count + dates
 - **SMS**: [{entrance_date*, exit_date?, note?}] — no pending
 - **FAIL** / **ALMOST GOOD**: [{date*, category* (one of the four syllabus
-  tracks), flight_code? (Phase II sortie code, searchable + free text),
+  tracks), flight_code? (**round 5**: a select of THAT track's sorties +
+  "Other…" free text; a code of another track is refused server-side),
   items[]* (multi-select of that track's gradesheet items + custom),
-  instructor?, grade? (0-100 %), pending?}]
+  instructor?, grade? (0-100 %, **whole numbers**), pending?}]
 - **AIRSICKNESS**: [{date*, instructor?, phase?}] — the brief shows WHEN and
   WITH WHOM
-- **Evaluations**: [{date*, evaluation* (one of the eight stage checkrides —
-  C4590 C4790 C5090 C5490 · I4490 I4890 · F4690 · N4690), with?, grade?,
-  pending?}] — no free "Other" evaluation: a progress check flight is an FPC
-- **Solo flights**: [{date*, ng* (non-graded), grade? (0-100 %), instructor?}]
-  — grade + instructor required unless NG; NG rows are excluded from grade math
-- **FPC** (ex "Progress tests"): [{date*, by?, result?, grade?, pending?}]
-- **CEF** (ex "Aptitude exams"): [{date*, by?, result?, grade?, pending?}]
+- **Evaluations** — **FIXED SLOTS (round 5)**: [{evaluation* (one of the eight
+  stage checkrides — C4590 C4790 C5090 C5490 · I4490 I4890 · F4690 · N4690),
+  date* once flown, with?, grade?, pending?}] — all eight always present, no
+  add/remove, an unflown slot has no date and counts for nothing; no free
+  "Other" evaluation: a progress check flight is an FPC
+- **Solo flights** — **FIXED SLOTS (round 5)**: [{slot* (one of the eight
+  syllabus solo slots; F4301-06 has two), sortie? (which candidate sortie was
+  flown solo), date* once flown, ng* (non-graded), grade? (0-100 %),
+  instructor?}] — grade + instructor required unless NG; NG rows are excluded
+  from grade math; a solo the syllabus did not foresee is a slot-less
+  "additional solo", the only solo row that can be added or removed
+- **FPC** (ex "Progress tests"): [{date*, flight_code? (the stage flight that
+  triggered it), evaluator? (**round 5**, ex `by` — DO / Squadron CO /
+  instructor / typed), result?, grade?, pending?}]
+- **CEF** (ex "Aptitude exams"): [{date*, flight_code?, evaluator?, result?,
+  grade?, pending?}]
 
 **Legacy (v1) records migrate ON READ** (`wa.migrate_record`, mirrored in
 `WA.migrateRecord`): the NFS counter becomes one entry per counted event, a
@@ -165,6 +176,71 @@ a chip removal): overview column, brief kgrid, print summary row, instructor
 self-card and the summary CSV. `WA.recStats` has no `evals` key at all, so the
 number cannot come back by copying a line. Per-evaluation grades and the
 summary table remain the carriers.
+
+## 4c. Round 5 (2026-08-13) — the syllabus enters the data model
+
+Round 5 is the hands-on review round: five of the six changes replace free text
+with **the printed source of truth**, and the sixth is an audit.
+
+**NFS carries the REASON printed on the sheet.** `nfs[i].note` is joined by
+`nfs[i].reason`, one of the six causes of the ΦΜΠ as printed on form **Α0473
+«ΦΥΛΛΟ ΜΗ ΠΤΗΣΗΣ ΜΑΘΗΤΗ – ΕΚΠΑΙΔΕΥΟΜΕΝΟΥ»** (3-01/2025 ΔΑΕ, ΚΕΦ.9, PDF page
+219 = printed page 201): failed questionnaire · failed pre-flight briefing ·
+failed flight · failed F/S · illness · other cause. English labels, the Greek
+line verbatim in the option tooltip and under the box; "other" requires the
+cause in the note — it is the sheet's own blank «ΑΛΛΗ ΑΙΤΙΑ:» line.
+`WA.NFS_REASONS` ↔ `wa.nfs_reasons()`.
+
+**Flight codes are pickers, per category, everywhere.** One shared picker
+component (`pickerF`) draws a real `<select>` over a closed list with an
+"Other…" option that reveals a free-text box. FAIL / ALMOST GOOD offer **only
+the chosen track's sorties**, so *Instrument + C4302* is unreachable; changing
+the track drops a code that belonged to the old one, out loud. FPC / CEF offer
+**every stage sortie** (checkrides included) as the TRIGGER flight; a solo slot
+offers its section's solo candidates. Server side, `wa.code_track()` reads the
+track off the code's letter (B/C contact · I instrument · F formation ·
+N navigation — verified against all 133 codes) and **refuses** a
+syllabus-shaped code that contradicts its category, while a code the generated
+catalogue does not know is **accepted and shown marked** (`*`, "not in the
+syllabus catalogue"): the syllabus data may lag reality, and a record must
+never become unstorable because of it.
+
+**Grades are whole numbers.** `step=1` on every grade box and
+`wa.chk_grade` refuses a fraction by name ("62.5 is not accepted — round it,
+e.g. 63"). Stored fractions are never rewritten behind the owner's back: they
+RENDER rounded with the raw value in the tooltip (`WA.pct`), export raw
+(`WA.pctRaw`), and the form offers a **"Round to 63%"** button on the row.
+
+**Solo flights and evaluations are FIXED SYLLABUS SLOTS — no add, no remove.**
+The solo slots are generated from the flow chart: every Training Section whose
+printed duration block says SOLO SORTIES > 0 contributes that many rows —
+**eight slots, and F4301-06 carries TWO** (SORTIES/HOURS SOLO: 2/2,4), so it
+draws two distinct rows. `WA_SOLO_SLOTS` ↔ `wa.solo_slots()`; each slot knows
+its candidate sorties, and `solo_flights[i].slot` / `.sortie` record which one
+was flown. The eight checkrides are the same idea with the identity as the key.
+A slot is **pending until flown**: the mandatory-date rule is relaxed for these
+two sections only (`wa.slot_empty`), an unflown slot **counts for nothing**
+(`wa.entry_count`, `wa.co_entry_count`, `WA.recStats`) and is **never stamped**
+as CO-entered. Reality is not stuck: an unforeseen solo is a slot-LESS
+"additional solo" (add/remove kept), an earlier attempt at a checkride survives
+beside its slot, and an imported evaluation that finally gets identified moves
+into its empty slot. Migration places pre-round-5 solos in the earliest free
+slot **in date order** — the slots are in stage order, so the k-th solo flown
+is the k-th prescribed — and anything beyond takes the additional path.
+
+**FPC / CEF: trigger flight + EVALUATOR.** Both sections gain `flight_code`
+(due to which stage flight) and rename `by` → `evaluator`, picked from **DO ·
+Squadron CO · the squadron's instructors · Other…**. The superseded key is read
+for ever and refused on write with a message that names the new one. Every
+surface prints the same line: **"FPC (C4590) — DO — 12/08/2026"**
+(`WA.checkLine` / `WA.checkLineHTML`). Several FPC after the same flight are
+simply several entries.
+
+**Multi-item display audit.** `items[]` was already stored and rendered in
+full; what was missing was the *evidence* at a glance. Every surface now states
+the count beside the list — chips in the form, a "3 items" badge in the CO's
+tables, "(3 items)" in the brief and the instructor card — and the entries CSV
+carries the list **comma-joined** in one cell plus an **Item count** column.
 
 ## 4. Screens
 

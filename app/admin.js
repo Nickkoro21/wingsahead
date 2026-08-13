@@ -53,7 +53,12 @@ WA.renderAdmin = async function (view, me) {
            correct against a cloud instance still running the v1 schema */
         s.record = WA.migrateRecord(s.record);
         s._stats = WA.recStats(s.record);
-        s._evals = WA.evalRows(s.record);
+        /* ROUND 5 — the eight checkrides are fixed rows: a slot nobody has
+           flown is a placeholder, so _evals holds the ATTEMPTS (and the
+           imported entries nobody has identified), while _evalSlots holds the
+           full eight-row view the tables and the printed brief show. */
+        s._evals = WA.evalRows(s.record).filter((r) => r.flown || !r.id);
+        s._evalSlots = WA.evalSlotRows(s.record);
         s._fpc = WA.fpcRows(s.record);
         /* WHOSE record this is, counted from the entries (round 4b): _src.all
            = the CO entered all of it, _src.some = the owner's record with
@@ -371,31 +376,53 @@ WA.renderAdmin = async function (view, me) {
       </svg>`;
   }
 
-  /* ── the summary table every plot point points at ── */
+  /* ── the summary table every plot point points at ──
+     ROUND 5: all EIGHT checkrides are always listed, in syllabus order —
+     the ones nobody has flown yet say so, which is half of what the CO is
+     looking for during the brief. */
   function evalSummary(s) {
     const rows = [];
-    s._evals.slice().sort((a, b) => (a.order - b.order) || String(a.date).localeCompare(String(b.date)))
-      .forEach((r) => rows.push({
-        key: "ev:" + r.i, cat: r.cat,
-        what: r.def ? `<b>${esc(r.id)}</b> ${esc(r.def.name)}` : `<span class="warn-t">(not identified — imported entry)</span>`,
+    for (const sl of s._evalSlots.slots) {
+      const r = sl.row;
+      rows.push({
+        key: r ? "ev:" + r.i : "", cat: sl.def.cat, flown: !!r,
+        what: `<b>${esc(sl.def.id)}</b> ${esc(sl.def.name)}`,
+        who: r ? r.with : "", grade: r ? r.grade : null, date: r ? r.date : "",
+        pending: !!(r && r.pending), co: !!(r && WA.isCO(r)),
+      });
+      for (const old of sl.earlier) {
+        rows.push({
+          key: "ev:" + old.i, cat: sl.def.cat, flown: true, sub: true,
+          what: `<span class="k">earlier attempt — ${esc(sl.def.id)}</span>`,
+          who: old.with, grade: old.grade, date: old.date, pending: old.pending, co: WA.isCO(old),
+        });
+      }
+    }
+    for (const r of s._evalSlots.extras) {
+      rows.push({
+        key: "ev:" + r.i, cat: null, flown: true,
+        what: `<span class="warn-t">(not identified — imported entry)</span>`,
         who: r.with, grade: r.grade, date: r.date, pending: r.pending, co: WA.isCO(r),
-      }));
+      });
+    }
     s._fpc.forEach((r, k) => rows.push({
-      key: "fpc:" + r.i, cat: "fpc",
-      what: `<b>FPC #${k + 1}</b> ${esc(r.result || "flight progress check")}`,
+      key: "fpc:" + r.i, cat: "fpc", flown: true,
+      what: `<b>FPC #${k + 1}</b> ${r.trigger ? "(" + WA.sortieCell(null, r.trigger) + ") " : ""}${esc(r.result || "flight progress check")}`,
       who: r.with, grade: r.grade, date: r.date, pending: r.pending, co: WA.isCO(r),
     }));
-    if (!rows.length) return `<p class="hint">No evaluations or FPC entries reported yet.</p>`;
     return `
       <div class="tblwrap"><table class="tbl" id="sumtbl">
         <thead><tr><th>Evaluation</th><th>With whom</th><th>Grade</th><th>Date</th><th>Pending</th><th>Source</th></tr></thead>
         <tbody>${rows.map((r) => `
-          <tr data-sumrow="${esc(r.key)}" class="${r.cat === A.plotCat ? "in-cat" : ""}${A.hi === r.key ? " is-hi" : ""}">
-            <td>${r.what}</td><td>${esc(r.who || "—")}</td>
+          <tr data-sumrow="${esc(r.key)}" class="${r.cat === A.plotCat ? "in-cat" : ""}${
+            A.hi && A.hi === r.key ? " is-hi" : ""}${r.flown ? "" : " is-unflown"}">
+            <td>${r.what}${r.sub ? "" : ""}</td>
+            <td>${r.flown ? esc(r.who || "—") : `<span class="k">not flown yet</span>`}</td>
             <td class="num">${WA.pct(r.grade)}</td>
-            <td>${esc(fmtD(r.date))}</td>
+            <td>${r.flown ? esc(fmtD(r.date)) : "—"}</td>
             <td>${r.pending ? `<span class="badge badge-warn">pending</span>` : "—"}</td>
-            <td>${r.co ? `<span class="cotag" title="${esc(WA.CO_TIP)}">CO</span>` : `<span class="k">self</span>`}</td></tr>`).join("")}
+            <td>${r.flown ? (r.co ? `<span class="cotag" title="${esc(WA.CO_TIP)}">CO</span>`
+                                  : `<span class="k">self</span>`) : "—"}</td></tr>`).join("")}
         </tbody></table></div>`;
   }
 
@@ -421,8 +448,10 @@ WA.renderAdmin = async function (view, me) {
       list.slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).map((e) => `
         <tr><td>${esc(fmtD(e.date))}</td>
           <td>${esc(WA.itemCatLabel(e.category))}</td>
-          <td title="${esc(WA.sortieLabel(e.category, e.flight_code))}">${esc(e.flight_code || "—")}</td>
-          <td>${esc(WA.itemsLabel(e))}</td>
+          <td>${WA.sortieCell(e.category, e.flight_code)}</td>
+          <td class="items">${esc(WA.itemsLabel(e))}
+            ${(e.items || []).length > 1
+              ? `<span class="badge" title="${esc((e.items || []).join(" · "))}">${(e.items || []).length} items</span>` : ""}</td>
           <td>${esc(e.instructor || "—")}</td>
           <td class="num">${WA.pct(e.grade)}</td>
           <td>${e.pending ? `<span class="badge badge-warn">pending</span>` : ""}</td>
@@ -438,31 +467,73 @@ WA.renderAdmin = async function (view, me) {
           <td>${esc(e.phase || "—")}</td>${srcCell(e)}</tr>`));
   }
 
+  /* the solo section as the CO must see it: the FIXED syllabus slots, in
+     syllabus order, each either flown or openly pending, plus any extra solo
+     reality produced (round 5) */
+  function soloRows(s) {
+    const list = Array.isArray(s.record.solo_flights) ? s.record.solo_flights : [];
+    const bySlot = {};
+    for (const e of list) if (e.slot) bySlot[e.slot] = e;
+    const out = WA.soloSlots().map((sl) => {
+      const e = bySlot[sl.id];
+      const flown = !!e && !WA.slotEmpty("solo_flights", e);
+      return `<tr class="${flown ? "" : "is-unflown"}">
+        <td title="${esc(WA.soloSlotTip(sl.id))}"><b>${esc(sl.sec)}</b>${
+          sl.of > 1 ? ` <span class="k">solo ${sl.n} of ${sl.of}</span>` : ""}${
+          sl.req ? ` <span class="badge badge-warn">required</span>` : ""}</td>
+        <td>${flown && e.sortie ? WA.sortieCell(null, e.sortie) : `<span class="k">${esc(sl.codes.join(" / "))}</span>`}</td>
+        <td>${flown ? esc(fmtD(e.date)) : `<span class="badge">pending — not flown</span>`}</td>
+        <td>${!flown ? "—" : (e.ng ? `<span class="badge">NG — non-graded</span>` : WA.pct(e.grade))}</td>
+        <td>${!flown ? "—" : esc(e.ng ? "—" : (e.instructor || "—"))}</td>
+        ${flown ? srcCell(e) : "<td>—</td>"}</tr>`;
+    });
+    for (const e of list) {
+      if (e.slot && WA.soloSlot(e.slot)) continue;
+      out.push(`<tr><td><span class="badge badge-acc">additional</span></td>
+        <td>${e.sortie ? WA.sortieCell(null, e.sortie) : "—"}</td>
+        <td>${esc(fmtD(e.date))}</td>
+        <td>${e.ng ? `<span class="badge">NG — non-graded</span>` : WA.pct(e.grade)}</td>
+        <td>${esc(e.ng ? "—" : (e.instructor || "—"))}</td>${srcCell(e)}</tr>`);
+    }
+    return out;
+  }
+
+  /* "3 of 8 syllabus solos flown · 1 additional" — the honest solo counter */
+  function soloCount(s) {
+    const list = Array.isArray(s.record.solo_flights) ? s.record.solo_flights : [];
+    const done = list.filter((e) => e.slot && WA.soloSlot(e.slot) &&
+      !WA.slotEmpty("solo_flights", e)).length;
+    const extra = s._stats.solos - done;
+    return done + " of " + WA.soloSlots().length + " syllabus solos flown" +
+      (extra > 0 ? " · " + extra + " additional" : "");
+  }
+
   function otherTables(s) {
     const r = s.record;
     const nfs = (r.nfs || []).map((e) =>
-      `<tr><td>${esc(fmtD(e.date))}</td><td>${esc(e.note || "—")}</td>${srcCell(e)}</tr>`);
+      `<tr><td>${esc(fmtD(e.date))}</td>
+        <td title="${esc((WA.nfsReason(e.reason) || {}).el || "")}">${esc(WA.nfsReasonShort(e))}</td>
+        <td>${esc(e.note || "—")}</td>${srcCell(e)}</tr>`);
     const sms = (r.sms || []).map((e) =>
       `<tr><td>${esc(fmtD(e.entrance_date))}</td><td>${e.exit_date ? esc(fmtD(e.exit_date)) : `<span class="badge badge-warn">still open</span>`}</td>
         <td>${esc(e.note || "—")}</td>${srcCell(e)}</tr>`);
-    const solo = (r.solo_flights || []).map((e) =>
-      `<tr><td>${esc(fmtD(e.date))}</td>
-        <td>${e.ng ? `<span class="badge">NG — non-graded</span>` : WA.pct(e.grade)}</td>
-        <td>${esc(e.ng ? "—" : (e.instructor || "—"))}</td>${srcCell(e)}</tr>`);
     const chk = (k) => (r[k] || []).map((e) =>
-      `<tr><td>${esc(fmtD(e.date))}</td><td>${esc(e.by || "—")}</td>
+      `<tr><td><b>${esc(WA.secLabel(k))}</b>${e.flight_code ? " (" + WA.sortieCell(null, e.flight_code) + ")" : ""}</td>
+        <td>${esc(e.evaluator || "—")}</td>
+        <td>${esc(fmtD(e.date))}</td>
         <td>${esc(e.result || "—")}</td>
         <td class="num">${WA.pct(e.grade)}</td>
         <td>${e.pending ? `<span class="badge badge-warn">pending</span>` : ""}</td>${srcCell(e)}</tr>`);
-    const blk = (k, head, rows) => `
+    const blk = (k, head, rows, cnt) => `
       <h3 style="margin-top:8px">${esc(WA.secLabel(k))} ${WA.tipDot(k)}
-        <span class="cnt">${rows.length} ${rows.length === 1 ? "entry" : "entries"}</span></h3>
+        <span class="cnt">${esc(cnt || (rows.length + " " + (rows.length === 1 ? "entry" : "entries")))}</span></h3>
       ${rows.length ? evTable(head, rows) : `<p class="hint">None reported.</p>`}`;
-    return blk("nfs", ["Date", "Note", "Source"], nfs) +
+    return blk("nfs", ["Date", "Reason (form Α0473)", "Note", "Source"], nfs) +
            blk("sms", ["Entrance", "Exit", "Note", "Source"], sms) +
-           blk("solo_flights", ["Date", "Grade", "Instructor", "Source"], solo) +
-           blk("fpc", ["Date", "By", "Result", "Grade", "", "Source"], chk("fpc")) +
-           blk("cef", ["Date", "By", "Result", "Grade", "", "Source"], chk("cef"));
+           blk("solo_flights", ["Syllabus slot", "Sortie", "Date", "Grade", "Evaluator / instructor", "Source"],
+               soloRows(s), soloCount(s)) +
+           blk("fpc", ["Entry", "Evaluator", "Date", "Result", "Grade", "", "Source"], chk("fpc")) +
+           blk("cef", ["Entry", "Evaluator", "Date", "Result", "Grade", "", "Source"], chk("cef"));
   }
 
   function branchBoxes(s, forBrief) {
@@ -649,22 +720,29 @@ WA.renderAdmin = async function (view, me) {
         </div></div>
         <div class="card b-detail">
           <div class="kline"><span class="k">Evaluations</span>
-            ${s._evals.length ? s._evals.slice().sort((a, b) => a.order - b.order).map((e) =>
-              `<b>${esc(WA.evalShort(e.id))}</b> ${WA.pct(e.grade)}${
-                e.with ? " <span class='k'>w/ " + esc(e.with) + "</span>" : ""}${e.pending ? " ⏳" : ""}${WA.coTag(e)}`).join(" · ")
-              : "<span class='k'>none reported</span>"}</div>
+            ${s._evalSlots.slots.map((sl) => sl.row
+              ? `<b>${esc(sl.def.id)}</b> ${WA.pct(sl.row.grade)}${
+                  sl.row.with ? " <span class='k'>w/ " + esc(sl.row.with) + "</span>" : ""}${
+                  sl.row.pending ? " ⏳" : ""}${WA.coTag(sl.row)}`
+              : `<span class="k">${esc(sl.def.id)} not flown</span>`).join(" · ")}
+            ${s._evalSlots.extras.length
+              ? ` · <span class="k">${s._evalSlots.extras.length} imported, not identified</span>` : ""}</div>
           <div class="kline"><span class="k">Solo flights</span>
-            ${st.solos ? (s.record.solo_flights || []).map((e) =>
+            <span class="k">${esc(soloCount(s))}</span>
+            ${st.solos ? " — " + WA.filled("solo_flights", s.record.solo_flights).map((e) =>
+              `<b>${esc(e.slot ? (WA.soloSlot(e.slot) || {}).sec || e.slot : "extra")}</b> ` +
               esc(fmtD(e.date)) + (e.ng ? " <span class='k'>NG</span>" : " <b>" + WA.pct(e.grade) + "</b>") +
               WA.coTag(e)).join(" · ")
-              : "<span class='k'>none reported</span>"}</div>
+              : ""}</div>
           ${["fail", "almost_good"].map((k) => {
             const list = s.record[k] || [];
             /* one sub-line per entry: the items inside an entry are already
                separated by · , so entries must not be */
             return `<div class="kline"><span class="k">${esc(WA.secLabel(k))}</span>
               ${list.length ? list.map((e) => `<div class="sub">${esc(fmtD(e.date))}` +
-                (e.flight_code ? " <b>" + esc(e.flight_code) + "</b>" : "") + " " + esc(WA.itemsLabel(e)) +
+                (e.flight_code ? " <b>" + WA.sortieCell(e.category, e.flight_code) + "</b>" : "") + " " +
+                esc(WA.itemsLabel(e)) +
+                ((e.items || []).length > 1 ? ` <span class="k">(${(e.items || []).length} items)</span>` : "") +
                 (e.grade === null || e.grade === undefined ? "" : " <b>" + WA.pct(e.grade) + "</b>") +
                 (e.instructor ? " <span class='k'>w/ " + esc(e.instructor) + "</span>" : "") +
                 (e.pending ? " ⏳" : "") + WA.coTag(e) + `</div>`).join("")
@@ -674,6 +752,21 @@ WA.renderAdmin = async function (view, me) {
             ${(s.record.airsickness || []).length ? (s.record.airsickness || []).map((e) =>
               esc(fmtD(e.date)) + (e.instructor ? " <span class='k'>w/ " + esc(e.instructor) + "</span>" : "") +
               (e.phase ? " (" + esc(e.phase) + ")" : "") + WA.coTag(e)).join(" · ")
+              : "<span class='k'>none reported</span>"}</div>
+          ${["fpc", "cef"].map((k) => {
+            const list = s.record[k] || [];
+            /* "FPC (C4590) — DO — 12/08/2026" — the line the CO asked for */
+            return `<div class="kline"><span class="k">${esc(WA.secLabel(k))}</span>
+              ${list.length ? list.map((e) => `<div class="sub">${WA.checkLineHTML(k, e)}` +
+                (e.grade === null || e.grade === undefined ? "" : " <b>" + WA.pct(e.grade) + "</b>") +
+                (e.result ? " <span class='k'>" + esc(e.result) + "</span>" : "") +
+                (e.pending ? " ⏳" : "") + WA.coTag(e) + `</div>`).join("")
+                : "<span class='k'>none reported</span>"}</div>`;
+          }).join("")}
+          <div class="kline"><span class="k">NFS</span>
+            ${(s.record.nfs || []).length ? (s.record.nfs || []).map((e) =>
+              esc(fmtD(e.date)) + " <span class='k'>" + esc(WA.nfsReasonLabel(e)) + "</span>" +
+              WA.coTag(e)).join(" · ")
               : "<span class='k'>none reported</span>"}</div>
         </div>
         <div class="grid3">${branchBoxes(s, true)}</div>
@@ -706,10 +799,18 @@ WA.renderAdmin = async function (view, me) {
         : `<p class="pr-none">None reported.</p>`;
       /* the CO tag rides in the first cell of every printed row — small, and
          it costs the table no extra column (round-4 W2c) */
-      const evRows = s._evals.slice().sort((a, b) => a.order - b.order).map((e) =>
-        `<tr><td>${esc(e.def ? e.id + " — " + e.def.name : "(not identified)")}${WA.coTag(e)}</td>
+      /* the eight checkrides, always all eight — a printed brief that omits
+         the ones nobody has flown hides half the picture (round 5) */
+      const evRows = s._evalSlots.slots.map((sl) => {
+        const e = sl.row;
+        return `<tr${e ? "" : ' class="is-unflown"'}>
+          <td>${esc(sl.def.id + " — " + sl.def.name)}${e ? WA.coTag(e) : ""}</td>
+          <td>${e ? esc(e.with || "—") : "not flown yet"}</td><td>${WA.pct(e ? e.grade : null)}</td>
+          <td>${e ? esc(fmtD(e.date)) : "—"}</td><td>${e && e.pending ? "pending" : ""}</td></tr>`;
+      }).concat(s._evalSlots.extras.map((e) =>
+        `<tr><td>(not identified — imported)${WA.coTag(e)}</td>
           <td>${esc(e.with || "—")}</td><td>${WA.pct(e.grade)}</td>
-          <td>${esc(fmtD(e.date))}</td><td>${e.pending ? "pending" : ""}</td></tr>`);
+          <td>${esc(fmtD(e.date))}</td><td>${e.pending ? "pending" : ""}</td></tr>`));
       const fgRows = (k) => (s.record[k] || []).map((e) =>
         `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${esc(WA.itemCatLabel(e.category))}</td>
           <td>${esc(e.flight_code || "—")}</td><td>${esc(WA.itemsLabel(e))}</td>
@@ -718,15 +819,32 @@ WA.renderAdmin = async function (view, me) {
           <td>${e.pending ? "pending" : ""}</td></tr>`);
       const asRows = (s.record.airsickness || []).map((e) =>
         `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${esc(e.instructor || "—")}</td><td>${esc(e.phase || "—")}</td></tr>`);
-      const soRows = (s.record.solo_flights || []).map((e) =>
-        `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${e.ng ? "NG (non-graded)" : WA.pct(e.grade)}</td>
-          <td>${esc(e.ng ? "—" : (e.instructor || "—"))}</td></tr>`);
+      /* the solos as the syllabus prescribes them: every slot, flown or not */
+      const soloBySlot = {};
+      for (const e of (s.record.solo_flights || [])) if (e.slot) soloBySlot[e.slot] = e;
+      const soRows = WA.soloSlots().map((sl) => {
+        const e = soloBySlot[sl.id];
+        const flown = !!e && !WA.slotEmpty("solo_flights", e);
+        return `<tr${flown ? "" : ' class="is-unflown"'}>
+          <td>${esc(sl.sec + (sl.of > 1 ? " (solo " + sl.n + " of " + sl.of + ")" : "") +
+                    (sl.req ? " — required" : ""))}${flown ? WA.coTag(e) : ""}</td>
+          <td>${esc(flown && e.sortie ? e.sortie : sl.codes.join(" / "))}</td>
+          <td>${flown ? esc(fmtD(e.date)) : "not flown yet"}</td>
+          <td>${!flown ? "—" : (e.ng ? "NG (non-graded)" : WA.pct(e.grade))}</td>
+          <td>${!flown ? "—" : esc(e.ng ? "—" : (e.instructor || "—"))}</td></tr>`;
+      }).concat((s.record.solo_flights || []).filter((e) => !e.slot || !WA.soloSlot(e.slot)).map((e) =>
+        `<tr><td>additional solo${WA.coTag(e)}</td><td>${esc(e.sortie || "—")}</td>
+          <td>${esc(fmtD(e.date))}</td>
+          <td>${e.ng ? "NG (non-graded)" : WA.pct(e.grade)}</td>
+          <td>${esc(e.ng ? "—" : (e.instructor || "—"))}</td></tr>`));
       const ckRows = (k) => (s.record[k] || []).map((e) =>
-        `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${esc(e.by || "—")}</td><td>${esc(e.result || "—")}</td>
+        `<tr><td>${esc(WA.checkTitle(k, e))}${WA.coTag(e)}</td><td>${esc(e.evaluator || "—")}</td>
+          <td>${esc(fmtD(e.date))}</td><td>${esc(e.result || "—")}</td>
           <td>${WA.pct(e.grade)}</td>
           <td>${e.pending ? "pending" : ""}</td></tr>`);
       const nfsRows = (s.record.nfs || []).map((e) =>
-        `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${esc(e.note || "—")}</td></tr>`);
+        `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${esc(WA.nfsReasonShort(e))}</td>
+          <td>${esc(e.note || "—")}</td></tr>`);
       const smsRows = (s.record.sms || []).map((e) =>
         `<tr><td>${esc(fmtD(e.entrance_date))}${WA.coTag(e)}</td><td>${e.exit_date ? esc(fmtD(e.exit_date)) : "still open"}</td>
           <td>${esc(e.note || "—")}</td></tr>`);
@@ -756,16 +874,16 @@ WA.renderAdmin = async function (view, me) {
           ${prT(["Date", "Track", "Flight", "Items", "Instructor", "Grade", ""], fgRows("almost_good"))}
           <div class="pr-sec">Airsickness — when and with whom</div>
           ${prT(["Date", "With whom", "Phase of flight / note"], asRows)}
-          <div class="pr-sec">Solo flights</div>
-          ${prT(["Date", "Grade", "Instructor"], soRows)}
-          <div class="pr-sec">NFS</div>
-          ${prT(["Date", "Note"], nfsRows)}
+          <div class="pr-sec">Solo flights — the syllabus slots (${esc(soloCount(s))})</div>
+          ${prT(["Syllabus slot", "Sortie", "Date", "Grade", "Evaluator / instructor"], soRows)}
+          <div class="pr-sec">NFS — Φύλλο μη Πτήσης (reason per form Α0473)</div>
+          ${prT(["Date", "Reason", "Note"], nfsRows)}
           <div class="pr-sec">SMS</div>
           ${prT(["Entrance", "Exit", "Note"], smsRows)}
           <div class="pr-sec">FPC — Δοκιμή Προόδου (flight progress check)</div>
-          ${prT(["Date", "By", "Result", "Grade", ""], ckRows("fpc"))}
+          ${prT(["Entry", "Evaluator", "Date", "Result", "Grade", ""], ckRows("fpc"))}
           <div class="pr-sec">CEF — Εξέταση Καταλληλότητας (Squadron Evaluator)</div>
-          ${prT(["Date", "By", "Result", "Grade", ""], ckRows("cef"))}
+          ${prT(["Entry", "Evaluator", "Date", "Result", "Grade", ""], ckRows("cef"))}
           <div class="pr-sec">Utilization proposals (weighted 3×1st + 2×2nd + 1×3rd)</div>
           <table class="pr-t"><thead><tr><th>Branch</th><th>1st choice</th><th>2nd choice</th><th>3rd choice</th><th>Σ</th></tr></thead>
             <tbody>${branchRows}</tbody></table>
@@ -1012,32 +1130,42 @@ WA.renderAdmin = async function (view, me) {
     download("wings-ahead-summary-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
   }
 
-  /* every dated entry of every student, one row each — the raw record on paper */
+  /* every dated entry of every student, one row each — the raw record on paper.
+     ROUND 5: the multi-select items travel COMMA-JOINED in one cell (the CSV
+     separator is ";", so a comma is safe and reads as a list), a fixed slot
+     nobody has flown is not exported as an entry, and the grade is the RAW
+     stored number — a fractional legacy grade is never rounded away here. */
   function exportEntriesCSV() {
     const rows = [["Student", "Class", "Section", "Date", "Detail", "Flight code",
-      "Items", "With whom", "Grade", "Pending", "Incomplete import", "Entered by"]];
+      "Items", "Item count", "With whom", "Grade", "Pending", "Incomplete import", "Entered by"]];
     const add = (s, sec, e, detail, code, items, who, grade, pend, date) =>
       rows.push([WA.personName(s.person, true), s.person.class, WA.secLabel(sec),
-        fmtD(date === undefined ? e.date : date), detail, code || "", items || "", who || "",
-        grade === null || grade === undefined ? "" : grade, pend ? "yes" : "",
+        fmtD(date === undefined ? e.date : date), detail, code || "",
+        items || "", Array.isArray(e.items) ? e.items.length : "", who || "",
+        WA.pctRaw(grade), pend ? "yes" : "",
         e.legacy ? "yes" : "", WA.coWord(e)]);
     for (const s of A.data.students) {
       const r = s.record;
-      (r.nfs || []).forEach((e) => add(s, "nfs", e, e.note || "", "", "", "", null, false));
+      (r.nfs || []).forEach((e) => add(s, "nfs", e,
+        WA.nfsReasonLabel(e) + (e.note && e.reason !== "other" ? " — " + e.note : ""),
+        "", "", "", null, false));
       (r.sms || []).forEach((e) => add(s, "sms", e,
         e.exit_date ? "exit " + fmtD(e.exit_date) : "still open", "", "", "", null, false, e.entrance_date));
       (r.airsickness || []).forEach((e) => add(s, "airsickness", e, e.phase || "", "", "", e.instructor, null, false));
       for (const k of ["fail", "almost_good"]) {
         (r[k] || []).forEach((e) => add(s, k, e, WA.itemCatLabel(e.category),
-          e.flight_code, (e.items || []).join(" | "), e.instructor, e.grade, e.pending));
+          e.flight_code, (e.items || []).join(", "), e.instructor, e.grade, e.pending));
       }
-      (r.evaluations || []).forEach((e) => add(s, "evaluations", e,
+      WA.filled("evaluations", r.evaluations).forEach((e) => add(s, "evaluations", e,
         e.evaluation ? WA.evalLabel(e.evaluation) : "(not identified)", e.evaluation, "",
         e.with, e.grade, e.pending));
-      (r.solo_flights || []).forEach((e) => add(s, "solo_flights", e,
-        e.ng ? "NG (non-graded)" : "graded", "", "", e.instructor, e.grade, false));
+      WA.filled("solo_flights", r.solo_flights).forEach((e) => add(s, "solo_flights", e,
+        (e.slot ? WA.soloSlotLabel(e.slot) : "additional solo") +
+        (e.ng ? " — NG (non-graded)" : " — graded"),
+        e.sortie, "", e.instructor, e.grade, false));
       for (const k of ["fpc", "cef"]) {
-        (r[k] || []).forEach((e) => add(s, k, e, e.result || "", "", "", e.by, e.grade, e.pending));
+        (r[k] || []).forEach((e) => add(s, k, e, e.result || "",
+          e.flight_code, "", e.evaluator, e.grade, e.pending));
       }
     }
     download("wings-ahead-entries-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
