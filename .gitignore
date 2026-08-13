@@ -1,0 +1,14 @@
+# local Supabase stack (docker volumes / temp state — never in the repo)
+supabase/.temp/
+supabase/.branches/
+supabase/.env
+# node
+node_modules/
+npm-debug.log*
+# editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+# Claude session files
+.claude/

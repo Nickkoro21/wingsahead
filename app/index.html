@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="obsidian" data-mode="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>WingsAhead</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Ctext%20y='0.9em'%20font-size='90'%3E%E2%9C%88%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+<script>
+/* Palette before first paint — no flash of the default theme on reload.
+   Mirrors app.js (PALETTES / apply): same keys. app.js re-applies it. */
+(function () {
+  try {
+    var d = document.documentElement,
+        id = localStorage.getItem("wa-palette"),
+        mode = localStorage.getItem("wa-palmode");
+    if (!id) { id = "obsidian"; mode = "dark"; }
+    d.setAttribute("data-theme", id);
+    d.setAttribute("data-mode", mode === "light" ? "light" : "dark");
+    d.classList.add("pal-" + id);
+    if (mode === "light") d.classList.add("light");
+  } catch (e) {}
+})();
+</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-icon" aria-hidden="true">&#9992;</span>
+    <div>
+      <h1>WingsAhead</h1>
+      <div class="tagline">Student utilization &mdash; Wing Commander brief</div>
+    </div>
+  </div>
+  <div class="top-actions">
+    <button id="theme-gal-btn" class="btn thm-btn" type="button" title="Theme gallery">
+      <span class="thm-dot" aria-hidden="true"></span><span class="thm-lbl">Theme</span></button>
+    <button id="theme-btn" class="btn thm-btn" type="button" title="Quick light/dark switch">&#9788;</button>
+  </div>
+</header>
+<main id="view"></main>
+<div id="toast" role="status" aria-live="polite"></div>
+<footer class="foot">
+  Data hosted on Supabase (EU &mdash; Frankfurt). The public repository holds code only
+  &mdash; no personal data, no links. Personal links are private: do not forward them.
+</footer>
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script src="student.js"></script>
+<script src="instructor.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>
