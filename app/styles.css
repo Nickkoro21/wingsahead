@@ -163,6 +163,18 @@ a { color: var(--accent); }
 .btn-danger { color: var(--bad); border-color: rgba(var(--bad-rgb), 0.5); }
 .btn-danger:hover { border-color: var(--bad); background: var(--bad-soft); }
 .btn-sm { padding: 4px 9px; font-size: 12px; border-radius: 7px; }
+/* ── "+ ADD" IS THE ACCENT (round 8) ───────────────────────────────────────
+   Adding a row is the one thing a student comes to a section to do, and it
+   was wearing the same quiet outline as "remove" and "back". It is now the
+   accent fill in every section and every palette: --accent / --on-accent is
+   the one pair the palette catalogue guarantees at >= 4.5:1 (contrast
+   contract, top of this file), so a single rule is AA in all eight. */
+.btn-add {
+  background: var(--accent); color: var(--on-accent);
+  border-color: transparent; font-weight: 600;
+}
+.btn-add:hover { filter: brightness(1.08); border-color: transparent; }
+.btn-add:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .btn-ghost { background: transparent; }
 
 .thm-btn { font-size: 13px; letter-spacing: 0.3px; }
@@ -263,7 +275,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 }
 input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); }
 .ck { display: flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; user-select: none; }
-.ck.pend { color: var(--warn); }
 
 /* ── round 5: the shared picker, the fixed slots, the marked values ── */
 /* the free-text box a picker reveals when "Other…" is chosen */
@@ -307,7 +318,7 @@ input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent);
    READABLE (greyed, never hidden), and what has to change before the record
    can be saved again is WARNED (the warn colour, never silently). */
 /* a box the rules do not allow to be filled YET — a checkride whose
-   predecessor is still pending. Never used on a box that already holds a
+   predecessor has not been flown. Never used on a box that already holds a
    value: a value must always be correctable. */
 .f.is-off > span, .ck.is-off { opacity: 0.55; }
 .f.is-off input, .f.is-off select { opacity: 0.6; cursor: not-allowed; }
@@ -341,7 +352,8 @@ input:disabled, select:disabled { background: var(--panel); }
   border: 1px solid var(--line); border-left: 3px solid var(--line);
   border-radius: 8px; padding: 10px; margin-bottom: 8px; background: var(--panel-2);
 }
-.rrow.is-pending { border-left-color: var(--warn); }
+/* NOTE (round 8): there is no .is-pending row any more — the flag it marked
+   is gone from the data model. */
 .rrow.is-legacy { border-left-color: var(--bad); }
 .rrow.is-co { border-left-color: var(--accent); }
 .legnote {
@@ -370,6 +382,26 @@ input:disabled, select:disabled { background: var(--panel); }
   padding: 4px 8px; line-height: 1.4;
 }
 .conote .cotag { margin-left: 0; margin-right: 4px; }
+/* ── LOCKED BY THE CO (round 8) ────────────────────────────────────────────
+   The owner sees the row exactly as it stands and can do nothing to it. That
+   has to look like a state and not like a failure: the accent border it
+   already had (is-co), a padlock chip, and controls that are visibly inert.
+   The row is never hidden or greyed to the point of being hard to read — it
+   is part of the record and the student is entitled to read it. */
+.colock {
+  display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: 0.5px;
+  color: var(--accent); background: var(--accent-soft);
+  border: 1px solid rgba(var(--accent-rgb), 0.55); border-radius: 4px;
+  padding: 0 5px; margin-right: 4px; white-space: nowrap; cursor: help;
+}
+.rrow.is-colock { border-left-color: var(--accent); border-left-width: 4px; }
+.rrow.is-colock input:disabled,
+.rrow.is-colock select:disabled,
+.rrow.is-colock textarea:disabled {
+  background: var(--panel); color: var(--text); opacity: 1; cursor: not-allowed;
+}
+.rrow.is-colock .rm, .rrow.is-colock .mschip .x,
+.rrow.is-colock .chip:disabled { opacity: 0.4; cursor: not-allowed; }
 /* the banner that says loudly WHOSE form this is */
 .cobar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -447,6 +479,24 @@ input:disabled, select:disabled { background: var(--panel); }
 .chip:hover { border-color: var(--accent); }
 .chip.is-on { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
 .chiprow { display: flex; gap: 6px; flex-wrap: wrap; }
+/* ── NOT RECOMMENDED — the fourth state of a branch (round 8) ──────────────
+   It is not a position, so it must not look like one: the rank chips fill
+   with the accent when chosen, this one fills with --bad. Unselected it is an
+   ordinary chip, because saying nothing is still the default. */
+.chip-nr.is-on {
+  background: var(--bad); color: #fff; border-color: transparent; font-weight: 600;
+}
+html[data-mode="dark"] .chip-nr.is-on { color: #10161f; }
+.nrtag {
+  display: inline-block; font-size: 10.5px; font-weight: 600; color: var(--bad);
+  border: 1px solid rgba(var(--bad-rgb), 0.55); background: var(--bad-soft);
+  border-radius: 4px; padding: 0 5px; white-space: nowrap; cursor: help;
+}
+.polite li.is-nr { color: var(--bad); list-style: square; }
+.polite li.is-nr b { color: var(--bad); }
+.nrline {
+  font-size: 0.95em; color: var(--bad); margin-top: 6px; line-height: 1.5;
+}
 
 /* ── Instructor: student blocks ── */
 .stucard { border-left: 3px solid var(--accent); }
@@ -507,9 +557,6 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .ana-nav .pos { font-size: 12px; color: var(--muted); }
 .ana-nav .nm { font-size: 18px; font-weight: 700; flex: 1; text-align: center; min-width: 0; }
 .arrowbtn { font-size: 16px; padding: 6px 14px; }
-.pendlist { margin: 6px 0 0 18px; font-size: 12.5px; color: var(--warn); }
-.pendlist li { margin-bottom: 2px; }
-
 .chartbox { background: var(--chart-bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
 .chartbox svg { display: block; width: 100%; height: auto; }
 .chartbox .chk { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
@@ -669,4 +716,31 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
   }
   .pr-brand span { font-size: 16px; font-weight: 800; letter-spacing: 1px; }
   .pr-brand .pr-brand-sub { font-size: 10.5px; font-weight: 400; letter-spacing: 0.4px; margin-left: auto; color: #333; }
+
+  /* ── THE INSTRUCTOR'S PRINTED RECOMMENDATION SHEET (round 8) ─────────────
+     One block per student, and a block is never split across two pages: an
+     instructor reading a torn table cannot check his own recommendation. */
+  .pr-ins-blk {
+    break-inside: avoid; page-break-inside: avoid;
+    border-top: 1px solid #000; padding-top: 3mm; margin-bottom: 5mm;
+  }
+  .pr-ins-blk:first-of-type { border-top: none; padding-top: 0; }
+  .pr-ins-blk h3 {
+    font-size: 14px; font-weight: 700; margin-bottom: 1.5mm;
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  }
+  .pr-ins-blk .pr-ins-meta { font-size: 11px; font-weight: 400; color: #333; }
+  .pr-ins-line { font-size: 11px; line-height: 1.5; margin: 0 0 1.5mm; }
+  .pr-ins-sub {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.4px;
+    margin: 2.5mm 0 1mm; text-transform: uppercase;
+  }
+  /* an explicit "not recommended": colour is not available on paper, so the
+     cell says the words and wears the weight */
+  .pr-t td.pr-nr { font-weight: 700; }
+  .pr-ins-blk .pr-t { margin-bottom: 2mm; }
 }
+
+/* R8 verify finding: the long Greek verbatim under the SMS reason box must stay
+   mixed-case as printed — the .f > span uppercase rule is for FIELD LABELS only */
+.f > span.fnote { text-transform: none; }

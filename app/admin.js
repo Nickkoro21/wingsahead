@@ -161,7 +161,6 @@ WA.renderAdmin = async function (view, me) {
           <td class="num">${st.airsickness}</td>
           <td class="num">${st.fpc}</td>
           <td class="num">${st.cef}</td>
-          <td>${st.pending ? `<span class="badge badge-warn">${st.pending} pending</span>` : `<span class="badge">—</span>`}</td>
           <td><span class="minibars" title="proposals naming Fighters / Helicopters / Transport–FF">
                 <i style="height:${mb(pc.fighters)}px" title="Fighters: ${pc.fighters}"></i>
                 <i class="b2" style="height:${mb(pc.helicopters)}px" title="Helicopters: ${pc.helicopters}"></i>
@@ -202,9 +201,9 @@ WA.renderAdmin = async function (view, me) {
       <div class="tblwrap"><table class="tbl">
         <thead><tr>
           <th>Student</th><th>Class</th><th>Solos</th><th>NFS</th><th>SMS</th>
-          <th>FAIL</th><th>A.Good</th><th>Airsick</th>
+          <th>FAIL</th><th>Almost Good</th><th>Airsick</th>
           <th title="${esc(WA.secTip("fpc"))}">FPC</th><th title="${esc(WA.secTip("cef"))}">CEF</th>
-          <th>Pending</th><th>Proposals</th><th>Self-report</th><th>Enter for</th>
+          <th>Proposals</th><th>Self-report</th><th>Enter for</th>
         </tr></thead><tbody>${rows}</tbody></table></div>
       <div class="grid2" style="margin-top:12px">
         <div class="card"><h3>Students without a self-report</h3>
@@ -217,6 +216,15 @@ WA.renderAdmin = async function (view, me) {
   /* ════════ STUDENT ANALYSIS ════════ */
   /* one 4-bar comparison: this student · class best · class worst · class average.
      opts.unit — "%" appended to every value · opts.max — fixed axis top. */
+  /* ── THE AXIS FOLLOWS THE DATA (round 8) ──────────────────────────────────
+     A grade chart pinned to 0-100 spends four fifths of its height on a range
+     nobody in the class is in: 69 · 77 · 87 draw three bars of almost exactly
+     the same length, and the CO cannot see at a glance what he came to see.
+     `o.min0` asks for a floor derived from the plot itself — the LOWEST value
+     actually drawn, less 5, floored at 0 — while the top stays the honest 100
+     so a grade is never made to look bigger than it is. Counts keep their
+     0-based axis: a bar chart of "how many FAILs" must start at zero or it
+     lies. The value labels ride above the bars either way. */
   function barsSVG(caption, mine, vals, dir, opts) {
     const o = opts || {};
     const unit = o.unit || "";
@@ -230,22 +238,26 @@ WA.renderAdmin = async function (view, me) {
       { label: "Class average", v: avg, color: "var(--hf)" },
     ];
     const W = 640, H = 280, L = 44, R = 10, T = 26, B = 38;
-    /* counts get whole-number gridlines; grades keep the honest 0-100 axis */
+    /* counts get whole-number gridlines; grades keep the honest 100 at the top */
     const peak = Math.max(0, ...bars.map((b) => (b.v === null ? 0 : b.v)));
-    const step = o.max ? o.max / 4 : Math.max(1, Math.ceil(peak / 4));
-    const max = o.max || step * 4;
+    const step0 = o.max ? o.max / 4 : Math.max(1, Math.ceil(peak / 4));
+    const max = o.max || step0 * 4;
+    /* the floor: the lowest value actually plotted, less 5, never below 0 */
+    const drawn = bars.map((b) => b.v).filter((v) => v !== null && isFinite(v));
+    const lo = (o.min0 && drawn.length) ? Math.max(0, Math.floor(Math.min(...drawn)) - 5) : 0;
+    const span = Math.max(1, max - lo);
     const iw = (W - L - R) / bars.length;
     let grid = "", labels = "";
     for (let i = 0; i <= 4; i++) {
-      const val = step * i;
-      const y = H - B - ((H - T - B) * val) / max;
+      const val = lo + (span / 4) * i;
+      const y = H - B - ((H - T - B) * (val - lo)) / span;
       grid += `<line x1="${L}" y1="${y}" x2="${W - R}" y2="${y}" style="stroke:var(--line);stroke-width:${i === 0 ? 1.4 : 0.6}"/>` +
               `<text x="${L - 6}" y="${y + 3.5}" text-anchor="end" style="fill:var(--muted);font-size:10px">${esc(round1(val))}</text>`;
     }
     const rects = bars.map((b, i) => {
       const x = L + iw * i + iw * 0.18, w = iw * 0.64;
-      const v = b.v === null ? 0 : b.v;
-      const h = Math.max(b.v === null ? 0 : 2, ((H - T - B) * v) / max);
+      const v = b.v === null ? lo : Math.max(lo, b.v);
+      const h = Math.max(b.v === null ? 0 : 2, ((H - T - B) * (v - lo)) / span);
       const y = H - B - h;
       labels += `<text x="${x + w / 2}" y="${H - B + 15}" text-anchor="middle" style="fill:var(--muted);font-size:10.5px">${esc(b.label)}</text>` +
                 `<text x="${x + w / 2}" y="${y - 6}" text-anchor="middle" style="fill:var(--text);font-size:12px;font-weight:600">${
@@ -279,14 +291,21 @@ WA.renderAdmin = async function (view, me) {
     const vals = all.filter((x) => x.v !== null).map((x) => x.v);
     const mineRow = WA.evalLatest(s._evals, id);
     const mine = mineRow ? mineRow.grade : null;
+    /* ROUND 8 — the axis starts just below the lowest grade on the plot, so
+       the four bars differ by what the grades differ by (min0), and still ends
+       at 100, so nothing is exaggerated. */
     const chart = barsSVG(WA.evalLabel(id) + " — grade %, higher is better", mine, vals, "high",
-                          { unit: "%", max: 100 });
+                          { unit: "%", max: 100, min0: true });
     const listed = all.filter((x) => x.v !== null)
       .sort((a, b) => b.v - a.v)
       .map((x) => `${esc(x.name)} ${esc(x.v)}%`).join(" · ");
     return `
       ${chart}
-      <p class="hint chk">Class values on <b>${esc(id)}</b>: ${listed || "nobody has flown it yet"}
+      <p class="hint chk">Axis: ${vals.length || mine !== null
+        ? esc(Math.max(0, Math.floor(Math.min(...[mine].concat(vals)
+            .filter((v) => v !== null && isFinite(v)))) - 5)) + "–100 %"
+        : "0–100 %"} — it starts just below the lowest grade plotted.
+        Class values on <b>${esc(id)}</b>: ${listed || "nobody has flown it yet"}
         ${vals.length ? ` &mdash; best ${esc(Math.max(...vals))}%, worst ${esc(Math.min(...vals))}%,
         average ${esc(round1(vals.reduce((a, b) => a + b, 0) / vals.length))}%` : ""}
         (n = ${vals.length} of ${A.data.students.length} students).
@@ -388,13 +407,13 @@ WA.renderAdmin = async function (view, me) {
         key: r ? "ev:" + r.i : "", cat: sl.def.cat, flown: !!r,
         what: `<b>${esc(sl.def.id)}</b> ${esc(sl.def.name)}`,
         who: r ? r.with : "", grade: r ? r.grade : null, date: r ? r.date : "",
-        pending: !!(r && r.pending), co: !!(r && WA.isCO(r)),
+        co: !!(r && WA.isCO(r)),
       });
       for (const old of sl.earlier) {
         rows.push({
           key: "ev:" + old.i, cat: sl.def.cat, flown: true, sub: true,
           what: `<span class="k">earlier attempt — ${esc(sl.def.id)}</span>`,
-          who: old.with, grade: old.grade, date: old.date, pending: old.pending, co: WA.isCO(old),
+          who: old.with, grade: old.grade, date: old.date, co: WA.isCO(old),
         });
       }
     }
@@ -402,17 +421,17 @@ WA.renderAdmin = async function (view, me) {
       rows.push({
         key: "ev:" + r.i, cat: null, flown: true,
         what: `<span class="warn-t">(not identified — imported entry)</span>`,
-        who: r.with, grade: r.grade, date: r.date, pending: r.pending, co: WA.isCO(r),
+        who: r.with, grade: r.grade, date: r.date, co: WA.isCO(r),
       });
     }
     s._fpc.forEach((r, k) => rows.push({
       key: "fpc:" + r.i, cat: "fpc", flown: true,
       what: `<b>FPC #${k + 1}</b> ${r.trigger ? "(" + WA.sortieCell(null, r.trigger) + ") " : ""}${esc(r.result || "flight progress check")}`,
-      who: r.with, grade: r.grade, date: r.date, pending: r.pending, co: WA.isCO(r),
+      who: r.with, grade: r.grade, date: r.date, co: WA.isCO(r),
     }));
     return `
       <div class="tblwrap"><table class="tbl" id="sumtbl">
-        <thead><tr><th>Evaluation</th><th>With whom</th><th>Grade</th><th>Date</th><th>Pending</th><th>Source</th></tr></thead>
+        <thead><tr><th>Evaluation</th><th>With whom</th><th>Grade</th><th>Date</th><th>Source</th></tr></thead>
         <tbody>${rows.map((r) => `
           <tr data-sumrow="${esc(r.key)}" class="${r.cat === A.plotCat ? "in-cat" : ""}${
             A.hi && A.hi === r.key ? " is-hi" : ""}${r.flown ? "" : " is-unflown"}">
@@ -420,7 +439,6 @@ WA.renderAdmin = async function (view, me) {
             <td>${r.flown ? esc(r.who || "—") : `<span class="k">not flown yet</span>`}</td>
             <td class="num">${WA.pct(r.grade)}</td>
             <td>${r.flown ? esc(fmtD(r.date)) : "—"}</td>
-            <td>${r.pending ? `<span class="badge badge-warn">pending</span>` : "—"}</td>
             <td>${r.flown ? (r.co ? `<span class="cotag" title="${esc(WA.CO_TIP)}">CO</span>`
                                   : `<span class="k">self</span>`) : "—"}</td></tr>`).join("")}
         </tbody></table></div>`;
@@ -444,7 +462,7 @@ WA.renderAdmin = async function (view, me) {
   function failTable(s, k) {
     const list = Array.isArray(s.record[k]) ? s.record[k] : [];
     if (!list.length) return `<p class="hint">No ${esc(WA.secLabel(k))} entries reported.</p>`;
-    return evTable(["Date", "Track", "Flight", "Items", "Instructor", "Grade", "", "Source"],
+    return evTable(["Date", "Track", "Flight", "Items", "Instructor", "Grade", "Source"],
       list.slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).map((e) => `
         <tr><td>${esc(fmtD(e.date))}</td>
           <td>${esc(WA.itemCatLabel(e.category))}</td>
@@ -457,7 +475,6 @@ WA.renderAdmin = async function (view, me) {
                   WA.itemsLegacy(e).length} legacy</span>` : ""}</td>
           <td>${esc(e.instructor || "—")}</td>
           <td class="num">${WA.pct(e.grade)}</td>
-          <td>${e.pending ? `<span class="badge badge-warn">pending</span>` : ""}</td>
           ${srcCell(e)}</tr>`));
   }
 
@@ -476,7 +493,7 @@ WA.renderAdmin = async function (view, me) {
   }
 
   /* the solo section as the CO must see it: the FIXED syllabus slots, in
-     syllabus order, each either flown or openly pending, plus any extra solo
+     syllabus order, each either flown or openly unflown, plus any extra solo
      reality produced (round 5) */
   function soloRows(s) {
     const list = Array.isArray(s.record.solo_flights) ? s.record.solo_flights : [];
@@ -490,7 +507,7 @@ WA.renderAdmin = async function (view, me) {
           sl.of > 1 ? ` <span class="k">solo ${sl.n} of ${sl.of}</span>` : ""}${
           sl.req ? ` <span class="badge badge-warn">required</span>` : ""}</td>
         <td>${flown && e.sortie ? WA.sortieCell(null, e.sortie) : `<span class="k">${esc(sl.codes.join(" / "))}</span>`}</td>
-        <td>${flown ? esc(fmtD(e.date)) : `<span class="badge">pending — not flown</span>`}</td>
+        <td>${flown ? esc(fmtD(e.date)) : `<span class="badge">not flown yet</span>`}</td>
         <td>${!flown ? "—" : (e.ng ? `<span class="badge">NG — non-graded</span>` : WA.pct(e.grade))}</td>
         <td>${!flown ? "—" : WA.soloWhoHTML(e)}</td>
         ${flown ? srcCell(e) : "<td>—</td>"}</tr>`;
@@ -523,8 +540,15 @@ WA.renderAdmin = async function (view, me) {
       `<tr><td>${esc(fmtD(e.date))}</td>
         <td title="${esc((WA.nfsReason(e.reason) || {}).el || "")}">${esc(WA.nfsReasonShort(e))}</td>
         <td>${esc(e.note || "—")}</td>${srcCell(e)}</tr>`);
+    /* ROUND 8 — the entrance names its ΚΕΠΕ condition (3-01 ΚΕΦ.2 §32β). A row
+       recorded before the rule shows the gap, marked, so the CO can see which
+       rows the student still has to complete. */
     const sms = (r.sms || []).map((e) =>
-      `<tr><td>${esc(fmtD(e.entrance_date))}</td><td>${e.exit_date ? esc(fmtD(e.exit_date)) : `<span class="badge badge-warn">still open</span>`}</td>
+      `<tr><td>${esc(fmtD(e.entrance_date))}</td>
+        <td title="${esc((WA.smsReason(e.reason) || {}).el || "")}">${WA.smsReason(e.reason)
+          ? esc(WA.smsReasonShort(e))
+          : `<span class="itlegacy" title="Recorded before round 8 asked which of the ΚΕΠΕ entry conditions of 3-01 ΚΕΦ.2 §32β it was — the row cannot be saved again until it is chosen">not recorded <span class="k">(legacy)</span></span>`}</td>
+        <td>${e.exit_date ? esc(fmtD(e.exit_date)) : `<span class="badge badge-warn">still open</span>`}</td>
         <td>${esc(e.note || "—")}</td>${srcCell(e)}</tr>`);
     /* ROUND 6 — an FPC is conducted by the Squadron CO or the DO. A stored FPC
        naming anybody else is shown as it was written, marked, so the CO can see
@@ -541,18 +565,27 @@ WA.renderAdmin = async function (view, me) {
         <td>${evalCell(k, e)}</td>
         <td>${esc(fmtD(e.date))}</td>
         <td>${esc(e.result || "—")}</td>
-        <td class="num">${WA.pct(e.grade)}</td>
-        <td>${e.pending ? `<span class="badge badge-warn">pending</span>` : ""}</td>${srcCell(e)}</tr>`);
+        <td class="num">${WA.pct(e.grade)}</td>${srcCell(e)}</tr>`);
     const blk = (k, head, rows, cnt) => `
       <h3 style="margin-top:8px">${esc(WA.secLabel(k))} ${WA.tipDot(k)}
         <span class="cnt">${esc(cnt || (rows.length + " " + (rows.length === 1 ? "entry" : "entries")))}</span></h3>
       ${rows.length ? evTable(head, rows) : `<p class="hint">None reported.</p>`}`;
     return blk("nfs", ["Date", "Reason (form Α0473)", "Note", "Source"], nfs) +
-           blk("sms", ["Entrance", "Exit", "Note", "Source"], sms) +
-           blk("solo_flights", ["Syllabus slot", "Sortie", "Date", "Grade", "Evaluator / instructor", "Source"],
+           blk("sms", ["Entrance", "Entry condition (3-01 ΚΕΦ.2 §32β)", "Exit", "Note", "Source"], sms) +
+           blk("solo_flights", ["Syllabus slot", "Sortie", "Date", "Grade", "Authorised by", "Source"],
                soloRows(s), soloCount(s)) +
-           blk("fpc", ["Entry", "Evaluator", "Date", "Result", "Grade", "", "Source"], chk("fpc")) +
-           blk("cef", ["Entry", "Evaluator", "Date", "Result", "Grade", "", "Source"], chk("cef"));
+           blk("fpc", ["Entry", "Evaluator", "Date", "Result", "Grade", "Source"], chk("fpc")) +
+           blk("cef", ["Entry", "Evaluator", "Date", "Result", "Grade", "Source"], chk("cef"));
+  }
+
+  /* one branch of one proposal, in the drill-down: the position, the explicit
+     refusal, or the silence — three different cells, never one (round 8) */
+  function propCell(p, bid) {
+    if (p.ranks[bid]) return esc(RW[p.ranks[bid]]);
+    if (p.not_recommended && p.not_recommended[bid]) {
+      return `<span class="nrtag" title="${esc(WA.NR_TIP)}">not recomm.</span>`;
+    }
+    return "—";
   }
 
   function branchBoxes(s, forBrief) {
@@ -562,6 +595,14 @@ WA.renderAdmin = async function (view, me) {
     return BR.map((b) => {
       const ag = s.aggregates[b.id];
       const firsts = (ag.by_rank["1"] || []).length;
+      /* ROUND 8 — THE THREE SILENCES, EACH IN ITS OWN WORDS.
+         "does not recommend" is a judgement the instructor made and typed;
+         "has not recommended" is a proposal that simply does not name this
+         branch; "has not submitted" is no proposal at all. The CO reads all
+         three differently, so they can never share a sentence. */
+      const nrList = ag.not_recommended || [];
+      const politeNR = nrList.map((n) =>
+        `<li class="is-nr"><b>${esc(n)} does not recommend ${esc(b.label)} for this student</b></li>`).join("");
       const politeA = ag.not_this_branch.map((n) =>
         `<li>${esc(n)} has not recommended ${esc(b.label)} for this student</li>`).join("");
       const politeB = s.not_submitted.map((n) =>
@@ -586,8 +627,13 @@ WA.renderAdmin = async function (view, me) {
           ${names}
           <div class="stats">weighted <b>${esc(ag.weighted)}</b> (3×1st + 2×2nd + 1×3rd) ·
             ${firsts} first-choice ${firsts === 1 ? "vote" : "votes"} ·
+            ${nrList.length ? `<b>${nrList.length} not recommended</b> · ` : ""}
             ${total ? flewPct + "% of proposers flew with them" : "no proposers yet"}</div>
-          ${forBrief ? "" : `<ul class="polite">${politeA}${politeB}</ul>`}
+          ${forBrief
+            ? (nrList.length
+                ? `<div class="nrline" title="${esc(WA.NR_TIP)}">Not recommended by
+                     <b>${esc(nrList.join(", "))}</b></div>` : "")
+            : `<ul class="polite">${politeNR}${politeA}${politeB}</ul>`}
         </div>`;
     }).join("");
   }
@@ -597,7 +643,6 @@ WA.renderAdmin = async function (view, me) {
     if (!students.length) return `<div class="card"><p class="hint">No active students yet — add them under People &amp; links.</p></div>`;
     const s = students[A.sel];
     const st = s._stats;
-    const pend = WA.pendingItems(s.record);
     const chips = METRICS.map((m) =>
       `<button type="button" class="chip${m.id === A.metric ? " is-on" : ""}" data-metric="${esc(m.id)}"
         title="${esc((m.tip ? m.tip + " " : "") + "(" + DIRWORD[m.dir] + ")")}">${esc(m.label)}</button>`).join("");
@@ -612,9 +657,7 @@ WA.renderAdmin = async function (view, me) {
           <tbody>${s.proposals.map((p) => `
             <tr><td><b>${esc((p.rank ? p.rank + " " : "") + p.last_name)}</b></td>
               <td>${esc(p.duty || "—")}</td><td>${esc(p.leadership || "—")}</td><td>${esc(p.status || "—")}</td>
-              <td>${esc(p.ranks.fighters ? RW[p.ranks.fighters] : "—")}</td>
-              <td>${esc(p.ranks.helicopters ? RW[p.ranks.helicopters] : "—")}</td>
-              <td>${esc(p.ranks.transport_ff ? RW[p.ranks.transport_ff] : "—")}</td>
+              ${BR.map((b) => `<td>${propCell(p, b.id)}</td>`).join("")}
               <td>${p.flew_with ? "✓" : "—"}</td><td>${esc(p.comment || "")}</td>
               ${srcCell(p)}</tr>`).join("")}
           </tbody></table></div></details>` : "";
@@ -637,7 +680,6 @@ WA.renderAdmin = async function (view, me) {
           <span class="nm">${esc(WA.personName(s.person, true))}</span>
           <span class="meta">${esc([s.person.mn ? "MN " + s.person.mn : "", s.person.class ? "Class " + s.person.class : ""].filter(Boolean).join(" · "))}</span>
           <span class="lastupd">Self-report: <b>${s.completion.has_record ? esc(fmtDT(s.last_update)) : "not submitted"}</b></span>
-          ${st.pending ? `<span class="badge badge-warn">${st.pending} pending item${st.pending === 1 ? "" : "s"}</span>` : ""}
           ${st.legacy ? `<span class="badge badge-bad"
             title="Entries recorded on an earlier version of the form. They are readable everywhere; the student is asked to complete them, and the round-6 rules refuse the next save until they are."
             >${st.legacy} entr${st.legacy === 1 ? "y" : "ies"} to correct</span>` : ""}
@@ -648,7 +690,6 @@ WA.renderAdmin = async function (view, me) {
             title="Open this student's form and enter data on their behalf — every entry is tagged 'entered by CO'"
             >&#9998; Edit record</button>
         </div>
-        ${pend.length ? `<ul class="pendlist">${pend.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
       </div>
       <div class="card">
         <h2>Comparison vs class</h2>
@@ -725,7 +766,6 @@ WA.renderAdmin = async function (view, me) {
         </div>
         <div class="b-name">${esc(WA.personName(s.person, true))}</div>
         <div class="b-meta">${esc([s.person.mn ? "MN " + s.person.mn : "", s.person.class ? "Class " + s.person.class : ""].filter(Boolean).join(" · "))}
-          ${st.pending ? ` · <span style="color:var(--warn)">${st.pending} pending</span>` : ""}
           ${s._src.any ? ` · ${WA.coRecordTag(s._src)} ${esc(s._src.all
             ? "record entered by the CO"
             : s._src.n + (s._src.n === 1 ? " entry" : " entries") + " entered by the CO")}` : ""}</div>
@@ -734,7 +774,7 @@ WA.renderAdmin = async function (view, me) {
           <span><span class="k">NFS</span> <b>${st.nfs}</b></span>
           <span><span class="k">SMS</span> <b>${st.sms}</b></span>
           <span><span class="k">FAIL</span> <b>${st.fail}</b></span>
-          <span><span class="k">ALMOST GOOD</span> <b>${st.almost_good}</b></span>
+          <span><span class="k">Almost Good</span> <b>${st.almost_good}</b></span>
           <span><span class="k">Airsickness</span> <b>${st.airsickness}</b></span>
           <span title="${esc(WA.secTip("fpc"))}"><span class="k">FPC</span> <b>${st.fpc}</b></span>
           <span title="${esc(WA.secTip("cef"))}"><span class="k">CEF</span> <b>${st.cef}</b></span>
@@ -743,8 +783,8 @@ WA.renderAdmin = async function (view, me) {
           <div class="kline"><span class="k">Evaluations</span>
             ${s._evalSlots.slots.map((sl) => sl.row
               ? `<b>${esc(sl.def.id)}</b> ${WA.pct(sl.row.grade)}${
-                  sl.row.with ? " <span class='k'>w/ " + esc(sl.row.with) + "</span>" : ""}${
-                  sl.row.pending ? " ⏳" : ""}${WA.coTag(sl.row)}`
+                  sl.row.with ? " <span class='k'>with " + esc(sl.row.with) + "</span>" : ""}${
+                  WA.coTag(sl.row)}`
               : `<span class="k">${esc(sl.def.id)} not flown</span>`).join(" · ")}
             ${s._evalSlots.extras.length
               ? ` · <span class="k">${s._evalSlots.extras.length} imported, not identified</span>` : ""}</div>
@@ -768,15 +808,15 @@ WA.renderAdmin = async function (view, me) {
                 WA.itemsLabelHTML(e) +
                 WA.itemsCountHTML(e) +
                 (e.grade === null || e.grade === undefined ? "" : " <b>" + WA.pct(e.grade) + "</b>") +
-                (e.instructor ? " <span class='k'>w/ " + esc(e.instructor) + "</span>" : "") +
-                (e.pending ? " ⏳" : "") + WA.coTag(e) + `</div>`).join("")
+                (e.instructor ? " <span class='k'>with " + esc(e.instructor) + "</span>" : "") +
+                WA.coTag(e) + `</div>`).join("")
                 : "<span class='k'>none reported</span>"}</div>`;
           }).join("")}
           <div class="kline"><span class="k">Airsickness</span>
             ${(s.record.airsickness || []).length ? (s.record.airsickness || []).map((e) =>
               esc(fmtD(e.date)) +
               (e.flight_code ? " <b>" + WA.sortieCell(null, e.flight_code) + "</b>" : "") +
-              (e.instructor ? " <span class='k'>w/ " + esc(e.instructor) + "</span>" : "") +
+              (e.instructor ? " <span class='k'>with " + esc(e.instructor) + "</span>" : "") +
               (e.phase ? ` <span class='k' title="the phase-of-flight note this form collected before round 6">(legacy: ${esc(e.phase)})</span>` : "") +
               WA.coTag(e)).join(" · ")
               : "<span class='k'>none reported</span>"}</div>
@@ -787,9 +827,16 @@ WA.renderAdmin = async function (view, me) {
               ${list.length ? list.map((e) => `<div class="sub">${WA.checkLineHTML(k, e)}` +
                 (e.grade === null || e.grade === undefined ? "" : " <b>" + WA.pct(e.grade) + "</b>") +
                 (e.result ? " <span class='k'>" + esc(e.result) + "</span>" : "") +
-                (e.pending ? " ⏳" : "") + WA.coTag(e) + `</div>`).join("")
+                WA.coTag(e) + `</div>`).join("")
                 : "<span class='k'>none reported</span>"}</div>`;
           }).join("")}
+          <div class="kline"><span class="k">SMS</span>
+            ${(s.record.sms || []).length ? (s.record.sms || []).map((e) =>
+              esc(fmtD(e.entrance_date)) + " <span class='k'>" + esc(WA.smsReasonLabel(e)) + "</span>" +
+              (e.exit_date ? " <span class='k'>→ " + esc(fmtD(e.exit_date)) + "</span>"
+                           : " <span class='k'>still open</span>") +
+              WA.coTag(e)).join(" · ")
+              : "<span class='k'>none reported</span>"}</div>
           <div class="kline"><span class="k">NFS</span>
             ${(s.record.nfs || []).length ? (s.record.nfs || []).map((e) =>
               esc(fmtD(e.date)) + " <span class='k'>" + esc(WA.nfsReasonLabel(e)) + "</span>" +
@@ -813,9 +860,14 @@ WA.renderAdmin = async function (view, me) {
           <td>${esc((ag.by_rank["1"] || []).join(", ") || "—")}</td>
           <td>${esc((ag.by_rank["2"] || []).join(", ") || "—")}</td>
           <td>${esc((ag.by_rank["3"] || []).join(", ") || "—")}</td>
+          <td>${esc((ag.not_recommended || []).join(", ") || "—")}</td>
           <td>${esc(ag.weighted)}</td></tr>`;
       }).join("");
-      const politeAll = BR.map((b) => s.aggregates[b.id].not_this_branch.map((n) =>
+      /* ROUND 8 — an explicit "not recommended" is a judgement and prints as
+         one; the two silences keep their own, weaker sentences */
+      const politeAll = BR.map((b) => (s.aggregates[b.id].not_recommended || []).map((n) =>
+        `<li><b>${esc(n)} does not recommend ${esc(b.label)} for this student</b></li>`).join("")).join("") +
+        BR.map((b) => s.aggregates[b.id].not_this_branch.map((n) =>
         `<li>${esc(n)} has not recommended ${esc(b.label)} for this student</li>`).join("")).join("") +
         s.not_submitted.map((n) => `<li>${esc(n)} has not submitted a recommendation for this student yet</li>`).join("");
       const comments = s.proposals.filter((p) => p.comment).map((p) =>
@@ -833,18 +885,17 @@ WA.renderAdmin = async function (view, me) {
         return `<tr${e ? "" : ' class="is-unflown"'}>
           <td>${esc(sl.def.id + " — " + sl.def.name)}${e ? WA.coTag(e) : ""}</td>
           <td>${e ? esc(e.with || "—") : "not flown yet"}</td><td>${WA.pct(e ? e.grade : null)}</td>
-          <td>${e ? esc(fmtD(e.date)) : "—"}</td><td>${e && e.pending ? "pending" : ""}</td></tr>`;
+          <td>${e ? esc(fmtD(e.date)) : "—"}</td></tr>`;
       }).concat(s._evalSlots.extras.map((e) =>
         `<tr><td>(not identified — imported)${WA.coTag(e)}</td>
           <td>${esc(e.with || "—")}</td><td>${WA.pct(e.grade)}</td>
-          <td>${esc(fmtD(e.date))}</td><td>${e.pending ? "pending" : ""}</td></tr>`));
+          <td>${esc(fmtD(e.date))}</td></tr>`));
       const fgRows = (k) => (s.record[k] || []).map((e) =>
         `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${esc(WA.itemCatLabel(e.category))}</td>
           <td>${esc(e.flight_code || "—")}</td>
           <td>${esc(WA.itemsLabel(e))}${WA.itemsCountHTML(e, "pr-n")}</td>
           <td>${esc(e.instructor || "—")}</td>
-          <td>${WA.pct(e.grade)}</td>
-          <td>${e.pending ? "pending" : ""}</td></tr>`);
+          <td>${WA.pct(e.grade)}</td></tr>`);
       /* ROUND 6 — the printed airsickness table names the FLIGHT; a row that
          still carries the retired note prints it marked "legacy", so paper
          says exactly what the screen says */
@@ -880,13 +931,15 @@ WA.renderAdmin = async function (view, me) {
             ? ` <span class="pr-n">(legacy — an FPC is conducted by the ${
                 esc(WA.FPC_EVALUATORS.join(" or the "))})</span>` : ""}</td>
           <td>${esc(fmtD(e.date))}</td><td>${esc(e.result || "—")}</td>
-          <td>${WA.pct(e.grade)}</td>
-          <td>${e.pending ? "pending" : ""}</td></tr>`);
+          <td>${WA.pct(e.grade)}</td></tr>`);
       const nfsRows = (s.record.nfs || []).map((e) =>
         `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${esc(WA.nfsReasonShort(e))}</td>
           <td>${esc(e.note || "—")}</td></tr>`);
       const smsRows = (s.record.sms || []).map((e) =>
-        `<tr><td>${esc(fmtD(e.entrance_date))}${WA.coTag(e)}</td><td>${e.exit_date ? esc(fmtD(e.exit_date)) : "still open"}</td>
+        `<tr><td>${esc(fmtD(e.entrance_date))}${WA.coTag(e)}</td>
+          <td>${WA.smsReason(e.reason) ? esc(WA.smsReasonShort(e))
+            : `<span class="pr-n">not recorded (legacy)</span>`}</td>
+          <td>${e.exit_date ? esc(fmtD(e.exit_date)) : "still open"}</td>
           <td>${esc(e.note || "—")}</td></tr>`);
       return `
         <div class="pr-page">
@@ -901,31 +954,32 @@ WA.renderAdmin = async function (view, me) {
             · proposals in: ${s.completion.proposals_in}/${s.completion.instructors_total}</div>
           <div class="pr-sec">Reported record — counts derived from the dated entries</div>
           <table class="pr-t"><thead><tr><th>Solos</th><th>NFS</th>
-            <th>SMS</th><th>FAIL</th><th>Almost Good</th><th>Airsick</th><th>FPC</th><th>CEF</th><th>Pending</th></tr></thead>
+            <th>SMS</th><th>FAIL</th><th>Almost Good</th><th>Airsick</th><th>FPC</th><th>CEF</th></tr></thead>
             <tbody><tr>
               <td>${st.solos}</td><td>${st.nfs}</td><td>${st.sms}</td><td>${st.fail}</td>
               <td>${st.almost_good}</td><td>${st.airsickness}</td><td>${st.fpc}</td>
-              <td>${st.cef}</td><td>${st.pending}</td></tr></tbody></table>
+              <td>${st.cef}</td></tr></tbody></table>
           <div class="pr-sec">Evaluations (syllabus order)</div>
-          ${prT(["Evaluation", "With whom", "Grade", "Date", ""], evRows)}
+          ${prT(["Evaluation", "With whom", "Grade", "Date"], evRows)}
           <div class="pr-sec">FAIL</div>
-          ${prT(["Date", "Track", "Flight", "Items", "Instructor", "Grade", ""], fgRows("fail"))}
+          ${prT(["Date", "Track", "Flight", "Items", "Instructor", "Grade"], fgRows("fail"))}
           <div class="pr-sec">ALMOST GOOD</div>
-          ${prT(["Date", "Track", "Flight", "Items", "Instructor", "Grade", ""], fgRows("almost_good"))}
+          ${prT(["Date", "Track", "Flight", "Items", "Instructor", "Grade"], fgRows("almost_good"))}
           <div class="pr-sec">Airsickness — when, on which flight and with whom</div>
           ${prT(["Date", "Flight", "With whom"], asRows)}
           <div class="pr-sec">Solo flights — the syllabus slots (${esc(soloCount(s))})</div>
-          ${prT(["Syllabus slot", "Sortie", "Date", "Grade", "Evaluator / instructor"], soRows)}
+          ${prT(["Syllabus slot", "Sortie", "Date", "Grade", "Authorised by"], soRows)}
           <div class="pr-sec">NFS — Φύλλο μη Πτήσης (reason per form Α0473)</div>
           ${prT(["Date", "Reason", "Note"], nfsRows)}
-          <div class="pr-sec">SMS</div>
-          ${prT(["Entrance", "Exit", "Note"], smsRows)}
+          <div class="pr-sec">SMS — ΚΕΠΕ (entry condition per 3-01 ΚΕΦ.2 §32β)</div>
+          ${prT(["Entrance", "Entry condition", "Exit", "Note"], smsRows)}
           <div class="pr-sec">FPC — Δοκιμή Προόδου (flight progress check)</div>
-          ${prT(["Entry", "Evaluator", "Date", "Result", "Grade", ""], ckRows("fpc"))}
+          ${prT(["Entry", "Evaluator", "Date", "Result", "Grade"], ckRows("fpc"))}
           <div class="pr-sec">CEF — Εξέταση Καταλληλότητας (Squadron Evaluator)</div>
-          ${prT(["Entry", "Evaluator", "Date", "Result", "Grade", ""], ckRows("cef"))}
+          ${prT(["Entry", "Evaluator", "Date", "Result", "Grade"], ckRows("cef"))}
           <div class="pr-sec">Utilization proposals (weighted 3×1st + 2×2nd + 1×3rd)</div>
-          <table class="pr-t"><thead><tr><th>Branch</th><th>1st choice</th><th>2nd choice</th><th>3rd choice</th><th>Σ</th></tr></thead>
+          <table class="pr-t"><thead><tr><th>Branch</th><th>1st choice</th><th>2nd choice</th><th>3rd choice</th>
+            <th>Not recommended by</th><th>Σ</th></tr></thead>
             <tbody>${branchRows}</tbody></table>
           ${comments ? `<div class="pr-sec">Instructor comments</div><ul class="pr-bullets">${comments}</ul>` : ""}
           ${politeAll ? `<div class="pr-sec">Outstanding</div><ul class="pr-bullets">${politeAll}</ul>` : ""}
@@ -950,7 +1004,7 @@ WA.renderAdmin = async function (view, me) {
           &ldquo;+N CO&rdquo; a self-reported record he added N entries to.</p>
         <table class="pr-t"><thead><tr><th>#</th><th>Student</th>
           <th>Fighters Σ</th><th>Helicopters Σ</th><th>Transport–FF Σ</th>
-          <th>1st-choice votes</th><th>Proposals in</th><th>FAIL</th><th>A.Good</th><th>FPC</th><th>CEF</th></tr></thead><tbody>
+          <th>1st-choice votes</th><th>Proposals in</th><th>FAIL</th><th>Almost Good</th><th>FPC</th><th>CEF</th></tr></thead><tbody>
           ${list.map((s, i) => {
             const firsts = BR.reduce((acc, b) => acc + (s.aggregates[b.id].by_rank["1"] || []).length, 0);
             return `<tr><td>${i + 1}</td><td><b>${esc(WA.personName(s.person, true))}</b>${
@@ -1039,8 +1093,8 @@ WA.renderAdmin = async function (view, me) {
         <span class="hint">Personal links only — whoever holds a link IS that person. Distribute privately
           (Viber/mail). If a link leaks: <b>Regenerate</b> and resend.</span>
         <span class="spacer"></span>
-        <button type="button" class="btn btn-sm btn-primary" data-act="add-student">+ Add student</button>
-        <button type="button" class="btn btn-sm" data-act="add-instructor">+ Add instructor</button>
+        <button type="button" class="btn btn-sm btn-add" data-act="add-student">+ Add student</button>
+        <button type="button" class="btn btn-sm btn-add" data-act="add-instructor">+ Add instructor</button>
       </div>
       <div class="card"><h3>Students (${stu.length})</h3>
         <div class="tblwrap"><table class="tbl">
@@ -1144,7 +1198,7 @@ WA.renderAdmin = async function (view, me) {
   function exportSummaryCSV() {
     const rows = [["MN", "Rank", "Last name", "First name", "Class",
       "Solos", "NFS", "SMS", "FAIL", "Almost Good", "Airsickness",
-      "FPC", "CEF", "Pending items", "Entries to correct",
+      "FPC", "CEF", "Entries to correct",
       "Record entered by", "CO-entered entries"]
       .concat(WA.EVALUATIONS.map((d) => d.id))
       .concat(["W Fighters", "W Helicopters", "W Transport-FF",
@@ -1153,7 +1207,7 @@ WA.renderAdmin = async function (view, me) {
       const st = s._stats, ag = s.aggregates;
       rows.push([s.person.mn, s.person.rank, s.person.last_name, s.person.first_name, s.person.class,
         st.solos, st.nfs, st.sms, st.fail,
-        st.almost_good, st.airsickness, st.fpc, st.cef, st.pending, st.legacy,
+        st.almost_good, st.airsickness, st.fpc, st.cef, st.legacy,
         /* "CO" = every entry is the CO's · "self" = the owner's record, and
            the next column says how many entries of it the CO added */
         s.completion.has_record || s._src.any ? s._src.word : "", s._src.n]
@@ -1177,51 +1231,56 @@ WA.renderAdmin = async function (view, me) {
      stored number — a fractional legacy grade is never rounded away here. */
   function exportEntriesCSV() {
     const rows = [["Student", "Class", "Section", "Date", "Detail", "Flight code",
-      "Items", "Item count", "With whom", "Grade", "Pending", "To correct", "Entered by"]];
-    const add = (s, sec, e, detail, code, items, who, grade, pend, date) =>
+      "Items", "Item count", "With whom / authorised by", "Grade", "To correct", "Entered by"]];
+    const add = (s, sec, e, detail, code, items, who, grade, date) =>
       rows.push([WA.personName(s.person, true), s.person.class, WA.secLabel(sec),
         fmtD(date === undefined ? e.date : date), detail, code || "",
         items || "", WA.itemsN(e) || "", who || "",
-        WA.pctRaw(grade), pend ? "yes" : "",
+        WA.pctRaw(grade),
         e.legacy ? "yes" : "", WA.coWord(e)]);
     for (const s of A.data.students) {
       const r = s.record;
       (r.nfs || []).forEach((e) => add(s, "nfs", e,
         WA.nfsReasonLabel(e) + (e.note && e.reason !== "other" ? " — " + e.note : ""),
-        "", "", "", null, false));
+        "", "", "", null));
+      /* ROUND 8 — the ΚΕΠΕ entry condition travels in Detail beside the state */
       (r.sms || []).forEach((e) => add(s, "sms", e,
-        e.exit_date ? "exit " + fmtD(e.exit_date) : "still open", "", "", "", null, false, e.entrance_date));
+        WA.smsReasonLabel(e) + " — " + (e.exit_date ? "exit " + fmtD(e.exit_date) : "still open"),
+        "", "", "", null, e.entrance_date));
       /* ROUND 6 — the flight travels in the "Flight code" column like every
          other section's; a surviving phase note rides in Detail, named */
       (r.airsickness || []).forEach((e) => add(s, "airsickness", e,
-        e.phase ? "legacy note: " + e.phase : "", e.flight_code, "", e.instructor, null, false));
+        e.phase ? "legacy note: " + e.phase : "", e.flight_code, "", e.instructor, null));
       for (const k of ["fail", "almost_good"]) {
         (r[k] || []).forEach((e) => add(s, k, e, WA.itemCatLabel(e.category),
-          e.flight_code, (e.items || []).join(", "), e.instructor, e.grade, e.pending));
+          e.flight_code, (e.items || []).join(", "), e.instructor, e.grade));
       }
       WA.filled("evaluations", r.evaluations).forEach((e) => add(s, "evaluations", e,
         e.evaluation ? WA.evalLabel(e.evaluation) : "(not identified)", e.evaluation, "",
-        e.with, e.grade, e.pending));
+        e.with, e.grade));
       WA.filled("solo_flights", r.solo_flights).forEach((e) => add(s, "solo_flights", e,
         (e.slot ? WA.soloSlotLabel(e.slot) : "additional solo") +
         (e.ng ? " — NG (non-graded)" : " — graded"),
-        e.sortie, "", WA.soloWho(e), e.grade, false));
+        e.sortie, "", WA.soloWho(e), e.grade));
       for (const k of ["fpc", "cef"]) {
         (r[k] || []).forEach((e) => add(s, k, e, e.result || "",
-          e.flight_code, "", e.evaluator, e.grade, e.pending));
+          e.flight_code, "", e.evaluator, e.grade));
       }
     }
     download("wings-ahead-entries-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
   }
 
   function exportProposalsCSV() {
+    /* ROUND 8 — one cell, three answers: the position, "not recommended", or
+       empty for a branch the instructor said nothing about */
+    const cell = (p, bid) => p.ranks[bid] ? RW[p.ranks[bid]]
+      : ((p.not_recommended && p.not_recommended[bid]) ? "not recommended" : "");
     const rows = [["Student", "Class", "Instructor", "Duty", "Leadership", "Status",
       "Fighters", "Helicopters", "Transport-FF", "Flew with", "Comment", "Updated", "Entered by"]];
     for (const s of A.data.students) for (const p of s.proposals) {
       rows.push([WA.personName(s.person, true), s.person.class,
         (p.rank ? p.rank + " " : "") + p.last_name, p.duty, p.leadership, p.status,
-        p.ranks.fighters ? RW[p.ranks.fighters] : "", p.ranks.helicopters ? RW[p.ranks.helicopters] : "",
-        p.ranks.transport_ff ? RW[p.ranks.transport_ff] : "",
+        cell(p, "fighters"), cell(p, "helicopters"), cell(p, "transport_ff"),
         p.flew_with ? "yes" : "no", p.comment || "", fmtDT(p.updated_at), WA.coWord(p)]);
     }
     download("wings-ahead-proposals-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));

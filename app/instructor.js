@@ -17,6 +17,15 @@ WA.BRANCHES = [
   { id: "transport_ff", label: "Transport–Firefighting" },
 ];
 WA.RANK_WORD = { 1: "1st", 2: "2nd", 3: "3rd" };
+/* ── THE FOURTH STATE OF A BRANCH (round 8) ────────────────────────────────
+   Ranked 1st / 2nd / 3rd · NOT RECOMMENDED · untouched. Until round 8 the
+   third had to carry two meanings at once — "I would not send him there" and
+   "I have not formed a view" — and the CO could not tell them apart on the
+   brief. They are now different answers, worded differently everywhere:
+   "does not recommend" is a judgement, "has not recommended" is a silence.
+   MIRROR: db/schema.sql → proposals.nr_* / the aggregates of admin_get_data. */
+WA.NR_WORD = "Not recommended";
+WA.NR_TIP = "The instructor says this branch is not for this student — different from simply not ranking it, which says nothing either way.";
 
 WA.renderInstructor = async function (view, me, opts) {
   const O = opts || {};
@@ -47,6 +56,11 @@ WA.renderInstructor = async function (view, me, opts) {
         helicopters: mp && mp.ranks ? mp.ranks.helicopters : null,
         transport_ff: mp && mp.ranks ? mp.ranks.transport_ff : null,
       },
+      nr: {
+        fighters: !!(mp && mp.not_recommended && mp.not_recommended.fighters),
+        helicopters: !!(mp && mp.not_recommended && mp.not_recommended.helicopters),
+        transport_ff: !!(mp && mp.not_recommended && mp.not_recommended.transport_ff),
+      },
       flew_with: !!(mp && mp.flew_with),
       comment: (mp && mp.comment) || "",
       savedAt: mp ? mp.updated_at : null,
@@ -71,7 +85,7 @@ WA.renderInstructor = async function (view, me, opts) {
     const doneSlots = solos.filter((e) => e.slot && WA.soloSlot(e.slot)).length;
     const evLine = slots.slots.map((sl) => sl.row
       ? `${esc(sl.def.id)} <b>${WA.pct(sl.row.grade)}</b>` +
-        (sl.row.date ? ` (${esc(fmtD(sl.row.date))})` : "") + (sl.row.pending ? " ⏳" : "") + WA.coTag(sl.row)
+        (sl.row.date ? ` (${esc(fmtD(sl.row.date))})` : "") + WA.coTag(sl.row)
       : `<span class="k">${esc(sl.def.id)} —</span>`).join(" · ") +
       (slots.extras.length ? ` · <span class="k">${slots.extras.length} imported, not identified</span>` : "");
     const soLine = `<span class="k">${doneSlots} of ${nSlots} syllabus solos flown${
@@ -91,8 +105,8 @@ WA.renderInstructor = async function (view, me, opts) {
         `<div class="sub">${esc(fmtD(e.date))}${e.flight_code ? " <b>" + WA.sortieCell(e.category, e.flight_code) + "</b>" : ""}
           ${WA.itemsLabelHTML(e)}${WA.itemsCountHTML(e)}${
           e.grade === null || e.grade === undefined ? "" : ` <b>${WA.pct(e.grade)}</b>`}
-          ${e.instructor ? `<span class="k">w/ ${esc(e.instructor)}</span>` : ""}
-          ${e.pending ? "⏳" : ""}${WA.coTag(e)}</div>`).join("") + `</div>`;
+          ${e.instructor ? `<span class="k">with ${esc(e.instructor)}</span>` : ""}
+          ${WA.coTag(e)}</div>`).join("") + `</div>`;
     }).join("");
     /* NOTE (round-4 W3c): no "Evals" count here — every student converges to
        the same eight checkrides, so the number compares nothing. The grades
@@ -101,7 +115,6 @@ WA.renderInstructor = async function (view, me, opts) {
       <div class="selfrep">
         <div class="t">Self-reported record ${s.last_update
           ? `<span class="badge">upd. ${esc(fmtDT(s.last_update))}</span>` : `<span class="badge badge-warn">nothing submitted yet</span>`}
-          ${st.pending ? `<span class="badge badge-warn">${st.pending} pending</span>` : ""}
           ${src.any
             ? `<span class="badge badge-acc" title="${esc(src.tip)}">${esc(src.all
                 ? "entered by CO" : src.n + " entr" + (src.n === 1 ? "y" : "ies") + " by CO")}</span>`
@@ -111,7 +124,7 @@ WA.renderInstructor = async function (view, me, opts) {
           <span><span class="k">NFS</span> <b>${st.nfs}</b></span>
           <span><span class="k">SMS</span> <b>${st.sms}</b></span>
           <span><span class="k">FAIL</span> <b>${st.fail}</b></span>
-          <span><span class="k">A.GOOD</span> <b>${st.almost_good}</b></span>
+          <span><span class="k">Almost Good</span> <b>${st.almost_good}</b></span>
           <span><span class="k">Airsick</span> <b>${st.airsickness}</b></span>
           <span title="${esc(WA.secTip("fpc"))}"><span class="k">FPC</span> <b>${st.fpc}</b></span>
           <span title="${esc(WA.secTip("cef"))}"><span class="k">CEF</span> <b>${st.cef}</b></span>
@@ -124,10 +137,15 @@ WA.renderInstructor = async function (view, me, opts) {
 
   function chipRow(sid, branch) {
     const cur = P[sid].ranks[branch];
+    const nr = P[sid].nr[branch];
     return [1, 2, 3].map((n) => `
       <button type="button" class="chip${cur === n ? " is-on" : ""}"
               data-stu="${esc(sid)}" data-branch="${esc(branch)}" data-rank="${n}"
-              aria-pressed="${cur === n ? "true" : "false"}">${WA.RANK_WORD[n]}</button>`).join("");
+              aria-pressed="${cur === n ? "true" : "false"}">${WA.RANK_WORD[n]}</button>`).join("") +
+      `<button type="button" class="chip chip-nr${nr ? " is-on" : ""}"
+               data-stu="${esc(sid)}" data-branch="${esc(branch)}" data-nr="1"
+               title="${esc(WA.NR_TIP)}"
+               aria-pressed="${nr ? "true" : "false"}">${esc(WA.NR_WORD)}</button>`;
   }
 
   function stuCard(s) {
@@ -141,7 +159,8 @@ WA.renderInstructor = async function (view, me, opts) {
         </div>
         ${selfCard(s)}
         <div class="hint" style="margin-bottom:6px">Your recommendation — rank up to three branches
-          (each position used once):</div>
+          (each position used once), or say <b>Not recommended</b> for a branch you would not send
+          this student to. A branch you leave untouched says nothing either way:</div>
         ${WA.BRANCHES.map((b) => `
           <div class="rankrow"><span class="bl">${esc(b.label)}</span>
             <span class="rk-chips" data-chips="${esc(sid)}:${esc(b.id)}">${chipRow(sid, b.id)}</span></div>`).join("")}
@@ -160,7 +179,7 @@ WA.renderInstructor = async function (view, me, opts) {
   }
 
   view.innerHTML = `
-    <div class="wrap" id="ins-form">
+    <div class="wrap screen-only" id="ins-form">
       ${asCO ? `
         <div class="cobar" role="note">
           <span class="cotag">CO</span>
@@ -186,9 +205,87 @@ WA.renderInstructor = async function (view, me, opts) {
       ${data.students.length
         ? data.students.map(stuCard).join("")
         : `<section class="card"><p class="hint">No active students yet.</p></section>`}
-    </div>`;
+    </div>
+    <div class="print-only" id="print-ins"></div>`;
 
   const root = $("ins-form");
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     THE PRINTED RECOMMENDATION SHEET (round 8).
+     Until now this view had no print block at all, so Ctrl+P printed the live
+     form — chips, buttons, filter boxes and all — and the instructor got a
+     screenshot of an app instead of a document. It now prints what the
+     document actually is: a header naming whose recommendations these are, and
+     one BLOCK PER STUDENT carrying (a) the identity line, (b) the branch table
+     — position or "Not recommended" per branch, with the fourth state spelled
+     out in words because paper has no colour — (c) whether the instructor has
+     flown with the student and their comment, and (d) the student's own
+     reported record in one compact table, which is the evidence the
+     recommendation rests on. Monochrome, like every other printed surface.
+     ══════════════════════════════════════════════════════════════════════════ */
+  function branchWord(p, bid) {
+    if (p.ranks[bid]) return WA.RANK_WORD[p.ranks[bid]] + " choice";
+    if (p.nr[bid]) return WA.NR_WORD;
+    return "—";
+  }
+  function buildInsPrint() {
+    const holder = $("print-ins");
+    if (!holder) return;
+    const pages = data.students.map((s) => {
+      const p = P[s.person.id];
+      const rec = WA.migrateRecord(s.record);
+      const st = WA.recStats(rec);
+      const slots = WA.evalSlotRows(rec);
+      const solos = WA.filled("solo_flights", rec.solo_flights);
+      const doneSlots = solos.filter((e) => e.slot && WA.soloSlot(e.slot)).length;
+      const anySaid = WA.BRANCHES.some((b) => p.ranks[b.id] || p.nr[b.id]);
+      return `
+        <div class="pr-ins-blk">
+          <h3>${esc(WA.personName(s.person, true))}
+            <span class="pr-ins-meta">${esc([s.person.mn ? "MN " + s.person.mn : "",
+              s.person.class ? "Class " + s.person.class : ""].filter(Boolean).join(" · "))}</span></h3>
+          <table class="pr-t"><thead><tr><th>Branch</th><th>Recommendation</th></tr></thead><tbody>
+            ${WA.BRANCHES.map((b) => `<tr><td>${esc(b.label)}</td>
+              <td${p.nr[b.id] ? ' class="pr-nr"' : ""}>${esc(branchWord(p, b.id))}</td></tr>`).join("")}
+          </tbody></table>
+          <p class="pr-ins-line"><b>Flown with this student:</b> ${p.flew_with ? "yes" : "no"}
+            &nbsp;·&nbsp; <b>Recommendation:</b> ${anySaid
+              ? "submitted" + (p.savedAt ? " " + esc(fmtDT(p.savedAt)) : "")
+              : "nothing recorded for any branch"}</p>
+          ${p.comment ? `<p class="pr-ins-line"><b>Comment:</b> ${esc(p.comment)}</p>` : ""}
+          <p class="pr-ins-sub">The student's own reported record</p>
+          <table class="pr-t"><thead><tr>
+            <th>Solos</th><th>NFS</th><th>SMS</th><th>FAIL</th><th>Almost Good</th>
+            <th>Airsick</th><th>FPC</th><th>CEF</th></tr></thead>
+            <tbody><tr><td>${doneSlots} of ${WA.soloSlots().length}</td><td>${st.nfs}</td>
+              <td>${st.sms}</td><td>${st.fail}</td><td>${st.almost_good}</td>
+              <td>${st.airsickness}</td><td>${st.fpc}</td><td>${st.cef}</td></tr></tbody></table>
+          <table class="pr-t"><thead><tr><th>Checkride</th>
+            ${slots.slots.map((sl) => `<th>${esc(sl.def.id)}</th>`).join("")}</tr></thead>
+            <tbody><tr><td>Grade</td>
+              ${slots.slots.map((sl) => `<td>${sl.row ? WA.pct(sl.row.grade) : "not flown"}</td>`).join("")}
+            </tr></tbody></table>
+        </div>`;
+    }).join("");
+    holder.innerHTML = `
+      <div class="pr-page">
+        <div class="pr-brand"><img src="assets/364mea-240.png" alt=""><span>Wings Ahead</span>
+          <span class="pr-brand-sub">364 MEA — utilization recommendations</span></div>
+        <h2>${esc(WA.personName(who, true))}</h2>
+        <div class="pr-meta">${esc([who.duty, who.leadership, who.status].filter(Boolean).join(" · "))}
+          · ${data.students.length} student${data.students.length === 1 ? "" : "s"}
+          · printed ${esc(fmtDT(new Date().toISOString()))}${asCO ? " · entered by the squadron CO" : ""}</div>
+        ${pages || `<p class="pr-none">No active students.</p>`}
+      </div>`;
+  }
+  buildInsPrint();
+  if (!WA._insPrintHooked) {
+    WA._insPrintHooked = true;
+    window.addEventListener("beforeprint", () => {
+      if (WA._insPrint) WA._insPrint();
+    });
+  }
+  WA._insPrint = buildInsPrint;
 
   function refreshChips(sid) {
     for (const b of WA.BRANCHES) {
@@ -198,12 +295,25 @@ WA.renderInstructor = async function (view, me, opts) {
   }
   function markDirty(sid) {
     P[sid].dirty = true;
+    if (WA._insPrint) WA._insPrint();
     const st = root.querySelector(`[data-st="${sid}"]`);
     st.className = "prop-st";
     st.textContent = "Unsaved changes — press Save.";
   }
 
   root.addEventListener("click", async (ev) => {
+    /* NOT RECOMMENDED — mutually exclusive with a rank, and a toggle of its
+       own: tapping it again returns the branch to untouched (round 8) */
+    const nrChip = ev.target.closest(".chip[data-nr]");
+    if (nrChip) {
+      const sid = nrChip.dataset.stu, branch = nrChip.dataset.branch;
+      const on = !P[sid].nr[branch];
+      P[sid].nr[branch] = on;
+      if (on) P[sid].ranks[branch] = null;
+      refreshChips(sid);
+      markDirty(sid);
+      return;
+    }
     const chip = ev.target.closest(".chip[data-rank]");
     if (chip) {
       const sid = chip.dataset.stu, branch = chip.dataset.branch, n = Number(chip.dataset.rank);
@@ -213,6 +323,7 @@ WA.renderInstructor = async function (view, me, opts) {
       } else {
         for (const b of WA.BRANCHES) if (ranks[b.id] === n) ranks[b.id] = null;  // uniqueness
         ranks[branch] = n;
+        P[sid].nr[branch] = false;            // a rank IS a recommendation
       }
       refreshChips(sid);
       markDirty(sid);
@@ -226,7 +337,8 @@ WA.renderInstructor = async function (view, me, opts) {
       st.className = "prop-st";
       st.textContent = "Saving…";
       try {
-        const payload = { ranks: P[sid].ranks, flew_with: P[sid].flew_with,
+        const payload = { ranks: P[sid].ranks, not_recommended: P[sid].nr,
+                          flew_with: P[sid].flew_with,
                           comment: P[sid].comment.trim() || null };
         const res = asCO
           ? await rpc("admin_save_proposal", { p_token: WA.token, p_instructor_id: O.targetId,
@@ -237,6 +349,7 @@ WA.renderInstructor = async function (view, me, opts) {
         P[sid].dirty = false;
         st.className = "prop-st ok";
         st.textContent = "Saved ✓ " + fmtDT(res.updated_at) + (asCO ? " — tagged as entered by CO" : "");
+        if (WA._insPrint) WA._insPrint();
         /* mirror the server's stamp: the OWNER saving clears it (db/schema.sql
            → wa.write_proposal), the CO saving sets it */
         const tag = root.querySelector(`[data-cotag="${sid}"]`);

@@ -49,35 +49,43 @@ the ~15-20 instructors once their form is verified.
 **ROUND-3 RULE (2026-08-13): every section is a LIST OF DATED ENTRIES and the
 count is DERIVED.** No number is ever typed by hand anywhere in the app; the
 server rejects a payload that carries one (`nfs` as an object, or a `count`
-key inside any entry). `pending` («εκκρεμεί») stays where waiting for a result
-is a real state — **never on SMS** (round-3 ruling).
+key inside any entry). **`pending` («εκκρεμεί») is GONE — round-8 ruling
+(2026-08-14):** it is out of every section's whitelist, refused by name on
+write and stripped on read. An unfilled fixed slot has no date, which is what
+"not flown yet" already looks like; a result still awaited is a grade nobody
+has written yet. See §4f.
 
 - **NFS**: [{date*, reason* (round 5 — one of the six causes printed on form
   Α0473), note? (required when the reason is "other")}]  ← *was* count + dates
-- **SMS**: [{entrance_date*, exit_date?, note?}] — no pending
+- **SMS**: [{entrance_date*, reason* (**round 8** — one of the ΚΕΠΕ entry
+  conditions printed in 3-01 ΚΕΦ.2 §32β), exit_date?, note? (required when the
+  reason is the Squadron CO / DO decision)}]
 - **FAIL** / **ALMOST GOOD**: [{date*, category* (one of the four syllabus
   tracks), flight_code? (**round 5**: a select of THAT track's sorties +
   "Other…" free text; a code of another track is refused server-side),
   items[]* (multi-select of that track's gradesheet items + custom),
-  instructor?, grade? (0-100 %, **whole numbers**), pending?}]
+  instructor?, grade? (0-100 %, **whole numbers**; **round 8**: a NEW row opens
+  at 40 for a FAIL and 50 for an ALMOST GOOD, editable)}]
 - **AIRSICKNESS**: [{date*, instructor?, phase?}] — the brief shows WHEN and
   WITH WHOM
 - **Evaluations** — **FIXED SLOTS (round 5)**: [{evaluation* (one of the eight
   stage checkrides — C4590 C4790 C5090 C5490 · I4490 I4890 · F4690 · N4690),
-  date* once flown, with?, grade?, pending?}] — all eight always present, no
+  date* once flown, with?, grade?}] — all eight always present, no
   add/remove, an unflown slot has no date and counts for nothing; no free
   "Other" evaluation: a progress check flight is an FPC
 - **Solo flights** — **FIXED SLOTS (round 5)**: [{slot* (one of the eight
   syllabus solo slots; F4301-06 has two), sortie? (which candidate sortie was
-  flown solo), date* once flown, ng* (non-graded), grade? (0-100 %),
-  instructor?}] — grade + instructor required unless NG; NG rows are excluded
+  flown solo), date* once flown, ng* (non-graded; **round 8**: a CONTACT slot
+  opens NG the first time it is filled, a FORMATION slot opens graded — both
+  switchable), grade? (0-100 %), instructor? (labelled **"Authorised by"**
+  everywhere since round 8)}] — grade + instructor required unless NG; NG rows are excluded
   from grade math; a solo the syllabus did not foresee is a slot-less
   "additional solo", the only solo row that can be added or removed
 - **FPC** (ex "Progress tests"): [{date*, flight_code? (the stage flight that
   triggered it), evaluator? (**round 5**, ex `by` — DO / Squadron CO /
-  instructor / typed), result?, grade?, pending?}]
+  instructor / typed), result?, grade?}]
 - **CEF** (ex "Aptitude exams"): [{date*, flight_code?, evaluator?, result?,
-  grade?, pending?}]
+  grade?}]
 
 **Legacy (v1) records migrate ON READ** (`wa.migrate_record`, mirrored in
 `WA.migrateRecord`): the NFS counter becomes one entry per counted event, a
@@ -96,6 +104,9 @@ instructor pickers. Free text remains accepted everywhere.
 **proposals** (instructor × student, upsert-once-per-pair):
 - ranks: {fighters: 1|2|3|null, helicopters: …, transport_ff: …} — **ranking,
   multiple allowed**: 1 to 3 branches, each with an order position (decision Q1)
+- not_recommended: {fighters: bool, …} — **round 8**: a branch has FOUR states,
+  ranked 1st/2nd/3rd · **explicitly not recommended** · untouched. A rank and a
+  refusal are mutually exclusive (server-checked, plus a table constraint)
 - flew_with: bool («έχω πετάξει μαζί του»)
 - comment: optional short free text
 
@@ -146,8 +157,10 @@ attribute. Adding one line to a student's 17 self-reported entries therefore
 stamps one line — round 4 stamped all 18, which made the record lie about
 itself in the exact place the feature exists to be honest. The stamps survive
 further CO saves (a CO re-save that changes nothing changes nothing, byte for
-byte); **the owner saving clears them all**, because reclaiming your own data
-makes it self-reported again.
+byte). **~~The owner saving clears them all.~~ SUPERSEDED by the round-8
+supremacy inversion (2026-08-14, §4f): a CO entry is LOCKED for its owner —
+the owner's save carries it through unchanged and no longer strips the stamp,
+and a payload that alters or drops one is refused.**
 The record-level flag is **derived, never typed** (`wa.record_stamp`): 'admin'
 when at least one entry carries it, or when the CO created a record its owner
 has never saved. It means *"contains CO-entered data"* — so every view must say
@@ -162,10 +175,10 @@ in one line: "7 self-reported (1 with 1 entry added by the CO) · 2 entered by C
 **PER-SECTION ENTRY-KEY WHITELIST** (`wa.entry_keys`, mirrored in
 `WA.ENTRY_KEYS`): an entry may carry only the keys its section defines.
 Unknown keys are refused on write with a message that lists what is accepted,
-and stripped from stored legacy rows on read. `pending` is accepted **only** in
-FAIL / ALMOST GOOD / evaluations / FPC / CEF — the sections whose form draws the
-tick box — so a pending badge on the CO's dashboard can always be cleared by
-somebody; `wa.pending_count` counts those same sections and nothing else.
+and stripped from stored legacy rows on read. ~~`pending` is accepted only in
+FAIL / ALMOST GOOD / evaluations / FPC / CEF.~~ **SUPERSEDED (round 8,
+2026-08-14, §4f): `pending` is accepted NOWHERE.** `wa.pending_sections` and
+`wa.pending_count` are dropped; the key is refused by name and stripped on read.
 
 **Grades never print bare.** `WA.pct()` is the single renderer: null, undefined
 or non-numeric becomes an em-dash, everywhere a percentage reaches the DOM or
@@ -218,7 +231,8 @@ printed duration block says SOLO SORTIES > 0 contributes that many rows —
 draws two distinct rows. `WA_SOLO_SLOTS` ↔ `wa.solo_slots()`; each slot knows
 its candidate sorties, and `solo_flights[i].slot` / `.sortie` record which one
 was flown. The eight checkrides are the same idea with the identity as the key.
-A slot is **pending until flown**: the mandatory-date rule is relaxed for these
+A slot is **empty until flown** (round 5 said "pending"; the word and the flag
+went in round 8, §4f — an empty slot needs neither): the mandatory-date rule is relaxed for these
 two sections only (`wa.slot_empty`), an unflown slot **counts for nothing**
 (`wa.entry_count`, `wa.co_entry_count`, `WA.recStats`) and is **never stamped**
 as CO-entered. Reality is not stuck: an unforeseen solo is a slot-LESS
@@ -286,6 +300,11 @@ did. The wording now lives in one helper (`WA.itemsN` / `WA.itemsCount` /
 `WA.itemsCountHTML`) that every surface calls, print included — a new surface
 cannot drift from the others.
 
+> **Round-8 note (2026-08-14):** the normalisation boundary of this round now
+> also carries `sms[i].reason` (a padded `'  sortie59  '` is stored and judged
+> as `sortie59`), and the live rounding offer is unchanged by the new FAIL /
+> ALMOST GOOD grade defaults — 40 and 50 are whole numbers and pass silently.
+
 ## 4e. Round 6 (2026-08-13) — five strictness rules
 
 The second hands-on review round. Each of the five replaces something the form
@@ -333,7 +352,7 @@ from every surface at once. Legacy custom strings survive: greyed chips marked
 every one of them is.
 
 **3 · EVALUATIONS FOLLOW THE SYLLABUS ORDER.** A later checkride cannot be
-FILLED while an earlier one is still pending. **The order is not a judgement
+FILLED while an earlier one has not been flown. **The order is not a judgement
 call**: `tools/gen-items-catalog.py` reads the **FILE ORDER of the sortie
 entries in `data/flowchart2.json`** — the order of the printed Training Flow
 Chart — and writes it into `WA_EVAL_ORDER` and `wa.eval_ids()` in the same run,
@@ -342,17 +361,18 @@ so the two mirrors cannot drift. The definitive sequence is
 DISABLES the boxes of a slot whose predecessors are unflown and says
 *"complete C4590 first"*; the server refuses the same fill with
 *"evaluations follow the syllabus order — C4790 cannot be recorded while C4590
-is pending"*. An empty fixed slot is always allowed — it is the state all eight
-start in, and the pending tick alone still owes its date (round 5, unchanged),
-so "recorded" means "flown". A row that is ALREADY filled out of order is never
+has not been flown"* (round 8 wording — the sentence said "is pending" until
+the flag was retired, §4f). An empty fixed slot is always allowed: it is the
+state all eight start in, and "recorded" means "flown". A row that is ALREADY filled out of order is never
 frozen (a value must stay correctable): it is marked, and the save is refused
 until the predecessor is filled or the row is cleared.
 
 **4 · EVERY FLOWN SOLO NAMES ITS INSTRUCTOR — NG INCLUDED.** A student does not
 launch alone on their own authority: somebody authorises the solo and signs for
-it. **NG removes the GRADE, never the person.** The label follows the row —
-*"Authorising instructor"* on an NG row, *"Evaluator / instructor"* on a graded
-one — and the name is required on both sides. It is asked of legacy rows too:
+it. **NG removes the GRADE, never the person.** ~~The label follows the row —
+"Authorising instructor" on an NG row, "Evaluator / instructor" on a graded
+one~~ — **round 8 (2026-08-14) gives it ONE label on every surface:
+"Authorised by"** — and the name is required on both sides. It is asked of legacy rows too:
 the flag excuses what the old form never asked for, never a rule of this round.
 **Round 6b — one absence, four spellings.** `absent` / `null` / `""` / `"   "`
 all mean nobody signed for the solo and all four are refused, on the NG side and
@@ -390,19 +410,140 @@ as it was, so the seed still carries **one legacy row per new rule**: two
 airsickness phase notes, three hand-typed items, two NG solos with no name and
 one FPC conducted by an instructor.
 
+## 4f. Round 8 (2026-08-14) — the CO's word is final, and the form stops hedging
+
+The third hands-on review round. Two of the nine changes are rulings about
+AUTHORITY and about what the data model is allowed to be vague about; the rest
+are the form saying out loud what the squadron already does.
+
+**1 · SMS NAMES ITS ΚΕΠΕ ENTRY CONDITION.** SMS is the squadron's Special
+Monitoring Status — **ΚΕΠΕ, «Κατάσταση Ειδικής Παρακολούθησης Εκπαίδευσης
+Μαθητή»** (3-01/2025 ΔΑΕ, ΚΕΦ.2 §32) — and an entrance is not a matter of
+prose. `sms[i].reason` is mandatory and closed, exactly as `nfs[i].reason` has
+been since round 5: **§32β prints six conditions**, at least one of which puts
+a student in ΚΕΠΕ (PDF page 54 = printed page 36, verified letter-for-letter):
+59% or below on any sortie or F/S (airsickness and flight-physiology incidents
+excepted) · 63% or below on two consecutive flights (finals and Δοκιμές
+Προόδου excepted) · airsickness on two consecutive flights · one failed written
+or ground exam, CBT included · 2 consecutive or 4 non-consecutive failed oral
+ground exams at the pre-flight briefing · the instructor's own recommendation
+for unacceptable progress between flights. The **seventh option is not an
+invented "Other…"**: it is the opening sentence of the same §32β — the standing
+discretion of the Squadron CO / DO — which the six conditions specify
+(«Ειδικότερα…») without exhausting. That is the only room the regulation
+leaves, so it is the only option beyond the six, it is NAMED rather than blank,
+and it demands the reason in writing (§32δ(2): the student is told why he was
+put in ΚΕΠΕ). English labels, the Greek verbatim in the option tooltip and
+under the box. `WA.SMS_REASONS` ↔ `wa.sms_reasons()`. A stored entrance from
+before the rule is **readable everywhere and refused on the next save** until
+the condition is chosen — the standing "keep it, ask for it" contract, asked of
+legacy rows too.
+
+**2 · "+ ADD" IS THE ACCENT.** Adding a row is what a student comes to a
+section to do, and it wore the same quiet outline as *remove* and *back*. One
+class (`.btn-add`) fills it with `--accent` / `--on-accent` — the one pair the
+palette catalogue guarantees at ≥ 4.5:1 — so it is AA in all eight palettes
+(measured: 6.49:1 Slate … 12.3:1 Aegean).
+
+**3 · A NEW FAIL OPENS AT 40, A NEW ALMOST GOOD AT 50.** The two are the
+squadron's «ΑΠΟΤΥΧΙΑ» and «ΥΣΤΕΡΗΣΗ» bands; a student corrects a number far
+more reliably than they supply one. Both stay editable and both are still
+whole-number validated. Only a NEW row is prefilled — nothing stored is ever
+overwritten.
+
+**4 · PENDING DIES EVERYWHERE.** The tick box, the flag, the badges, the
+columns, the counters and the chips are gone: form, admin tables (including the
+evaluations summary PENDING column and the overview column), brief, print, CSV,
+completion. **An unfilled fixed slot simply reads as not-yet-flown** — it has
+no date, which is what that already looks like — and a result still awaited is
+a grade nobody has written yet. `pending` is out of every entry-key whitelist,
+**refused by name** on write (`'the pending flag was removed — …'`) and
+**stripped on read**, so a record written before this round stops carrying it
+the moment it is read. `wa.pending_sections` / `wa.pending_count` /
+`WA.pendingItems` / `recStats.pending` are deleted, not merely unused.
+
+**5 · THE SOLO SLOT OPENS THE WAY ITS SECTION FLIES.** The CONTACT (adaptation)
+solos — C4791 and the C48xx / C49xx / C52xx / C53xx slots — have nobody in the
+other seat to grade them, so the row **opens NG the first time it is filled**
+and names who authorised the launch; the FORMATION slots (F43xx ×2, F45xx) open
+**graded**. It is a default and not a rule: the Graded/NG chips stay live, an
+explicit tap is never overridden, and a row that already has an answer is never
+moved (`WA.soloDefaultNG`, off the slot id's first letter — nothing is typed
+into the generated catalogue). The personnel label becomes **"Authorised by"**
+on every surface, replacing *"Authorising instructor"* / *"Evaluator /
+instructor"*: form, admin table, brief, print, and `WA.soloWho*` (which also
+loses the *"(authorising)"* suffix and the `w/` prefix).
+
+**6 · THE INSTRUCTOR SAYS NO OUT LOUD.** A branch had three states and
+"untouched" had to carry two meanings at once — *"I would not send him there"*
+and *"I have not formed a view"* — which the CO cannot tell apart on the brief.
+The vocabulary gains a fourth word: **ranked 1st / 2nd / 3rd · NOT RECOMMENDED
+· untouched**, the first two mutually exclusive (server check + table
+constraint `proposals_nr_excl`). It is stored (`proposals.nr_*`), it reaches
+the drill-down as its own cell, and the three silences never share a sentence:
+**"Maj Koroniadis does not recommend Fighters for this student"** (a judgement)
+vs *"Capt Paloukos has not recommended Fighters …"* (a proposal that does not
+name the branch) vs *"Capt X has not submitted a recommendation …"* (no
+proposal at all). The aggregates keep the sets disjoint (`not_recommended` is
+excluded from `not_this_branch`). **WORDING SWEEP:** "A.GOOD" / "A.Good" →
+**"Almost Good"** and "w/" → **"with"** in the instructor card, the admin
+tables, the brief and the print sheet. **THE INSTRUCTOR VIEW GETS A PRINT
+SHEET**: it had none, so Ctrl+P printed the live form — chips, filter boxes and
+all. `#print-ins` now prints one block per student (kept whole across page
+breaks) with the branch table, the flown-with / comment line and the student's
+own reported record in two compact tables, under the same monochrome brand
+header as the CO's brief.
+
+**7 ·** folded into 4.
+
+**8 · THE AXIS FOLLOWS THE DATA.** The per-evaluation comparison chart pinned
+to 0-100 spent four fifths of its height on a range nobody is in: 69 · 77 · 87
+drew three bars of almost the same length. The floor is now **the lowest value
+actually plotted, less 5, floored at 0**, and the top stays the honest 100 so
+nothing is exaggerated; gridlines and ticks follow, the bar value labels stay.
+Counts keep their 0-based axis — a bar chart of "how many FAILs" must start at
+zero or it lies. (Verified: grades {69, 77, 87} → axis 64–100, ticks
+64/73/82/91/100.)
+
+**9 · CO EDITS PREVAIL — THE SUPREMACY INVERSION.** *Supersedes the round-4b
+owner-reclaim rule of §4b.* When the Squadron CO writes a line into a student's
+record he is not making a suggestion, and a record in which the student can
+quietly overwrite the CO's correction is a record the CO cannot brief from.
+An entry the CO **created or modified** (`entered_by:'admin'`) is therefore
+**LOCKED for its owner**: the student sees it, marked **"🔒 locked by CO"**,
+with every control inside the row disabled and no remove button, and cannot
+modify or delete it. The owner's save must carry **every** CO entry through
+**unchanged** — matched fact for fact by `wa.entry_core`, position first, the
+same way the CO diff matches — and the server refuses a payload that alters or
+drops one, *"this entry was set by the squadron CO and only the CO can change
+it"* (a whole section omitted from the payload is caught by the same rule).
+The owner path **no longer strips stamps**: `wa.strip_stamps` is dropped and
+replaced by `wa.carry_stamps`, which preserves the stored provenance of every
+matched entry (admin stays admin, null stays null) and leaves everything the
+owner wrote unstamped. Diff-stamping is unchanged on the CO path; **the CO can
+still edit or delete his own entries, and the CO editing an OWNER entry
+re-stamps it admin — which locks it.** The record-level derived stamp follows:
+`wa.record_stamp` is now consulted on both paths, so a record keeps saying
+"contains CO-entered data" after its owner saves it; only the one case the
+entries cannot settle (a record the CO opened that nobody has filled) stays on
+the CO path, because an empty record locks nothing.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
    remove), Save any time, shows own last_update. Re-entry always allowed.
 2. **Instructor form**: student list; per student a **compact card of their
    self-reported data** (counters, evaluations, solos) beside the ranking
-   pickers (1st/2nd/3rd) + flew-with checkbox. Save/edit any time.
+   pickers (1st/2nd/3rd **+ Not recommended**, round 8) + flew-with checkbox.
+   Save/edit any time. **Its own printable sheet** (round 8): one structured
+   block per student — branch table, flown-with, comment, and the student's
+   reported record.
 3. **Admin dashboard** (CO) — THREE MODES (decision 2026-08-13):
    a. **Overview**: one row per student (key counters, mini proposal bars,
-      pending flags, completion status) + who has not submitted yet ·
+      completion status) + who has not submitted yet ·
       people/token management (generate/copy/revoke links) · CSV/JSON export.
    b. **Student analysis** (click a row — each student examined SEPARATELY):
-      - Identity header (MN, rank, name, class) + pending items highlighted.
+      - Identity header (MN, rank, name, class) + entries still to correct.
       - **Comparison chart** (vanilla SVG, mifchart discipline): the selected
         metric shown as FOUR bars — **this student · class best · class worst ·
         class average**. Metric selected by CLICK on chips: FAIL · ALMOST GOOD ·
@@ -414,12 +555,13 @@ one FPC conducted by an instructor.
       - **Evaluations card**: (a) PER-EVALUATION comparison — pick one of the
         eight checkrides, get the same four bars ON THAT checkride (each
         student contributes their latest graded attempt) with the contributing
-        values printed underneath so the CO can hand-check them; (b) a
+        values printed underneath so the CO can hand-check them — **round 8:
+        the y-axis starts just below the lowest grade plotted, not at 0**; (b) a
         PER-CATEGORY plot (chips Contact · Instrument · Formation · Navigation ·
         FPC) drawing that category's evaluations **in syllabus order, never in
         date order**, as connected points with grade labels and a faint dashed
         class-average reference — clicking a point highlights its row in
-        (c) the SUMMARY TABLE (evaluation · with whom · grade · date · pending).
+        (c) the SUMMARY TABLE (evaluation · with whom · grade · date · source).
       - **Dated-entry tables**: FAIL and ALMOST GOOD in full (flight code,
         items, instructor, grade), airsickness **when and with whom**, plus
         NFS · SMS · solos · FPC · CEF. All of it reaches the printed brief.
@@ -431,7 +573,10 @@ one FPC conducted by an instructor.
         Under each box, every NON-proposal appears as a POLITELY WORDED bullet —
         e.g. "• Maj Koroniadis has not recommended Fighters for this student" and,
         for instructors with no submission at all, "• Capt X has not submitted a
-        recommendation for this student yet". Weighted score per branch (default
+        recommendation for this student yet". **Round 8** adds the third and
+        strongest bullet: "• Maj Koroniadis **does not recommend** Fighters for
+        this student" — the branch he explicitly refused, which is a judgement
+        and not a silence. Weighted score per branch (default
         3/2/1, formula shown), count of 1st choices, % of proposers who flew
         with them; drill-down list (who, duty, leadership, status, flew_with,
         comment).

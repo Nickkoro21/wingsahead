@@ -26,7 +26,7 @@
    WA_EVAL_ORDER[]  — the eight checkrides in SYLLABUS ORDER: the FILE
              ORDER of the sortie entries of flowchart2.json, i.e. the order
              of the printed Training Flow Chart. A later evaluation cannot
-             be filled while an earlier one is still pending (round 6).
+             be filled while an earlier one has not been flown (round 6).
 
    117 items, 133 sortie codes and 8 solo slots across 4 categories,
    generated from master_index 2026-08-08T22:10:34 / flow chart 2026-08-09.
@@ -343,7 +343,7 @@ var WA_SOLO_SLOTS = [
 /* THE SYLLABUS ORDER OF THE EIGHT CHECKRIDES (round 6) — the FILE ORDER of
    the sortie entries in flowchart2.json, which is the order the printed
    Training Flow Chart lays the stage out in. Never date order: a later
-   evaluation cannot be FILLED while an earlier one is still pending, on the
+   evaluation cannot be FILLED while an earlier one has not been flown, on the
    client and on the server alike.
    MIRROR: db/schema.sql → wa.eval_ids() / wa.eval_pos(). */
 var WA_EVAL_ORDER = ["C4590", "C4790", "C5090", "C5490", "I4490", "I4890", "F4690", "N4690"];

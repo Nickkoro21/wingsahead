@@ -56,7 +56,10 @@ WA.renderStudent = async function (view, me, opts) {
   const COMPLETE = {
     nfs: (e) => isDate(e.date) && !!WA.nfsReason(e.reason) &&
       (e.reason !== "other" || !!txt(e.note)),
-    sms: (e) => isDate(e.entrance_date),
+    /* ROUND 8 — an SMS entrance names its ΚΕΠΕ condition (3-01 ΚΕΦ.2 §32β),
+       and the discretionary one names the performance it was based on */
+    sms: (e) => isDate(e.entrance_date) && !!WA.smsReason(e.reason) &&
+      (e.reason !== "judgement" || !!txt(e.note)),
     airsickness: (e) => isDate(e.date) && !!txt(e.flight_code),
     fail: (e) => isDate(e.date) && !!WA.itemCat(e.category) &&
       (e.items || []).length > 0 && !WA.itemsLegacy(e).length,
@@ -87,6 +90,13 @@ WA.renderStudent = async function (view, me, opts) {
     /* ROUND 6b — the flight is MANDATORY on every airsickness row, so a row
        without one blocks the save whether or not it carries the retired note */
     if (sec === "airsickness") return !txt(e.flight_code);
+    /* ROUND 8 — the ΚΕΠΕ condition is asked of every SMS row, legacy included:
+       the flag excuses what the old form never asked for, never a rule of this
+       round. The row stays readable; the record refuses to be saved again. */
+    if (sec === "sms") {
+      return !WA.smsReason(e.reason) ||
+             (e.reason === "judgement" && !txt(e.note));
+    }
     if (sec === "solo_flights") {
       return !WA.slotEmpty("solo_flights", e) && !txt(e.instructor);
     }
@@ -126,7 +136,7 @@ WA.renderStudent = async function (view, me, opts) {
     WA.EVALUATIONS.forEach((d, k) => { evIx[d.id] = k; });
     for (const d of WA.EVALUATIONS) {
       if (!evs.some((e) => e.evaluation === d.id)) {
-        evs.push({ evaluation: d.id, date: "", with: "", grade: null, pending: false });
+        evs.push({ evaluation: d.id, date: "", with: "", grade: null });
       }
     }
     evs.forEach((e, i) => { e._k = i; });
@@ -143,11 +153,25 @@ WA.renderStudent = async function (view, me, opts) {
   }
   ensureSlots();
 
+  /* ── THE CO'S EDITS PREVAIL (round 8) ─────────────────────────────────────
+     An entry the squadron CO created or modified is LOCKED for its owner: it
+     is shown, marked, and every control inside it is disabled — the student
+     can neither change it nor remove it, and their save must carry it through
+     untouched (the server refuses otherwise, in the same words). The CO's own
+     form locks nothing: on that side every row is his to edit or delete.
+     MIRROR: db/schema.sql → wa.carry_stamps. */
+  const coLocked = (e) => !asCO && WA.isCO(e);
+  /* the CO entries the record ARRIVED with, per section. Nothing in the UI can
+     drop one, so a mismatch at save time means a row was refused on its way
+     into the payload — and the owner cannot fix a locked row, so the message
+     has to send them to the CO instead of to the row. */
+  const CO_BASE = {};
+
   /* ── field builders ───────────────────────────────────────────────────── */
   const F = (sec, i, field, extra) =>
     `data-sec="${esc(sec)}" data-idx="${i}" data-field="${esc(field)}"${extra || ""}`;
   /* `off` freezes a box the rules do not allow to be filled YET — round 6 uses
-     it for a checkride whose predecessor is still pending. It is never used to
+     it for a checkride whose predecessor has not been flown. It is never used to
      freeze a box that already holds something: a value must always be
      correctable, or the form becomes a trap. */
   const off = (lock) => (lock ? " disabled" : "");
@@ -291,12 +315,14 @@ WA.renderStudent = async function (view, me, opts) {
         freePh: "e.g. " + ((slot.codes || [])[0] || "C4802") });
   }
 
-  /* pending / flown, the one badge that says what a fixed slot is */
+  /* flown / not flown — the one badge that says what a fixed slot is.
+     ROUND 8: there is no third state. An empty slot IS the not-yet-flown
+     state; it never needed a flag of its own. */
   function slotBadge(sec, i, flown) {
     return `<span class="badge ${flown ? "badge-good" : ""}" data-slotbadge="${esc(sec)}:${i}"
       title="${esc(flown ? "Flown — the details below are recorded"
                         : "This syllabus slot has not been flown yet")}"
-      >${flown ? "flown" : "pending — not flown yet"}</span>`;
+      >${flown ? "flown" : "not flown yet"}</span>`;
   }
 
   /* CEF — who conducted it: DO · Squadron CO · the squadron's instructors ·
@@ -323,10 +349,17 @@ WA.renderStudent = async function (view, me, opts) {
           : "An FPC is conducted by the Squadron CO or the DO." });
   }
 
-  const pendF = (sec, i, on, lock) => `
-    <label class="ck pend${lock ? " is-off" : ""}"><input type="checkbox" ${on ? "checked" : ""} ${
-      F(sec, i, "pending")}${off(lock)}>
-      pending</label>`;
+  /* SMS (ΚΕΠΕ) entry condition — the six printed thresholds of 3-01 ΚΕΦ.2
+     §32β plus the Squadron CO / DO discretion of its opening sentence. English
+     labels; the Greek of the printed line rides in each option's tooltip and
+     is shown verbatim under the box once a condition is chosen. */
+  function smsReasonF(i, e) {
+    const r = WA.smsReason(e.reason);
+    return pickerF("sms", i, e, "reason", "Entry condition",
+      [{ items: WA.SMS_REASONS.map((x) => ({ v: x.id, t: x.label, tip: x.el })) }],
+      { req: true, ph: "— under which condition was he put in SMS? —",
+        note: r ? `<span title="${esc("Printed verbatim in " + WA.SMS_SOURCE)}">${esc(r.el)}</span>` : "" });
+  }
 
   const rmB = (sec, i) =>
     `<button type="button" class="rm" data-rm="${esc(sec)}" data-idx="${i}">&#10005; remove</button>`;
@@ -434,7 +467,7 @@ WA.renderStudent = async function (view, me, opts) {
         ${gradeF(sec, i, "grade", e.grade, "Grade (%)")}
       </div>
       <div class="rgrid2">${insF(sec, i, "instructor", e.instructor, "Instructor")}<div></div></div>
-      <div class="rfoot">${pendF(sec, i, e.pending)}${rmB(sec, i)}</div>`;
+      <div class="rfoot">${rmB(sec, i)}</div>`;
   }
 
   /* ── the sections, in the order the student meets them ── */
@@ -455,15 +488,23 @@ WA.renderStudent = async function (view, me, opts) {
       blank: () => ({ date: "", reason: "", note: "" }) },
 
     { id: "sms",
-      hint: "One entry per SMS entrance. Leave the exit date empty while the entry is still open — SMS entries are never marked pending.",
+      hint: "One entry per SMS entrance — ΚΕΠΕ, the squadron's special monitoring status. Each entrance names the CONDITION it was raised under: 3-01 ΚΕΦ.2 §32β prints six of them, and the opening sentence of the same paragraph is the Squadron CO / DO decision (which asks for the reduced performance in writing). Leave the exit date empty while the entry is still open.",
       row: (e, i) => `
         <div class="rgrid2">
           ${dateF("sms", i, "entrance_date", e.entrance_date, "Entrance date", true)}
-          ${dateF("sms", i, "exit_date", e.exit_date, "Exit date (if closed)")}
+          ${smsReasonF(i, e)}
         </div>
-        ${e.note ? `<p class="hint">${esc(e.note)}</p>` : ""}
+        <div class="rgrid2">
+          ${dateF("sms", i, "exit_date", e.exit_date, "Exit date (if closed)")}
+          <div></div>
+        </div>
+        ${textF("sms", i, "note", e.note,
+                e.reason === "judgement" ? "Reduced performance the decision was based on *" : "Note (optional)",
+                e.reason === "judgement"
+                  ? "what fell short — the student is told the reasons (3-01 ΚΕΦ.2 §32δ(2))"
+                  : "anything worth remembering")}
         <div class="rfoot"><span class="hint">${e.exit_date ? "closed" : "still open"}</span>${rmB("sms", i)}</div>`,
-      blank: () => ({ entrance_date: "", exit_date: "" }) },
+      blank: () => ({ entrance_date: "", exit_date: "", reason: "", note: "" }) },
 
     { id: "airsickness",
       hint: "One entry per airsickness event — when it happened, on WHICH FLIGHT and with whom, so the squadron can see the pattern. The flight is required on every entry. (It replaced the free-text phase-of-flight note in round 6; a note already written is kept below the row as legacy information, and the row asks for its flight before the record can be saved again.)",
@@ -478,15 +519,21 @@ WA.renderStudent = async function (view, me, opts) {
         <div class="rfoot">${rmB("airsickness", i)}</div>`,
       blank: () => ({ date: "", instructor: "", flight_code: "" }) },
 
+    /* ROUND 8 — THE GRADE BOX STARTS WHERE THE CODE DOES. A FAIL is the
+       squadron's «ΑΠΟΤΥΧΙΑ» band and an ALMOST GOOD its «ΥΣΤΕΡΗΣΗ», so a new
+       row opens at 40 and 50 respectively instead of empty: the student
+       corrects a number far more reliably than they supply one. Both stay
+       editable and both are still whole-number validated. Only a NEW row is
+       prefilled — nothing stored is ever overwritten. */
     { id: "fail",
-      hint: "One entry per FAIL: the track, the flight it happened on, the syllabus items that missed the desired performance, the instructor, the date and the grade.",
+      hint: "One entry per FAIL: the track, the flight it happened on, the syllabus items that missed the desired performance, the instructor, the date and the grade. A new row opens at grade 40 — change it to what was actually awarded.",
       row: (e, i) => failRow("fail", i, e),
-      blank: () => ({ date: "", category: "", flight_code: "", items: [], instructor: "", grade: null, pending: false }) },
+      blank: () => ({ date: "", category: "", flight_code: "", items: [], instructor: "", grade: 40 }) },
 
     { id: "almost_good",
-      hint: "Same detail as a FAIL — the track, the flight, the items, the instructor, the date and the grade.",
+      hint: "Same detail as a FAIL — the track, the flight, the items, the instructor, the date and the grade. A new row opens at grade 50 — change it to what was actually awarded.",
       row: (e, i) => failRow("almost_good", i, e),
-      blank: () => ({ date: "", category: "", flight_code: "", items: [], instructor: "", grade: null, pending: false }) },
+      blank: () => ({ date: "", category: "", flight_code: "", items: [], instructor: "", grade: 50 }) },
 
     /* ── FIXED SLOTS: the eight stage checkrides, always all eight ──
        ROUND 6 — AND IN SYLLABUS ORDER. A slot whose predecessors have not been
@@ -495,7 +542,7 @@ WA.renderStudent = async function (view, me, opts) {
        printed Training Flow Chart; the server refuses the same fill with the
        same sentence, so the hint is a courtesy and not the guard. */
     { id: "evaluations", fixed: true,
-      hint: "The eight checkrides of the stage — every one of them is here from the first day and stays PENDING until you fly it. Fill in the date, the evaluator and the grade when it happens, IN SYLLABUS ORDER: a checkride cannot be recorded while an earlier one is still pending. Nothing can be added or removed: that is what lets the squadron compare you with your class on the same flight.",
+      hint: "The eight checkrides of the stage — every one of them is here from the first day and stays EMPTY until you fly it. Fill in the date, the evaluator and the grade when it happens, IN SYLLABUS ORDER: a checkride cannot be recorded while an earlier one has not been flown. Nothing can be added or removed: that is what lets the squadron compare you with your class on the same flight.",
       row: (e, i, meta) => {
         const m = meta || {};
         const flown = !WA.slotEmpty("evaluations", e);
@@ -508,7 +555,7 @@ WA.renderStudent = async function (view, me, opts) {
              ${slotBadge("evaluations", i, flown)}
              ${blocker ? `<span class="badge badge-warn" title="${esc(
                "Evaluations are flown and recorded in syllabus order — " + WA.EVAL_ORDER.join(" → ") +
-               ". " + esc(blocker) + " has not been flown yet.")}">complete ${esc(blocker)} first</span>` : ""}`
+               ". " + blocker + " has not been flown yet.")}">complete ${esc(blocker)} first</span>` : ""}`
           : (e.evaluation
               ? `<span class="slot-nm">Earlier attempt &mdash; ${esc(WA.evalLabel(e.evaluation))}</span>
                  <span class="badge" title="A checkride flown more than once: the latest attempt is the one every comparison uses">superseded</span>
@@ -519,7 +566,7 @@ WA.renderStudent = async function (view, me, opts) {
         <div class="slot-h">${head}</div>
         ${m.slot ? "" : evalF(i, e.evaluation)}
         ${blocker ? `<p class="ordnote${flown ? " warn-t" : ""}">${flown
-            ? `This checkride is recorded but <b>${esc(blocker)}</b> is still pending &mdash;
+            ? `This checkride is recorded but <b>${esc(blocker)}</b> has not been flown &mdash;
                evaluations follow the syllabus order, so the record cannot be saved until
                ${esc(blocker)} is filled in (or this row is cleared).`
             : `Waiting for <b>${esc(blocker)}</b> &mdash; the checkrides are flown in syllabus
@@ -529,13 +576,12 @@ WA.renderStudent = async function (view, me, opts) {
           ${insF("evaluations", i, "with", e.with, "With (evaluator)", lock)}
           ${dateF("evaluations", i, "date", e.date, "Date", flown, lock)}
         </div>
-        <div class="rgrid2">${gradeF("evaluations", i, "grade", e.grade, "Grade (%)", false, lock)}<div></div></div>
-        <div class="rfoot">${pendF("evaluations", i, e.pending, lock)}</div>`;
+        <div class="rgrid2">${gradeF("evaluations", i, "grade", e.grade, "Grade (%)", false, lock)}<div></div></div>`;
       } },
 
     /* ── FIXED SLOTS: the solos the syllabus prescribes ── */
     { id: "solo_flights", fixed: true,
-      hint: "The solos of the stage, one row each — they are fixed by the syllabus and stay PENDING until flown. Fill in the date and then either the grade and the instructor, or NG (non-graded). A solo the syllabus did not foresee goes in as an additional solo at the end.",
+      hint: "The solos of the stage, one row each — they are fixed by the syllabus and stay EMPTY until flown. Fill in the date and then either the grade or NG (non-graded); every flown row names who authorised it. The CONTACT (adaptation) solos open as NG the first time you fill one — nobody is in the other seat to grade them — and the FORMATION solos open graded; either can be switched. A solo the syllabus did not foresee goes in as an additional solo at the end.",
       row: (e, i, meta) => {
         const m = meta || {};
         const slot = e.slot ? WA.soloSlot(e.slot) : null;
@@ -559,17 +605,18 @@ WA.renderStudent = async function (view, me, opts) {
             <button type="button" class="chip${e.ng ? " is-on" : ""}" data-ng="solo_flights:${i}:1"
                     aria-pressed="${e.ng ? "true" : "false"}">NG (non-graded)</button>
           </span></div>
-        ${/* ROUND 6 — THE INSTRUCTOR IS ON EVERY ROW, NG INCLUDED. NG removes
-             the GRADE, never the person: a student does not launch alone on
-             their own authority, so the row names whoever AUTHORISED the
-             flight even when nobody was in the other seat to score it. */ ""}
+        ${/* ROUND 6 — THE PERSON IS ON EVERY ROW, NG INCLUDED. NG removes the
+             GRADE, never the person: a student does not launch alone on their
+             own authority, so the row names whoever AUTHORISED the flight even
+             when nobody was in the other seat to score it. ROUND 8 gives that
+             one label everywhere — "Authorised by". */ ""}
         <div class="rgrid2">
           ${e.ng
             ? `<div class="f"><span>&nbsp;</span><span class="hint">Non-graded solo — no grade is
-                 recorded; the authorising instructor still is.</span></div>`
+                 recorded; who authorised it still is.</span></div>`
             : gradeF("solo_flights", i, "grade", e.grade, "Grade (%)", flown)}
           ${insF("solo_flights", i, "instructor", e.instructor,
-                 (e.ng ? "Authorising instructor" : "Evaluator / instructor") + (flown ? " *" : ""))}
+                 "Authorised by" + (flown ? " *" : ""))}
         </div>
         ${e.ng ? `<p class="hint">He may not have flown along — he authorised the solo, and the
           squadron records who did.</p>` : ""}`;
@@ -577,7 +624,7 @@ WA.renderStudent = async function (view, me, opts) {
       blank: () => ({ slot: null, sortie: "", date: "", ng: false, grade: null, instructor: "" }) },
 
     { id: "fpc",
-      hint: "One entry per FPC — which stage flight it followed, who conducted it and the result. An FPC is conducted by the Squadron CO or the DO and by nobody else (round 6). Several FPC after the same flight are simply several entries. Tick pending while you are still waiting for the result.",
+      hint: "One entry per FPC — which stage flight it followed, who conducted it and the result. An FPC is conducted by the Squadron CO or the DO and by nobody else (round 6). Several FPC after the same flight are simply several entries. Leave the grade empty until the result is known.",
       row: (e, i) => `
         <div class="rgrid2">
           ${triggerF("fpc", i, e)}
@@ -589,11 +636,11 @@ WA.renderStudent = async function (view, me, opts) {
         </div>
         ${textF("fpc", i, "result", e.result, "Result (optional)", "e.g. pass")}
         <div class="rfoot"><span class="hint">${WA.checkLineHTML("fpc", e)}</span>
-          ${pendF("fpc", i, e.pending)}${rmB("fpc", i)}</div>`,
-      blank: () => ({ date: "", flight_code: "", evaluator: "", result: "", grade: null, pending: false }) },
+          ${rmB("fpc", i)}</div>`,
+      blank: () => ({ date: "", flight_code: "", evaluator: "", result: "", grade: null }) },
 
     { id: "cef",
-      hint: "One entry per CEF — which stage flight it followed, who conducted it and the result. Tick pending while you are still waiting for the result.",
+      hint: "One entry per CEF — which stage flight it followed, who conducted it and the result. Leave the grade empty until the result is known.",
       row: (e, i) => `
         <div class="rgrid2">
           ${triggerF("cef", i, e)}
@@ -605,8 +652,8 @@ WA.renderStudent = async function (view, me, opts) {
         </div>
         ${textF("cef", i, "result", e.result, "Result (optional)", "e.g. pass")}
         <div class="rfoot"><span class="hint">${WA.checkLineHTML("cef", e)}</span>
-          ${pendF("cef", i, e.pending)}${rmB("cef", i)}</div>`,
-      blank: () => ({ date: "", flight_code: "", evaluator: "", result: "", grade: null, pending: false }) },
+          ${rmB("cef", i)}</div>`,
+      blank: () => ({ date: "", flight_code: "", evaluator: "", result: "", grade: null }) },
   ];
   const secById = (id) => SECTIONS.find((s) => s.id === id);
 
@@ -614,16 +661,20 @@ WA.renderStudent = async function (view, me, opts) {
   function rowHTML(sec, e, i, meta) {
     const leg = stillLegacy(sec.id, e);
     const co = WA.isCO(e);
+    const lock = coLocked(e);
     const slot = !!(meta && meta.slot);
-    return `<div class="rrow${e.pending ? " is-pending" : ""}${leg ? " is-legacy" : ""}${
-      co ? " is-co" : ""}${slot ? " is-slot" : ""}${
+    return `<div class="rrow${leg ? " is-legacy" : ""}${
+      co ? " is-co" : ""}${lock ? " is-colock" : ""}${slot ? " is-slot" : ""}${
       slot && WA.slotEmpty(sec.id, e) ? " is-empty" : ""}" data-row="${esc(sec.id)}:${i}">
       ${leg ? `<p class="legnote">Recorded on an earlier version of this form &mdash; please complete
-        ${esc(missingOf(sec.id, e).join(", ") || "the missing details")}. ${blocksSave(sec.id, e)
-          ? "It stays readable everywhere in the meantime, but the record cannot be saved again until this is done."
-          : "Nothing is lost in the meantime — the rest of the form saves as it is."}</p>` : ""}
-      ${co ? `<p class="conote">${WA.coTag(e)} entered by the squadron CO
-        ${asCO ? "" : "on your behalf"}</p>` : ""}
+        ${esc(missingOf(sec.id, e).join(", ") || "the missing details")}. ${lock
+          ? "Only the squadron CO can change this entry, so ask him to complete it."
+          : blocksSave(sec.id, e)
+            ? "It stays readable everywhere in the meantime, but the record cannot be saved again until this is done."
+            : "Nothing is lost in the meantime — the rest of the form saves as it is."}</p>` : ""}
+      ${co ? `<p class="conote">${lock ? WA.coLockTag() : WA.coTag(e)} ${lock
+        ? "This entry was set by the squadron CO. You can see it, and it stays on your record exactly as it is &mdash; only the CO can change or remove it."
+        : "entered by the squadron CO"}</p>` : ""}
       ${sec.row(e, i, meta)}</div>`;
   }
 
@@ -651,7 +702,7 @@ WA.renderStudent = async function (view, me, opts) {
            <span class="hint">— earlier attempts at a checkride and imported entries that still need identifying.</span></div>`;
     return head.join("") + (tail.length ? extraHead + tail.join("") : "") +
       (sec.id === "solo_flights"
-        ? `<div class="addrow"><button type="button" class="btn btn-sm" data-add="solo_flights"
+        ? `<div class="addrow"><button type="button" class="btn btn-sm btn-add" data-add="solo_flights"
              >+ Add an additional solo</button></div>` : "");
   }
 
@@ -671,7 +722,12 @@ WA.renderStudent = async function (view, me, opts) {
 
   function missingOf(sec, e) {
     const out = [];
-    if (sec === "sms") { if (!isDate(e.entrance_date)) out.push("the entrance date"); return out; }
+    if (sec === "sms") {
+      if (!isDate(e.entrance_date)) out.push("the entrance date");
+      if (!WA.smsReason(e.reason)) out.push("the ΚΕΠΕ entry condition it was raised under");
+      else if (e.reason === "judgement" && !txt(e.note)) out.push("the reduced performance the decision was based on");
+      return out;
+    }
     if (!isDate(e.date)) out.push("the date");
     if (sec === "fail" || sec === "almost_good") {
       if (!WA.itemCat(e.category)) out.push("the track");
@@ -707,7 +763,7 @@ WA.renderStudent = async function (view, me, opts) {
   }
 
   /* the derived counter of a section — FILLED entries only, so the eight
-     pending solo slots do not read as eight solos flown (round 5) */
+     empty solo slots do not read as eight solos flown (round 5) */
   function cntHTML(id) {
     const list = S.data[id] || [];
     const n = WA.filled(id, list).length;
@@ -739,7 +795,7 @@ WA.renderStudent = async function (view, me, opts) {
                       : "counted automatically from the entries below"}">${cntHTML(sec.id)}</span>
           ${sec.fixed
             ? `<span class="badge" title="These rows are fixed by the syllabus — they cannot be added to or removed">fixed by the syllabus</span>`
-            : `<button type="button" class="btn btn-sm" data-add="${esc(sec.id)}">+ Add</button>`}</div>
+            : `<button type="button" class="btn btn-sm btn-add" data-add="${esc(sec.id)}">+ Add</button>`}</div>
         <p class="hint">${esc(sec.hint)}</p>
         <div style="margin-top:8px" id="rows-${esc(sec.id)}">${rowsHTML(sec)}</div>
       </section>`;
@@ -788,14 +844,32 @@ WA.renderStudent = async function (view, me, opts) {
     </div>`;
 
   const form = $("stu-form");
+  for (const k of WA.COUNTED) CO_BASE[k] = (S.data[k] || []).filter(WA.isCO).length;
+  /* the FIRST render is a render like any other — the locks apply to it too */
+  applyLocks();
 
   function redraw(secId) {
     $("rows-" + secId).innerHTML = rowsHTML(secById(secId));
     $("cnt-" + secId).textContent = cntHTML(secId);
+    applyLocks();
+  }
+  /* THE LOCK, ENFORCED IN THE DOM (round 8). Every control inside a row the CO
+     set is disabled — inputs, selects, the item chips' ✕, the Graded/NG chips
+     and the remove button alike — so no delegated handler can ever fire
+     against it. It runs after EVERY render path (section, single row,
+     multi-select), which is why it is one function and not a flag per box. */
+  function applyLocks() {
+    if (asCO) return;
+    for (const row of form.querySelectorAll(".rrow.is-colock")) {
+      for (const el of row.querySelectorAll("input, select, textarea, button")) {
+        el.disabled = true;
+      }
+    }
   }
   function redrawMS(secId, i) {
     const box = form.querySelector(`[data-ms="${secId}:${i}"]`);
     if (box) box.innerHTML = msHTML(secId, i, S.data[secId][i]);
+    applyLocks();
     return box;
   }
   /* ONE row, in place — a picker that reveals its free-text box must not
@@ -807,6 +881,7 @@ WA.renderStudent = async function (view, me, opts) {
     const meta = sec.fixed ? { slot: slotFlags(secId, S.data[secId])[i] } : null;
     el.outerHTML = rowHTML(sec, S.data[secId][i], i, meta);
     $("cnt-" + secId).textContent = cntHTML(secId);
+    applyLocks();
     if (focusSel) {
       const back = form.querySelector(`.rrow[data-row="${secId}:${i}"] ${focusSel}`);
       if (back) back.focus();
@@ -863,12 +938,12 @@ WA.renderStudent = async function (view, me, opts) {
     note.innerHTML = html;
   }
 
-  /* the pending/flown badge of a fixed slot, without touching the inputs */
+  /* the flown / not-flown badge of a fixed slot, without touching the inputs */
   function refreshSlotBadge(secId, i) {
     const b = form.querySelector(`[data-slotbadge="${secId}:${i}"]`);
     if (!b) return;
     const flown = !WA.slotEmpty(secId, S.data[secId][i]);
-    b.textContent = flown ? "flown" : "pending — not flown yet";
+    b.textContent = flown ? "flown" : "not flown yet";
     b.classList.toggle("badge-good", flown);
     const row = form.querySelector(`.rrow[data-row="${secId}:${i}"]`);
     if (row) row.classList.toggle("is-empty", !flown);
@@ -962,8 +1037,11 @@ WA.renderStudent = async function (view, me, opts) {
          n === 1 ? "was" : "were"} entered by the squadron CO</b>${asCO ? "" : " on your behalf"}
          and ${n === 1 ? "is" : "are"} marked as such wherever the record is shown${
          n < tot ? `; the other ${tot - n} ${tot - n === 1 ? "is" : "are"} self-reported` : ""}. ${asCO
-           ? (n === 1 ? "It stays" : "They stay") + " marked until the student saves this form themselves."
-           : "Pressing <b>Save</b> re-reports the whole record as your own and removes the marks."}`
+           ? (n === 1 ? "It is" : "They are") + " yours to edit or remove here; the student sees " +
+             (n === 1 ? "it" : "them") + " locked."
+           : (n === 1 ? "It is" : "They are") + " <b>locked</b> — " + (n === 1 ? "it stays" : "they stay") +
+             " on your record exactly as " + (n === 1 ? "it is" : "they are") +
+             ", and saving this form does not change or remove " + (n === 1 ? "it" : "them") + "."}`
       : "";
   }
   showLegacyNote();
@@ -1032,6 +1110,8 @@ WA.renderStudent = async function (view, me, opts) {
       const [sec, i, on] = ng.dataset.ng.split(":");
       const e = S.data[sec][Number(i)];
       e.ng = on === "1";
+      /* an explicit answer — the slot's opening default never overrides it */
+      e._ngset = true;
       /* ROUND 6 — NG drops the GRADE and nothing else: the instructor who
          authorised the solo stays on the row, because he authorised it */
       if (e.ng) e.grade = null;
@@ -1055,6 +1135,22 @@ WA.renderStudent = async function (view, me, opts) {
       toast("Grade rounded from " + was + "% to " + e[field] + "%");
     }
   });
+
+  /* ── HOW A SOLO SLOT OPENS (round 8) ──────────────────────────────────────
+     The contact (adaptation) solos are flown with nobody in the other seat to
+     score them, so the squadron records them NG and names who authorised the
+     launch; the formation solos are graded. That is applied THE FIRST TIME a
+     slot stops being empty — never to a row the owner has already answered,
+     and never over an explicit tap on the Graded/NG chips. The chips stay
+     live either way: this is a default, not a rule. */
+  function soloFirstFill(e, wasEmpty) {
+    if (!wasEmpty || !e.slot || e._ngset || e.ng) return false;
+    if (WA.slotEmpty("solo_flights", e)) return false;
+    if (!WA.soloDefaultNG(e.slot)) return false;
+    e.ng = true;
+    e.grade = null;
+    return true;
+  }
 
   /* one edit → drop the legacy flag if the row is now complete, mark dirty */
   function afterEdit(secId, entry, row) {
@@ -1107,6 +1203,8 @@ WA.renderStudent = async function (view, me, opts) {
     const i = Number(el.dataset.idx);
     const entry = S.data[sec][i];
     if (!entry) return;
+    /* was this solo slot still empty BEFORE the keystroke? (round 8) */
+    const soloWasEmpty = sec === "solo_flights" && WA.slotEmpty("solo_flights", entry);
 
     /* ── the shared picker (round 5) ── "@x" is the select of x, "~x" the
        free-text box it reveals. Choosing from the list is the normal path;
@@ -1120,10 +1218,17 @@ WA.renderStudent = async function (view, me, opts) {
         } else {
           entry["_o_" + key] = false;
           entry[key] = el.value || null;
+          if (soloFirstFill(entry, soloWasEmpty)) {
+            toast("Contact solos are recorded NG — switch the row to Graded % if this one was graded");
+          }
           redrawRow(sec, i, `[data-field="@${key}"]`);
         }
       } else {
         entry[key] = el.value;
+        if (soloFirstFill(entry, soloWasEmpty)) {
+          redrawRow(sec, i, `[data-field="~${key}"]`);
+          toast("Contact solos are recorded NG — switch the row to Graded % if this one was graded");
+        }
         refreshSlotBadge(sec, i);
         refreshCodeNote(sec, i, key);
       }
@@ -1142,7 +1247,6 @@ WA.renderStudent = async function (view, me, opts) {
 
     if (el.type === "checkbox") {
       entry[f] = el.checked;
-      if (f === "pending") el.closest(".rrow").classList.toggle("is-pending", el.checked);
     } else if (el.type === "number") {
       entry[f] = el.value === "" ? null : num(el.value);
       refreshFixnote(sec, i, f);
@@ -1150,6 +1254,8 @@ WA.renderStudent = async function (view, me, opts) {
       entry[f] = el.value;
     }
     const wasLegacy = !!entry.legacy;
+    /* the opening grading of a solo slot, applied the first time it is filled */
+    const ngDefaulted = soloFirstFill(entry, soloWasEmpty);
     dropLegacy(sec, entry);
     /* the category drives BOTH lists this row depends on: the syllabus items
        and the flight codes. A code chosen under the old track cannot survive
@@ -1179,7 +1285,6 @@ WA.renderStudent = async function (view, me, opts) {
           t.date = entry.date || "";
           t.with = entry.with || "";
           t.grade = (entry.grade === undefined ? null : entry.grade);
-          t.pending = !!entry.pending;
           if (entry.entered_by) t.entered_by = entry.entered_by;
           if (!WA.slotEmpty("evaluations", t) && !COMPLETE.evaluations(t)) t.legacy = true;
           S.data.evaluations.splice(i, 1);
@@ -1188,11 +1293,22 @@ WA.renderStudent = async function (view, me, opts) {
       ensureSlots();
       redraw(sec);
       showLegacyNote();
+    } else if (ngDefaulted) {
+      /* the row has just taken its slot's opening grading — the chips, the
+         grade box and the hint all change together, so the row is redrawn */
+      const at0 = document.activeElement;
+      const back0 = at0 && at0.dataset ? at0.dataset.field : null;
+      redrawRow(sec, i, back0 ? `[data-field="${back0}"]` : null);
+      toast("Contact solos are recorded NG — switch the row to Graded % if this one was graded");
     } else if (f === "note" && sec === "nfs") {
       /* the note IS the cause when the reason is "Other" — the row's own
          completeness note has to follow what is typed into it */
       const wasE = form.querySelector(`.rrow[data-row="nfs:${i}"]`);
       if (wasE) wasE.classList.toggle("is-legacy", stillLegacy("nfs", entry));
+    } else if (f === "note" && sec === "sms") {
+      /* the note IS the reason when the condition is the CO / DO decision */
+      const wasE = form.querySelector(`.rrow[data-row="sms:${i}"]`);
+      if (wasE) wasE.classList.toggle("is-legacy", stillLegacy("sms", entry));
     } else if (sec === "evaluations" &&
                wasRec !== !WA.slotEmpty("evaluations", entry)) {
       /* this checkride has just become recorded (or stopped being): the
@@ -1272,8 +1388,20 @@ WA.renderStudent = async function (view, me, opts) {
       if (e.exit_date && e.entrance_date && e.exit_date < e.entrance_date) {
         need("sms", i, "the exit date cannot be before the entrance date"); return;
       }
+      /* ROUND 8 — THE ΚΕΠΕ CONDITION, ON EVERY ROW, LEGACY INCLUDED. The
+         server refuses the same row in the same words; the form says it first. */
+      if (!WA.smsReason(e.reason)) {
+        need("sms", i, "choose the condition this SMS entrance was raised under — 3-01 ΚΕΦ.2 §32β prints the six thresholds, and its opening sentence the Squadron CO / DO decision");
+        return;
+      }
+      if (e.reason === "judgement" && !txt(e.note)) {
+        need("sms", i, "a Squadron CO / DO decision names the reduced performance it was based on — write it in the box below");
+        return;
+      }
       push("sms", { entrance_date: e.entrance_date || null,
-                    exit_date: e.exit_date || null, note: txt(e.note) || null }, e);
+                    exit_date: e.exit_date || null,
+                    reason: e.reason,
+                    note: txt(e.note) || null }, e);
     });
     /* AIRSICKNESS — THE FLIGHT, NOT THE PHASE (round 6). The note the form no
        longer collects is carried through untouched when the row already had
@@ -1328,7 +1456,7 @@ WA.renderStudent = async function (view, me, opts) {
           flight_code: code || null,
           items: (e.items || []).map((x) => WA.normLine(x)).filter(Boolean),
           instructor: WA.normLine(e.instructor) || null,
-          grade: gr(e.grade), pending: !!e.pending,
+          grade: gr(e.grade),
         }, e);
       });
     }
@@ -1346,13 +1474,13 @@ WA.renderStudent = async function (view, me, opts) {
       }
       if (!empty && WA.evalById(e.evaluation) && ordState.blockedBy[e.evaluation]) {
         problems.push("evaluations follow the syllabus order — " + e.evaluation +
-          " cannot be recorded while " + ordState.blockedBy[e.evaluation] + " is pending");
+          " cannot be recorded while " + ordState.blockedBy[e.evaluation] + " has not been flown");
         return;
       }
       if (!intOK("evaluations", i, e, "grade", "the grade")) return;
       push("evaluations", {
         date: e.date || null, evaluation: WA.evalById(e.evaluation) ? e.evaluation : null,
-        with: WA.normLine(e.with) || null, grade: gr(e.grade), pending: !!e.pending }, e);
+        with: WA.normLine(e.with) || null, grade: gr(e.grade) }, e);
     });
     /* THE SOLO SLOTS — same rule, plus the sortie that was flown solo */
     d.solo_flights.forEach((e, i) => {
@@ -1401,8 +1529,24 @@ WA.renderStudent = async function (view, me, opts) {
         push(k, { date: e.date || null,
                   flight_code: WA.normCode(e.flight_code) || null,
                   evaluator: WA.normLine(e.evaluator) || null,
-                  result: txt(e.result) || null, grade: gr(e.grade), pending: !!e.pending }, e);
+                  result: txt(e.result) || null, grade: gr(e.grade) }, e);
       });
+    }
+    /* ── THE CO'S ENTRIES MUST ALL STILL BE THERE (round 8) ─────────────────
+       Nothing in the UI can drop one — they are locked — so a section that
+       comes out of this function short of CO entries can only mean a locked
+       row was refused on its way into the payload. The owner cannot fix a
+       locked row, so the message sends them to the CO instead of to the box,
+       and it goes FIRST: the specific complaint underneath it is not
+       something they can act on. */
+    for (const sec of SECTIONS) {
+      const kept = (rows[sec.id] || []).filter(WA.isCO).length;
+      const miss = (CO_BASE[sec.id] || 0) - kept;
+      if (miss > 0) {
+        problems.unshift(WA.secLabel(sec.id) + ": " + miss +
+          (miss === 1 ? " entry was" : " entries were") +
+          " set by the squadron CO and only the CO can change them — ask him to correct it; your save cannot go through without them");
+      }
     }
     return { clean, rows, problems, leftovers };
   }

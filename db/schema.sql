@@ -16,7 +16,20 @@
 -- admin_* on-behalf RPCs. They share the owner's validation path exactly
 -- (wa.write_record / wa.write_proposal), and what they write is stamped
 -- entered_by='admin' server-side — the tag the whole UI renders as "CO".
--- The owner saving their own form clears it.
+-- ROUND 8 — THE CO'S EDITS PREVAIL (supersedes the round-4b reclaim rule):
+-- an entry the CO created or modified is LOCKED for its owner. The owner's
+-- save must carry every one of them through fact for fact and no longer
+-- strips the stamps (wa.carry_stamps refuses a payload that alters or drops
+-- one, by name); the CO can still edit or delete his own, and editing an
+-- owner's entry makes it his — which locks it.
+-- ROUND 8 — SMS NAMES ITS ΚΕΠΕ ENTRY CONDITION (3-01 ΚΕΦ.2 §32β, PDF 54 /
+-- printed 36): wa.sms_reasons(), required on every entrance, legacy rows
+-- readable and refused on re-save until the condition is chosen.
+-- ROUND 8 — PENDING IS GONE from the data model: the key is out of every
+-- section's whitelist, refused by name on write and stripped on read; an
+-- unflown fixed slot needs no flag to say it has not been flown.
+-- ROUND 8 — a proposal branch has FOUR states: 1st / 2nd / 3rd, explicitly
+-- NOT RECOMMENDED (proposals.nr_*), or untouched.
 -- ROUND 6 — FIVE STRICTNESS RULES. Each of them replaces something the form
 -- used to accept out of politeness with the thing the squadron can actually
 -- use, and each keeps what is already stored READABLE while refusing to write
@@ -31,7 +44,7 @@
 --   3. EVALUATIONS FOLLOW THE SYLLABUS ORDER — wa.eval_ids(), generated from
 --      the FILE ORDER of flowchart2.json (the printed Training Flow Chart):
 --      C4590 → C4790 → C5090 → C5490 → I4490 → I4890 → F4690 → N4690. A later
---      checkride cannot be recorded while an earlier one is still pending.
+--      checkride cannot be recorded while an earlier one has not been flown.
 --   4. EVERY FLOWN SOLO NAMES ITS INSTRUCTOR, NG included — NG removes the
 --      grade, not the person who AUTHORISED the flight.
 --   5. AN FPC IS CONDUCTED BY THE SQUADRON CO OR THE DO (wa.fpc_evaluators())
@@ -43,7 +56,7 @@
 -- space: ' C4302 ' under the Instrument track is refused exactly as C4302 is.
 -- ROUND 5: the NFS reason (the printed causes of the ΦΜΠ, form Α0473),
 -- whole-number grades, category⇄flight-code agreement, FIXED SYLLABUS SLOTS
--- for the solos and the eight checkrides (pending until flown — an unflown
+-- for the solos and the eight checkrides (empty until flown — an unflown
 -- slot is a placeholder that counts for nothing and is never stamped), and
 -- the FPC/CEF trigger flight + evaluator (ex "by").
 -- ROUND 4b — WHAT they write, not what they submit: a CO save is DIFFED
@@ -160,6 +173,24 @@ exception when duplicate_object then null; end $$;
 do $$ begin
   alter table public.proposals add constraint proposals_entered_by_chk
     check (entered_by is null or entered_by = 'admin');
+exception when duplicate_object then null; end $$;
+
+-- ── "NOT RECOMMENDED" — the fourth state of a branch (round 8) ────────────
+-- Until round 8 a branch had three states: 1st / 2nd / 3rd, or untouched —
+-- and "untouched" had to carry two very different meanings at once ("I would
+-- not put him there" and "I have not formed a view"). The instructor can now
+-- say the first one OUT LOUD, per branch, mutually exclusive with a rank.
+-- Untouched stays untouched: three states become four.
+alter table public.proposals add column if not exists nr_fighters     boolean not null default false;
+alter table public.proposals add column if not exists nr_helicopters  boolean not null default false;
+alter table public.proposals add column if not exists nr_transport_ff boolean not null default false;
+
+do $$ begin
+  alter table public.proposals add constraint proposals_nr_excl check (
+        (rank_fighters     is null or nr_fighters     = false)
+    and (rank_helicopters  is null or nr_helicopters  = false)
+    and (rank_transport_ff is null or nr_transport_ff = false)
+  );
 exception when duplicate_object then null; end $$;
 
 -- ranking positions must be pairwise distinct inside one proposal
@@ -287,7 +318,7 @@ language sql immutable as $$
 $$;
 
 -- one value of one field, normalised. Non-strings pass through untouched
--- (a grade stays a number, `pending` stays a boolean, json null stays null);
+-- (a grade stays a number, `ng` stays a boolean, json null stays null);
 -- a list of strings — items[] — is normalised element by element.
 create or replace function wa.norm_field(p_key text, v jsonb) returns jsonb
 language sql immutable as $$
@@ -643,11 +674,61 @@ language sql immutable as $$
   end
 $$;
 
+-- ── SMS (ΚΕΠΕ) ENTRY REASONS (round 8) — the printed entry thresholds ──────
+-- SMS is the squadron's Special Monitoring Status — ΚΕΠΕ, «Κατάσταση Ειδικής
+-- Παρακολούθησης Εκπαίδευσης Μαθητή» — and the regulation does not leave the
+-- reason for an entrance to prose: 3-01/2025 ΔΑΕ, ΚΕΦ.2 §32β, PDF page 54 =
+-- printed page 36, prints the general power in its opening sentence and then
+-- SIX numbered conditions, at least one of which puts a student in ΚΕΠΕ:
+--   (1) Σε οποιαδήποτε έξοδο αέρος, πλην (περιπτώσεων ΑΕΡΟΝΑΥΤΙΑΣ,
+--       Περιστατικού Φυσιολογίας Πτήσεων) ή F/S βαθμολογηθεί με 59% και κάτω.
+--   (2) Σε δύο συνεχόμενες πτήσεις, εκτός των τελικών εξετάσεων και Δοκιμών
+--       Προόδου, βαθμολογηθεί με 63% και κάτω.
+--   (3) Σε δύο συνεχόμενες πτήσεις παρουσιάσει ΑΕΡΟΝΑΥΤΙΑ.
+--   (4) Σε μία γραπτή αξιολόγηση ή εξέταση εδάφους (συμπεριλαμβανομένων
+--       εξετάσεων σε CBT) χαρακτηρισθεί ως «ΑΠΟΤΥΧΩΝ».
+--   (5) Σε 2 συνεχόμενες ή 4 μη συνεχόμενες προφορικές εξετάσεις εδάφους κατά
+--       την ομαδική ή/και ατομική προ πτήσεως ενημέρωση, χαρακτηρισθεί ως
+--       «ΑΠΟΤΥΧΩΝ».
+--   (6) Όταν ο Εκπαιδευτής του, εισηγηθεί να μπει σε ΚΕΠΕ λόγω μη αποδεκτής
+--       προόδου μεταξύ των πτήσεων.
+-- THE SEVENTH IS NOT AN INVENTED "Other…": it is the opening sentence of the
+-- same §32β — «Μαθητής να τίθεται σε ΚΕΠΕ κατά την κρίση του Διοικητή της
+-- Μοίρας ή του Α.Ε. αυτής, όταν οι επιδόσεις του στην πτητική ή θεωρητική
+-- εκπαίδευση υπολείπονται έναντι της παρεχόμενης εκπαίδευσης» — the standing
+-- discretion of the Squadron CO / DO, which the six conditions specify
+-- («Ειδικότερα…») without exhausting. That is the only room the regulation
+-- leaves, so it is the only option beyond the six, it is NAMED rather than
+-- blank, and it demands the reason in writing (§32δ(2): the CO informs the
+-- student of the reasons he was put in ΚΕΠΕ).
+-- MIRROR: app/app.js → WA.SMS_REASONS. Change one, change the other.
+create or replace function wa.sms_reasons() returns text[]
+language sql immutable as $$
+  select array['sortie59','two63','airsickness','written','oral','instructor',
+               'judgement']::text[]
+$$;
+
+-- one SMS entry, given the reason it did not use to carry (round 8).
+-- Nothing is guessed: a row written before the rule keeps its note and is
+-- flagged legacy, so it stays READABLE everywhere and the form asks which of
+-- the seven it was before the record can be saved again — the standing
+-- "keep it, ask for it" contract.
+create or replace function wa.sms_reason_fix(e jsonb) returns jsonb
+language sql immutable as $$
+  select case
+    when jsonb_typeof(e) <> 'object' then e
+    when (e->>'reason') = any(wa.sms_reasons()) then e
+    when (e->>'reason') is not null
+      then (e - 'reason') || jsonb_build_object('reason', null, 'legacy', true)
+    else e || jsonb_build_object('legacy', true)
+  end
+$$;
+
 -- ── THE FIXED SOLO SLOTS (round 5) ────────────────────────────────────────
 -- One slot per solo the stage prescribes — flow-chart Training Sections whose
 -- printed duration block says SOLO SORTIES > 0. F4301-06 prescribes TWO, so it
 -- carries two distinct slots. Solos are not a free list: the form draws exactly
--- these rows, pending until flown, and nothing can add or remove one. An
+-- these rows, empty until flown, and nothing can add or remove one. An
 -- unforeseen extra solo is a slot-LESS entry (the "additional solo" path).
 -- MIRROR: app/items-catalog.js → WA_SOLO_SLOTS (generated from flowchart2.json).
 create or replace function wa.solo_slots() returns text[]
@@ -679,29 +760,35 @@ language sql immutable as $$
                'evaluations','solo_flights','fpc','cef']::text[]
 $$;
 
--- the sections whose entries may carry `pending` — an entry is pending only
--- where the form offers the tick box. Anywhere else the flag would be a
--- badge on the CO's dashboard that nobody can ever clear (round-4 W3a).
-create or replace function wa.pending_sections() returns text[]
-language sql immutable as $$
-  select array['fail','almost_good','evaluations','fpc','cef']::text[]
-$$;
+-- ── PENDING IS GONE (round 8) ─────────────────────────────────────────────
+-- The tick box, the flag, the badges, the columns and the counters are all
+-- removed. An unfilled fixed slot needs no flag to say what it is: it has no
+-- date, so it has not been flown, and every surface reads it that way. A
+-- FAIL / FPC / CEF row waiting for a result is simply a row whose result is
+-- not written yet. The key is therefore out of every section's whitelist
+-- (wa.entry_keys), refused on write with its own sentence, and stripped from
+-- stored rows on read (wa.strip_entry, via wa.migrate_record).
+-- Superseded, and dropped so no view can call it back:
+drop function if exists wa.pending_sections();
+drop function if exists wa.pending_count(jsonb);
 
 -- ── PER-SECTION KEY WHITELIST (round-4 W3a) ───────────────────────────────
 -- The exhaustive list of keys ONE entry of a section may carry. Anything else
 -- is rejected on write and stripped on read: a typo ("total_count") is caught
--- instead of silently stored, and a flag the form cannot show ("pending" on an
--- NFS row) can never enter the record.
+-- instead of silently stored, and a flag the form no longer knows ("pending",
+-- retired in round 8) can never enter the record.
 -- MIRROR: app/app.js → WA.ENTRY_KEYS. Change one, change the other.
 create or replace function wa.entry_keys(p_sec text) returns text[]
 language sql immutable as $$
   select case p_sec
     when 'nfs'          then array['date','reason','note','legacy','entered_by']
-    when 'sms'          then array['entrance_date','exit_date','note','legacy','entered_by']
+    -- ROUND 8: an SMS entrance names the ΚΕΠΕ entry condition it was raised
+    -- under (3-01 ΚΕΦ.2 §32β) — wa.sms_reasons().
+    when 'sms'          then array['entrance_date','exit_date','reason','note','legacy','entered_by']
     when 'fail'         then array['date','category','flight_code','items','instructor',
-                                   'grade','pending','legacy','entered_by']
+                                   'grade','legacy','entered_by']
     when 'almost_good'  then array['date','category','flight_code','items','instructor',
-                                   'grade','pending','legacy','entered_by']
+                                   'grade','legacy','entered_by']
     -- ROUND 6: an airsickness event names the FLIGHT it happened on, not a
     -- phase-of-flight note. `phase` survives in this list as a READ-ONLY
     -- LEGACY CARRIER — a note already written is never destroyed behind its
@@ -709,17 +796,17 @@ language sql immutable as $$
     -- refuses to let the number of rows carrying one grow (wa.phase_count),
     -- and such a row cannot be saved again until its flight is chosen.
     when 'airsickness'  then array['date','instructor','flight_code','phase','legacy','entered_by']
-    when 'evaluations'  then array['date','evaluation','with','grade','pending','legacy','entered_by']
+    when 'evaluations'  then array['date','evaluation','with','grade','legacy','entered_by']
     when 'solo_flights' then array['slot','sortie','date','ng','grade','instructor','legacy','entered_by']
-    when 'fpc'          then array['date','flight_code','evaluator','result','grade','pending','legacy','entered_by']
-    when 'cef'          then array['date','flight_code','evaluator','result','grade','pending','legacy','entered_by']
+    when 'fpc'          then array['date','flight_code','evaluator','result','grade','legacy','entered_by']
+    when 'cef'          then array['date','flight_code','evaluator','result','grade','legacy','entered_by']
     else array[]::text[] end
 $$;
 
 -- ── AN EMPTY FIXED SLOT (round 5) ─────────────────────────────────────────
 -- Solo flights and evaluations are FIXED syllabus rows: the eight solos the
 -- stage prescribes and the eight stage checkrides are present from the first
--- day, pending until they are flown. A slot nobody has flown yet is a
+-- day, empty until they are flown. A slot nobody has flown yet is a
 -- PLACEHOLDER, not an entry — it must not be counted, must not be stamped as
 -- "entered by the CO", and must not demand a date it cannot have.
 create or replace function wa.slot_empty(p_sec text, e jsonb) returns boolean
@@ -731,11 +818,11 @@ language sql immutable as $$
       and (e->>'instructor') is null and (e->>'sortie') is null
       and coalesce((case when jsonb_typeof(e->'ng') = 'boolean'
                          then (e->>'ng')::boolean else false end), false) = false
+    -- ROUND 8: the pending tick is gone, so an evaluation slot is empty when
+    -- it carries nothing but its identity — which is all it ever meant.
     when p_sec = 'evaluations' then
       (e->>'evaluation') is not null and (e->>'date') is null and (e->>'grade') is null
       and (e->>'with') is null
-      and coalesce((case when jsonb_typeof(e->'pending') = 'boolean'
-                         then (e->>'pending')::boolean else false end), false) = false
     else false end
 $$;
 
@@ -804,12 +891,32 @@ begin
                          'reason "Other" needs the cause written out (the ΑΛΛΗ ΑΙΤΙΑ line of the form)');
 
         elsif k = 'sms' then
-          -- SMS entries can never be pending (round-3 ruling)
-          perform wa.chk(not (e ? 'pending') or jsonb_typeof(e->'pending') = 'null',
-                         w || '.pending', 'SMS entries cannot be pending');
           perform wa.chk_date(e->'entrance_date', w || '.entrance_date', not wa.is_legacy(e));
           perform wa.chk_date(e->'exit_date', w || '.exit_date', false);
           perform wa.chk_text(e->'note', w || '.note', false, 300);
+          -- ROUND 8 — THE ENTRANCE NAMES ITS ΚΕΠΕ CONDITION (3-01 ΚΕΦ.2 §32β).
+          -- The regulation prints the six thresholds and, in the opening
+          -- sentence of the same paragraph, the Squadron CO / DO discretion
+          -- they specify; nothing else puts a student in ΚΕΠΕ, so nothing else
+          -- is accepted here. REQUIRED EVEN ON A LEGACY ROW — the legacy flag
+          -- excuses what the OLD form never asked for, never a rule of this
+          -- round, or the rule would be optional for exactly the rows that
+          -- break it. Such a row stays READABLE everywhere and is refused on
+          -- the next save until the condition is chosen.
+          perform wa.chk_text(e->'reason', w || '.reason', false, 40);
+          perform wa.chk(nullif(trim(coalesce(e->>'reason', '')), '') is not null,
+                         w || '.reason',
+                         'every SMS entrance names the condition it was raised under — the six ΚΕΠΕ entry thresholds of 3-01 ΚΕΦ.2 §32β, or the Squadron CO / DO decision of its opening sentence');
+          perform wa.chk((e->>'reason') = any(wa.sms_reasons()),
+                         w || '.reason',
+                         format('unknown SMS entry condition — 3-01 ΚΕΦ.2 §32β prints %s',
+                                array_to_string(wa.sms_reasons(), ' / ')));
+          -- the discretionary path is the only one that is not a measurable
+          -- threshold, so it carries its reason in writing (§32δ(2))
+          perform wa.chk((e->>'reason') is distinct from 'judgement'
+                         or nullif(trim(coalesce(e->>'note', '')), '') is not null,
+                         w || '.note',
+                         'a Squadron CO / DO decision names the reduced performance it was based on — write it in the note (3-01 ΚΕΦ.2 §32δ(2): the student is told the reasons he was put in ΚΕΠΕ)');
 
         elsif k in ('fail', 'almost_good') then
           perform wa.chk_entry_date(e, w);
@@ -863,7 +970,6 @@ begin
           end if;
           perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
           perform wa.chk_grade(e->'grade', w || '.grade', false);
-          perform wa.chk_bool(e->'pending', w || '.pending');
 
         elsif k = 'airsickness' then
           -- ROUND 6 — THE FLIGHT, NOT THE PHASE. An airsickness event is
@@ -901,8 +1007,8 @@ begin
           -- FIXED SLOT RULE (round 5): the eight checkrides are always present.
           -- A checkride that has not been flown yet is an identity and nothing
           -- else — it cannot carry the date it does not have. The moment it
-          -- carries anything (a date, a grade, an evaluator, a pending tick)
-          -- it is a flown evaluation and the date is required again.
+          -- carries anything at all (a date, a grade, an evaluator) it is a
+          -- flown evaluation and the date is required again.
           perform wa.chk_bool(e->'legacy', w || '.legacy');
           perform wa.chk_date(e->'date', w || '.date',
                               not wa.is_legacy(e) and not wa.slot_empty(k, e));
@@ -911,11 +1017,10 @@ begin
                          w || '.evaluation', 'unknown evaluation — expected one of the eight checkrides');
           perform wa.chk_text(e->'with', w || '.with', false, 200);
           perform wa.chk_grade(e->'grade', w || '.grade', false);
-          perform wa.chk_bool(e->'pending', w || '.pending');
 
         elsif k = 'solo_flights' then
           -- FIXED SLOT RULE (round 5): the solos of the stage are the syllabus
-          -- slots, present from day one and pending until flown. `slot` names
+          -- slots, present from day one and empty until flown. `slot` names
           -- which one; a slot-LESS entry is the "additional solo" escape hatch
           -- for a solo the syllabus did not foresee.
           perform wa.chk_bool(e->'legacy', w || '.legacy');
@@ -1003,16 +1108,12 @@ begin
           end if;
           perform wa.chk_text(e->'result', w || '.result', false, 300);
           perform wa.chk_grade(e->'grade', w || '.grade', false);
-          perform wa.chk_bool(e->'pending', w || '.pending');
         end if;
 
-        -- `pending` exists only where the form draws the tick box; anywhere
-        -- else it would become a badge on the CO's dashboard that nobody can
-        -- ever clear (round-4 W3a).
-        perform wa.chk(not (e ? 'pending') or jsonb_typeof(e->'pending') = 'null'
-                       or k = any(wa.pending_sections()), w || '.pending',
-          format('a %s entry can never be pending — only %s entries can',
-                 k, array_to_string(wa.pending_sections(), ' / ')));
+        -- PENDING IS GONE (round 8) — refused by name, before the generic
+        -- whitelist message, so the reason is the ruling and not a typo report.
+        perform wa.chk(not (e ? 'pending'), w || '.pending',
+          'the pending flag was removed — an entry that has not happened yet is simply an unfilled row (a fixed slot with no date reads as not flown), and a result that is still awaited is a grade not written yet');
 
         -- KEY WHITELIST — last, so the specific messages above win when they
         -- apply. Everything else: named, and refused.
@@ -1061,7 +1162,7 @@ begin
             if not done[i2] then
               prev_id := (wa.eval_ids())[i2];
               perform wa.chk(false, k || '[' || (wa.eval_ids())[i] || ']',
-                format('evaluations follow the syllabus order — %s cannot be recorded while %s is pending',
+                format('evaluations follow the syllabus order — %s cannot be recorded while %s has not been flown',
                        (wa.eval_ids())[i], prev_id));
             end if;
           end loop;
@@ -1098,7 +1199,7 @@ $$;
 
 -- ── READ-TIME MIGRATION ────────────────────────────────────────────────────
 -- A v1 record (manual NFS counter, free-text FAIL items, identity-less
--- evaluations, pending SMS, graded/non-graded solos, progress_tests /
+-- evaluations, pending flags, graded/non-graded solos, progress_tests /
 -- aptitude_exams) is rewritten into the v2 shape on EVERY read. Nothing is
 -- ever lost: what cannot be completed is carried with legacy = true and the
 -- form asks the student for the missing field. The stored row is untouched —
@@ -1174,9 +1275,13 @@ begin
       if coalesce(case when jsonb_typeof(e->'pending') = 'boolean'
                        then (e->>'pending')::boolean else false end, false)
          and (e->'note') is null then
-        e := e || jsonb_build_object('note', 'was flagged pending in the previous form');
+        e := e || jsonb_build_object('note', 'was flagged as awaiting a result in the previous form');
       end if;
       e := e - 'pending';
+      -- ROUND 8 — the entrance names its ΚΕΠΕ condition (3-01 ΚΕΦ.2 §32β). A
+      -- row written before that rule has none: it is READ with its note
+      -- intact, flagged, and the form asks which of the seven it was.
+      e := wa.sms_reason_fix(e);
       if not wa.is_iso_date(e->>'entrance_date') then e := e || jsonb_build_object('legacy', true); end if;
       arr := arr || jsonb_build_array(e);
     end loop;
@@ -1363,7 +1468,7 @@ begin
   -- FINAL PASS — per-section key whitelist (round-4 W3a): a key the form
   -- cannot show and the validator no longer accepts is dropped on READ, so a
   -- record that was written before this rule stops carrying it (a smuggled
-  -- {"pending":true} on an NFS row disappears the moment the record is read).
+  -- {"pending":true} anywhere disappears the moment the record is read).
   arr := '{}'::jsonb;
   for k in select jsonb_object_keys(o) loop
     e := '[]'::jsonb;
@@ -1383,24 +1488,6 @@ language sql immutable as $$
     'first_name', p.first_name, 'last_name', p.last_name, 'class', p.class,
     'duty', p.duty, 'leadership', p.leadership, 'status', p.status,
     'active', p.active)
-$$;
-
--- count of pending-flagged entries (direct members of the PENDING-CAPABLE
--- top-level sections — exactly the entries the client's WA.pendingItems can
--- describe and the form can clear; a jsonpath '$.**' walk would double-count
--- through lax-mode array unwrapping, and counting every section would resurrect
--- the round-4 W3a bug: a badge nobody can clear)
-create or replace function wa.pending_count(p jsonb) returns int
-language sql immutable as $$
-  select coalesce((
-    select count(*)::int
-    from jsonb_each(coalesce(p, '{}'::jsonb)) s(key, val)
-    cross join lateral jsonb_array_elements(
-      case when jsonb_typeof(val) = 'array' then val else '[]'::jsonb end) e
-    where s.key = any(wa.pending_sections())
-      and jsonb_typeof(e) = 'object'
-      and case when jsonb_typeof(e->'pending') = 'boolean'
-               then (e->>'pending')::boolean else false end), 0)
 $$;
 
 -- how many entries of a record were entered BY THE CO on the owner's behalf
@@ -1459,28 +1546,21 @@ $$;
 -- place the feature exists to be honest about. Superseded:
 drop function if exists wa.stamp_record(jsonb, text);
 
--- the OWNER path: saving your own form re-reports the WHOLE record as yours
--- (the reclaim rule — unchanged, and deliberately not a diff).
-create or replace function wa.strip_stamps(p jsonb) returns jsonb
-language plpgsql immutable as $$
-declare o jsonb := '{}'::jsonb; k text; arr jsonb; i int; e jsonb;
-begin
-  if p is null or jsonb_typeof(p) <> 'object' then return coalesce(p, '{}'::jsonb); end if;
-  for k in select jsonb_object_keys(p) loop
-    if jsonb_typeof(p->k) <> 'array' then
-      o := o || jsonb_build_object(k, p->k);
-      continue;
-    end if;
-    arr := '[]'::jsonb;
-    for i in 0 .. jsonb_array_length(p->k) - 1 loop
-      e := p->k->i;
-      if jsonb_typeof(e) = 'object' then e := e - 'entered_by'; end if;
-      arr := arr || jsonb_build_array(e);
-    end loop;
-    o := o || jsonb_build_object(k, arr);
-  end loop;
-  return o;
-end $$;
+-- ── THE CO'S EDITS PREVAIL — THE SUPREMACY INVERSION (round 8) ────────────
+-- Rounds 4b-7 gave the owner the last word: saving your own form cleared every
+-- CO stamp on it, because "reclaiming your own data makes it self-reported
+-- again". The squadron reads it the other way round. When the Squadron CO
+-- writes a line into a student's record he is not making a suggestion, and a
+-- record in which the student can quietly overwrite the CO's correction is a
+-- record the CO cannot brief from.
+-- SO: an entry the CO created or modified (entered_by = 'admin') is LOCKED for
+-- its owner. The owner's save must carry every one of them through UNCHANGED —
+-- it is refused otherwise — and it NO LONGER STRIPS THE STAMPS. The CO keeps
+-- the full range of motion: he may edit or delete his own entries, and editing
+-- an owner's entry makes it his (the diff below stamps it), which locks it.
+-- The reclaim rule is superseded, and its function is dropped so no path can
+-- call it back:
+drop function if exists wa.strip_stamps(jsonb);
 
 -- ONE entry reduced to its FACTS — the identity the diff compares.
 -- The stamp itself is excluded (it is the thing being decided), and a
@@ -1561,6 +1641,86 @@ begin
   return o;
 end $$;
 
+-- the OWNER path (round 8): the submitted payload against the STORED record.
+-- Every entry the CO owns must still be there, fact for fact — matched by
+-- wa.entry_core exactly as the CO path matches, position first — and it comes
+-- out of this function still carrying his name. An entry of the owner's own
+-- keeps null whether it changed or not: their record is still theirs to write.
+-- A CO entry that was ALTERED has no match, and a CO entry that was DELETED
+-- has no match either; both leave a stored stamp unclaimed, and that is the
+-- refusal — one sentence, naming the rule, for both.
+create or replace function wa.carry_stamps(p_new jsonb, p_old jsonb) returns jsonb
+language plpgsql immutable as $$
+declare
+  o jsonb := '{}'::jsonb;
+  k text; nw jsonb; od jsonb; arr jsonb; e jsonb; core jsonb;
+  i int; j int; n_old int; hit int; used boolean[];
+begin
+  if p_new is null or jsonb_typeof(p_new) <> 'object' then return coalesce(p_new, '{}'::jsonb); end if;
+  for k in select jsonb_object_keys(p_new) loop
+    nw := p_new->k;
+    if jsonb_typeof(nw) <> 'array' then
+      o := o || jsonb_build_object(k, nw);
+      continue;
+    end if;
+    od := case when jsonb_typeof(coalesce(p_old, '{}'::jsonb)->k) = 'array'
+               then p_old->k else '[]'::jsonb end;
+    n_old := jsonb_array_length(od);
+    used := array_fill(false, array[greatest(n_old, 1)]);
+    arr := '[]'::jsonb;
+    for i in 0 .. jsonb_array_length(nw) - 1 loop
+      e := nw->i;
+      if jsonb_typeof(e) <> 'object' then
+        arr := arr || jsonb_build_array(e);
+        continue;
+      end if;
+      core := wa.entry_core(e);
+      hit := -1;
+      if i < n_old and not used[i + 1] and wa.entry_core(od->i) = core then
+        hit := i;
+      else
+        for j in 0 .. n_old - 1 loop
+          if not used[j + 1] and wa.entry_core(od->j) = core then hit := j; exit; end if;
+        end loop;
+      end if;
+      if hit >= 0 then
+        used[hit + 1] := true;
+        -- the stored provenance rides through untouched: 'admin' stays
+        -- 'admin' (the lock), null stays null (the owner's own line)
+        e := case when (od->hit->>'entered_by') is null then e - 'entered_by'
+                  else e || jsonb_build_object('entered_by', od->hit->'entered_by') end;
+      else
+        -- a row the owner wrote or changed — theirs, never the CO's
+        e := e - 'entered_by';
+      end if;
+      arr := arr || jsonb_build_array(e);
+    end loop;
+    -- EVERY CO ENTRY MUST HAVE BEEN CLAIMED. One that was not is one the owner
+    -- altered or dropped, and only the CO may do either.
+    for j in 0 .. n_old - 1 loop
+      if not used[j + 1] and (od->j->>'entered_by') = 'admin'
+         and not wa.slot_empty(k, od->j) then
+        perform wa.chk(false, format('%s[%s]', k, j),
+          'this entry was set by the squadron CO and only the CO can change it — it is shown on your form locked, and your save must leave it exactly as it stands');
+      end if;
+    end loop;
+    o := o || jsonb_build_object(k, arr);
+  end loop;
+  -- a whole SECTION the payload omitted takes its stored CO entries with it,
+  -- so the same rule has to look at what is not in the payload at all
+  for k in select jsonb_object_keys(coalesce(p_old, '{}'::jsonb)) loop
+    if (p_new ? k) or jsonb_typeof(p_old->k) <> 'array' then continue; end if;
+    for j in 0 .. jsonb_array_length(p_old->k) - 1 loop
+      if (p_old->k->j->>'entered_by') = 'admin'
+         and not wa.slot_empty(k, p_old->k->j) then
+        perform wa.chk(false, format('%s[%s]', k, j),
+          'this entry was set by the squadron CO and only the CO can change it — it is shown on your form locked, and your save must leave it exactly as it stands');
+      end if;
+    end loop;
+  end loop;
+  return o;
+end $$;
+
 -- ── the ONE student-record write path ─────────────────────────────────────
 -- Used by BOTH public.save_student_record (the owner) and
 -- public.admin_save_student_record (the CO on their behalf) — same validation,
@@ -1607,17 +1767,24 @@ begin
                  'airsickness',
                  'the phase-of-flight note was replaced by the flight code — an existing note is kept as legacy information, but a new one cannot be added');
 
-  -- THE STAMP (round 4b) — the CO's save is diffed against what is stored, so
-  -- only what he actually wrote carries his name; the owner's save reclaims
-  -- everything. Applied server-side on EVERY write, so a stamp can neither be
-  -- forged by a hand-made payload nor kept alive by one.
+  -- THE STAMP — decided per entry, against what is STORED, on BOTH paths.
+  -- CO path (round 4b, unchanged): only what he actually wrote carries his
+  -- name, and editing an owner's entry makes that entry his.
+  -- OWNER path (round 8): the stamps SURVIVE. Every CO entry must come back
+  -- fact for fact — wa.carry_stamps refuses the save otherwise, naming the
+  -- rule — and it comes back still stamped. The owner's own entries stay the
+  -- owner's whether they changed or not.
+  -- Applied server-side on EVERY write, so a stamp can neither be forged by a
+  -- hand-made payload nor thrown away by one.
   stamped := case when p_as_admin then wa.stamp_record_diff(pl, old)
-                  else wa.strip_stamps(pl) end;
-  -- DERIVED, never typed. On a CO save of a record that does not exist yet the
-  -- CO is its creator, which is what an empty record has instead of entries.
-  by_who := case when p_as_admin
-                 then wa.record_stamp(stamped, case when had then prev else 'admin' end)
-                 else null end;
+                  else wa.carry_stamps(pl, old) end;
+  -- DERIVED, never typed — on both paths now, because a record whose entries
+  -- carry the CO's name keeps saying so after its owner saves it. The one case
+  -- the entries cannot settle (a record the CO opened and nobody has filled)
+  -- still belongs to the CO path: an empty record locks nothing.
+  by_who := wa.record_stamp(stamped,
+              case when p_as_admin then (case when had then prev else 'admin' end)
+                   else null end);
 
   insert into public.student_records as sr (student_id, data, last_update, entered_by)
   values (p_student, stamped, now(), by_who)
@@ -1642,6 +1809,7 @@ language plpgsql volatile as $$
 declare
   s public.people;
   rf smallint; rh smallint; rt smallint;
+  nf boolean; nh boolean; nt boolean;
   fw boolean; cm text;
   n int;
   saved public.proposals;
@@ -1666,6 +1834,26 @@ begin
   rf := (p_payload->'ranks'->>'fighters')::smallint;
   rh := (p_payload->'ranks'->>'helicopters')::smallint;
   rt := (p_payload->'ranks'->>'transport_ff')::smallint;
+
+  -- "NOT RECOMMENDED" — THE FOURTH STATE OF A BRANCH (round 8).
+  -- A branch is ranked 1st / 2nd / 3rd, or explicitly NOT RECOMMENDED, or
+  -- untouched. The first two are mutually exclusive by definition: an
+  -- instructor who puts a student third for Helicopters has recommended
+  -- Helicopters. Untouched keeps meaning "no view expressed", which is what
+  -- the polite bullets have always said about it.
+  foreach cm in array array['fighters', 'helicopters', 'transport_ff'] loop
+    perform wa.chk_bool(p_payload->'not_recommended'->cm, 'not_recommended.' || cm);
+  end loop;
+  nf := coalesce((p_payload->'not_recommended'->>'fighters')::boolean, false);
+  nh := coalesce((p_payload->'not_recommended'->>'helicopters')::boolean, false);
+  nt := coalesce((p_payload->'not_recommended'->>'transport_ff')::boolean, false);
+  perform wa.chk(not (rf is not null and nf), 'not_recommended.fighters',
+                 'a branch cannot be ranked and not recommended at the same time');
+  perform wa.chk(not (rh is not null and nh), 'not_recommended.helicopters',
+                 'a branch cannot be ranked and not recommended at the same time');
+  perform wa.chk(not (rt is not null and nt), 'not_recommended.transport_ff',
+                 'a branch cannot be ranked and not recommended at the same time');
+
   select count(distinct x) into n from unnest(array[rf, rh, rt]) x where x is not null;
   perform wa.chk(n = (case when rf is null then 0 else 1 end
                     + case when rh is null then 0 else 1 end
@@ -1681,12 +1869,16 @@ begin
 
   insert into public.proposals as pr
          (instructor_id, student_id, rank_fighters, rank_helicopters,
-          rank_transport_ff, flew_with, comment, entered_by)
-  values (p_instructor, p_student, rf, rh, rt, fw, cm, by_who)
+          rank_transport_ff, nr_fighters, nr_helicopters, nr_transport_ff,
+          flew_with, comment, entered_by)
+  values (p_instructor, p_student, rf, rh, rt, nf, nh, nt, fw, cm, by_who)
   on conflict (instructor_id, student_id)
   do update set rank_fighters = excluded.rank_fighters,
                 rank_helicopters = excluded.rank_helicopters,
                 rank_transport_ff = excluded.rank_transport_ff,
+                nr_fighters = excluded.nr_fighters,
+                nr_helicopters = excluded.nr_helicopters,
+                nr_transport_ff = excluded.nr_transport_ff,
                 flew_with = excluded.flew_with,
                 comment = excluded.comment,
                 entered_by = excluded.entered_by
@@ -1715,6 +1907,10 @@ language sql stable as $$
                    'fighters', pr.rank_fighters,
                    'helicopters', pr.rank_helicopters,
                    'transport_ff', pr.rank_transport_ff),
+                 'not_recommended', jsonb_build_object(
+                   'fighters', pr.nr_fighters,
+                   'helicopters', pr.nr_helicopters,
+                   'transport_ff', pr.nr_transport_ff),
                  'flew_with', pr.flew_with,
                  'comment', pr.comment,
                  'entered_by', pr.entered_by,
@@ -1783,8 +1979,9 @@ begin
     where p.role = 'instructor' and p.active and p.last_name is not null), '[]'::jsonb);
 end $$;
 
--- the OWNER saving: every entry becomes self-reported again (any CO stamp on
--- the record and on its entries is cleared — see wa.strip_stamps).
+-- the OWNER saving (round 8): their own entries stay theirs, and every entry
+-- the squadron CO set comes through UNCHANGED and still stamped — a payload
+-- that alters or drops one is refused (see wa.carry_stamps).
 create or replace function public.save_student_record(p_token text, p_payload jsonb)
 returns jsonb
 language plpgsql volatile security definer set search_path = public, wa, pg_temp as $$
@@ -2036,7 +2233,6 @@ begin
         -- a record the CO entered. The dashboard must not confuse the two.
         'co_entries', wa.co_entry_count(m.rec),
         'entries_total', wa.entry_count(m.rec),
-        'pending_count', wa.pending_count(m.rec),
         'proposals_in', (select count(*) from public.proposals pr
                          join public.people ip on ip.id = pr.instructor_id and ip.active
                          where pr.student_id = s.id),
@@ -2050,6 +2246,10 @@ begin
                    'fighters', pr.rank_fighters,
                    'helicopters', pr.rank_helicopters,
                    'transport_ff', pr.rank_transport_ff),
+                 'not_recommended', jsonb_build_object(
+                   'fighters', pr.nr_fighters,
+                   'helicopters', pr.nr_helicopters,
+                   'transport_ff', pr.nr_transport_ff),
                  'flew_with', pr.flew_with, 'comment', pr.comment,
                  'entered_by', pr.entered_by,
                  'updated_at', pr.updated_at)
@@ -2083,8 +2283,25 @@ begin
               join public.people ip on ip.id = pr.instructor_id and ip.active
               where pr.student_id = s.id) x
             where x.rk is not null),
+          -- ROUND 8 — THE TWO SILENCES ARE NOT THE SAME SILENCE.
+          -- `not_recommended` = the instructor said so, out loud, on the form.
+          -- `not_this_branch` = he submitted a recommendation and simply did
+          -- not put this branch in it. The polite bullets word them
+          -- differently ("does not recommend" vs "has not recommended"), so
+          -- the two sets must not overlap: an explicit NR is only in the first.
+          'not_recommended', (
+            select coalesce(jsonb_agg(y.nm order by y.nm), '[]'::jsonb)
+            from (
+              select coalesce(ip.rank || ' ', '') || ip.last_name as nm
+              from public.proposals pr
+              join public.people ip on ip.id = pr.instructor_id and ip.active
+              where pr.student_id = s.id
+                and (case b.branch when 'fighters' then pr.nr_fighters
+                                   when 'helicopters' then pr.nr_helicopters
+                                   else pr.nr_transport_ff end)) y),
           'not_this_branch', (
-            -- submitted a proposal for this student but did NOT recommend this branch
+            -- submitted a proposal for this student, did NOT rank this branch
+            -- and did NOT say "not recommended" either: no view expressed
             select coalesce(jsonb_agg(y.nm order by y.nm), '[]'::jsonb)
             from (
               select coalesce(ip.rank || ' ', '') || ip.last_name as nm
@@ -2093,7 +2310,10 @@ begin
               where pr.student_id = s.id
                 and (case b.branch when 'fighters' then pr.rank_fighters
                                    when 'helicopters' then pr.rank_helicopters
-                                   else pr.rank_transport_ff end) is null) y)))
+                                   else pr.rank_transport_ff end) is null
+                and not (case b.branch when 'fighters' then pr.nr_fighters
+                                       when 'helicopters' then pr.nr_helicopters
+                                       else pr.nr_transport_ff end)) y)))
         from (values ('fighters'), ('helicopters'), ('transport_ff')) b(branch)),
       'not_submitted', coalesce((
         -- active instructors with no proposal at all for this student
@@ -2148,6 +2368,8 @@ begin
                     'instructor_id', pr.instructor_id, 'student_id', pr.student_id,
                     'ranks', jsonb_build_object('fighters', pr.rank_fighters,
                       'helicopters', pr.rank_helicopters, 'transport_ff', pr.rank_transport_ff),
+                    'not_recommended', jsonb_build_object('fighters', pr.nr_fighters,
+                      'helicopters', pr.nr_helicopters, 'transport_ff', pr.nr_transport_ff),
                     'flew_with', pr.flew_with, 'comment', pr.comment,
                     'entered_by', pr.entered_by,
                     'updated_at', pr.updated_at)) from public.proposals pr), '[]'::jsonb));

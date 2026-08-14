@@ -115,6 +115,9 @@ function teardownView() {
   WA._admNav = null;
   WA._stuState = null;
   WA._insState = null;
+  /* the instructor print builder is a closure over the view that is going
+     away — the once-attached beforeprint hook must not call a dead one */
+  WA._insPrint = null;
 }
 
 async function route() {
@@ -350,7 +353,7 @@ const PALETTES = [
               generator reads off the FILE ORDER of the sortie entries in
               flowchart2.json — the order of the printed Training Flow Chart.
               A later evaluation cannot be FILLED while an earlier one is
-              still pending, on this side and on the server's alike.
+              unflown, on this side and on the server's alike.
    ══════════════════════════════════════════════════════════════════════════ */
 WA.EVAL_ORDER = (typeof WA_EVAL_ORDER !== "undefined" && Array.isArray(WA_EVAL_ORDER))
   ? WA_EVAL_ORDER.slice()
@@ -410,6 +413,57 @@ WA.nfsReasonLabel = function (e) {
   return r.id === "other" ? (note || r.label) : r.label;
 };
 
+/* ══════════════════════════════════════════════════════════════════════════
+   SMS (ΚΕΠΕ) ENTRY CONDITIONS — the printed thresholds (round 8).
+   SMS is the squadron's Special Monitoring Status — ΚΕΠΕ, «Κατάσταση Ειδικής
+   Παρακολούθησης Εκπαίδευσης Μαθητή» — and an entrance is not a matter of
+   prose: 3-01/2025 ΔΑΕ, ΚΕΦ.2 §32β (PDF page 54 = printed page 36) prints the
+   SIX conditions, at least one of which puts a student in ΚΕΠΕ, verbatim in
+   `el` below. The SEVENTH option is not an invented "Other…": it is the
+   opening sentence of the same §32β — the standing discretion of the Squadron
+   CO / DO, which the six conditions specify («Ειδικότερα…») without
+   exhausting. It is the only room the regulation leaves, so it is the only
+   option beyond the six, it is NAMED rather than blank, and it asks for the
+   reason in writing (§32δ(2): the student is told why he was put in ΚΕΠΕ).
+   MIRROR: db/schema.sql → wa.sms_reasons(). Change one, change the other.
+     id — stored in sms[i].reason      el — the printed Greek, verbatim
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.SMS_REASONS = [
+  { id: "sortie59", label: "Graded 59% or below on a sortie or F/S",
+    el: "Σε οποιαδήποτε έξοδο αέρος, πλην (περιπτώσεων ΑΕΡΟΝΑΥΤΙΑΣ, Περιστατικού Φυσιολογίας Πτήσεων) ή F/S βαθμολογηθεί με 59% και κάτω." },
+  { id: "two63", label: "Graded 63% or below on two consecutive flights",
+    el: "Σε δύο συνεχόμενες πτήσεις, εκτός των τελικών εξετάσεων και Δοκιμών Προόδου, βαθμολογηθεί με 63% και κάτω." },
+  { id: "airsickness", label: "Airsickness on two consecutive flights",
+    el: "Σε δύο συνεχόμενες πτήσεις παρουσιάσει ΑΕΡΟΝΑΥΤΙΑ." },
+  { id: "written", label: "Failed one written or ground examination (CBT included)",
+    el: "Σε μία γραπτή αξιολόγηση ή εξέταση εδάφους (συμπεριλαμβανομένων εξετάσεων σε CBT) χαρακτηρισθεί ως «ΑΠΟΤΥΧΩΝ»." },
+  { id: "oral", label: "Failed 2 consecutive or 4 non-consecutive oral ground examinations",
+    el: "Σε 2 συνεχόμενες ή 4 μη συνεχόμενες προφορικές εξετάσεις εδάφους κατά την ομαδική ή/και ατομική προ πτήσεως ενημέρωση, χαρακτηρισθεί ως «ΑΠΟΤΥΧΩΝ»." },
+  { id: "instructor", label: "His instructor recommended it — unacceptable progress between flights",
+    el: "Όταν ο Εκπαιδευτής του, εισηγηθεί να μπει σε ΚΕΠΕ λόγω μη αποδεκτής προόδου μεταξύ των πτήσεων." },
+  { id: "judgement", label: "Squadron CO / DO decision — reduced performance…",
+    el: "Μαθητής να τίθεται σε ΚΕΠΕ κατά την κρίση του Διοικητή της Μοίρας ή του Α.Ε. αυτής, όταν οι επιδόσεις του στην πτητική ή θεωρητική εκπαίδευση υπολείπονται έναντι της παρεχόμενης εκπαίδευσης, με αποτέλεσμα να απαιτείται ιδιαίτερη παρακολούθηση της προόδου του." },
+];
+WA.SMS_SOURCE = "3-01/2025 ΔΑΕ, ΚΕΦ.2 §32β — «Κατάσταση Ειδικής Παρακολούθησης Εκπαίδευσης Μαθητή (ΚΕΠΕ)», PDF page 54 = printed page 36";
+WA.smsReason = function (id) {
+  return WA.SMS_REASONS.find((r) => r.id === id) || null;
+};
+/* the condition on its own — for a table that prints the note separately */
+WA.smsReasonShort = function (e) {
+  const r = WA.smsReason(e && e.reason);
+  return r ? r.label : "—";
+};
+/* the condition as one phrase — for a line with no room for a note column:
+   the discretionary path says nothing on its own, so the written reason wins */
+WA.smsReasonLabel = function (e) {
+  const r = WA.smsReason(e && e.reason);
+  /* a row recorded before round 8 asked: an em dash in a running line reads as
+     "nothing happened", which is not what it means (cf. WA.soloWhoPhrase) */
+  if (!r) return "condition not recorded";
+  const note = String((e && e.note) || "").trim();
+  return r.id === "judgement" ? (note || r.label) : r.label;
+};
+
 /* the chips of the per-category plot — the four tracks + the FPC section */
 WA.EVAL_CATS = [
   { id: "contact", label: "Contact" },
@@ -459,13 +513,16 @@ WA.fpcEvaluatorOK = function (v) {
 
 WA.SECTIONS_META = {
   nfs:          { label: "NFS", tip: "NFS = Φύλλο μη Πτήσης (ΦΜΠ) — one dated entry per event, with the reason printed on form Α0473 (3-01 ΚΕΦ.9): failed questionnaire / failed pre-flight briefing / failed flight / failed F/S / illness / other cause. The count is derived." },
-  sms:          { label: "SMS", tip: "SMS = Safety Management System — one entry per entrance, with the exit date when it closes." },
+  sms:          { label: "SMS", tip: "SMS = the squadron's Special Monitoring Status — ΚΕΠΕ, «Κατάσταση Ειδικής Παρακολούθησης Εκπαίδευσης Μαθητή» (3-01 ΚΕΦ.2 §32). One entry per entrance, naming the condition it was raised under — the six thresholds printed in §32β (59% on a sortie or F/S · 63% on two consecutive flights · airsickness on two consecutive flights · one failed written/ground exam · 2 consecutive or 4 non-consecutive failed orals · the instructor's recommendation) or the Squadron CO / DO decision of the same paragraph's opening sentence — plus the exit date when it closes." },
   airsickness:  { label: "Airsickness", tip: "One dated entry per airsickness event — the FLIGHT it happened on and with whom, so the squadron can see the pattern. The flight is required on every entry. (Round 6 replaced the free-text phase-of-flight note with the flight code; a note already written is kept as legacy information, and its row asks for the flight before the record can be saved again.)" },
   fail:         { label: "FAIL", tip: "FAIL = a syllabus item graded below the desired performance — the flight, the items, the instructor and the grade. The items are the printed gradesheet items of the chosen track and nothing else (round 6)." },
   almost_good:  { label: "ALMOST GOOD", tip: "ALMOST GOOD = an item that only just reached the desired performance — same detail as a FAIL, and the same syllabus-only item list." },
-  evaluations:  { label: "Evaluations", tip: "The eight checkrides of the stage — fixed rows, present from day one and pending until flown, so every student is compared on the same flight. They are filled in SYLLABUS ORDER: a later checkride cannot be recorded while an earlier one is still pending (round 6)." },
-  solo_flights: { label: "Solo flights", tip: "The solos the syllabus prescribes — eight fixed slots (F4301-06 carries two), pending until flown. A flown solo is graded 0-100 % or NG (non-graded), and EVERY flown row names its instructor: on an NG row that is the authorising instructor. An unforeseen solo is recorded as an additional solo." },
+  evaluations:  { label: "Evaluations", tip: "The eight checkrides of the stage — fixed rows, present from day one and empty until flown, so every student is compared on the same flight. They are filled in SYLLABUS ORDER: a later checkride cannot be recorded while an earlier one has not been flown (round 6)." },
+  solo_flights: { label: "Solo flights", tip: "The solos the syllabus prescribes — eight fixed slots (F4301-06 carries two), empty until flown. A flown solo is graded 0-100 % or NG (non-graded), and EVERY flown row names who authorised it. The contact (adaptation) solos start as NG and the formation solos as graded; either can be switched. An unforeseen solo is recorded as an additional solo." },
   fpc:          { label: "FPC", tip: "FPC = Δοκιμή Προόδου (flight progress check) — flown after failures, so fewer is better. Each entry names the stage flight that triggered it and the evaluator: the Squadron CO or the DO, and nobody else (round 6)." },
+  /* NOTE (round 8): no section carries a "pending" flag any more. A fixed slot
+     with no date has not been flown, and a result still awaited is a grade not
+     written yet — neither needs a flag to say so. */
   cef:          { label: "CEF", tip: "CEF = Εξέταση Καταλληλότητας (evaluation with a Squadron Evaluator) — flown after failures, so fewer is better. Each entry names the stage flight that triggered it and the evaluator who conducted it." },
 };
 WA.secLabel = function (k) { return (WA.SECTIONS_META[k] || {}).label || k; };
@@ -512,6 +569,18 @@ WA.pctRaw = function (v) {
    clears it — reclaimed data is self-reported again.
    ══════════════════════════════════════════════════════════════════════════ */
 WA.CO_TIP = "Entered by the squadron CO on behalf of the owner — not self-reported";
+/* ── THE CO'S EDITS PREVAIL (round 8) ──────────────────────────────────────
+   A row the CO wrote is not a suggestion. It is shown to its owner LOCKED:
+   readable, disabled, un-removable, and it must travel through the owner's
+   next save fact for fact — the server refuses the save otherwise, naming the
+   rule. Only the CO can change or delete it (and the CO editing one of the
+   owner's rows makes it his, which locks that one too).
+   MIRROR: db/schema.sql → wa.carry_stamps. */
+WA.CO_LOCK_TIP =
+  "Set by the squadron CO — locked. It stays on your record exactly as it stands; only the CO can change or remove it.";
+WA.coLockTag = function () {
+  return `<span class="colock" title="${esc(WA.CO_LOCK_TIP)}" aria-label="${esc(WA.CO_LOCK_TIP)}">&#128274; locked by CO</span>`;
+};
 WA.isCO = function (e) { return !!(e && e.entered_by === "admin"); };
 WA.coTag = function (e) {
   return WA.isCO(e)
@@ -709,7 +778,7 @@ WA.sortieCell = function (catId, code) {
    WA_SOLO_SLOTS is generated from the FDMS flow chart: every Training Section
    whose printed duration block says SOLO SORTIES > 0 contributes that many
    slots, so F4301-06 (SORTIES/HOURS SOLO: 2/2,4) carries TWO. The Solo
-   section renders exactly these, always, pending until flown — there is no
+   section renders exactly these, always, empty until flown — there is no
    + Add and no remove. A solo the syllabus did not foresee is recorded as a
    slot-LESS "additional solo".
    MIRROR: db/schema.sql → wa.solo_slots().
@@ -751,27 +820,25 @@ WA.NFS_IMPORT_NOTE = "imported from the old NFS counter — the date was never r
 /* PER-SECTION KEY WHITELIST — the exhaustive list of keys ONE entry may carry.
    MIRROR: db/schema.sql → wa.entry_keys. Change one, change the other.
    Anything else is stripped on read and refused on write: a typo is caught
-   instead of stored, and a flag the form cannot show ("pending" on an NFS row)
-   can never enter the record (round-4 W3a). */
+   instead of stored, and a flag the form no longer knows ("pending", retired in
+   round 8) can never enter the record (round-4 W3a). */
 WA.ENTRY_KEYS = {
   nfs:          ["date", "reason", "note", "legacy", "entered_by"],
-  sms:          ["entrance_date", "exit_date", "note", "legacy", "entered_by"],
-  fail:         ["date", "category", "flight_code", "items", "instructor", "grade", "pending", "legacy", "entered_by"],
-  almost_good:  ["date", "category", "flight_code", "items", "instructor", "grade", "pending", "legacy", "entered_by"],
+  /* ROUND 8: an SMS entrance names the ΚΕΠΕ condition it was raised under */
+  sms:          ["entrance_date", "exit_date", "reason", "note", "legacy", "entered_by"],
+  fail:         ["date", "category", "flight_code", "items", "instructor", "grade", "legacy", "entered_by"],
+  almost_good:  ["date", "category", "flight_code", "items", "instructor", "grade", "legacy", "entered_by"],
   /* ROUND 6: the FLIGHT, not a phase-of-flight note. `phase` stays in the list
      as a READ-ONLY legacy carrier — an already-written note is never destroyed
      — but the form draws no box for it, the server refuses to let the number
      of rows carrying one grow, and such a row cannot be saved again until its
      flight is chosen. */
   airsickness:  ["date", "instructor", "flight_code", "phase", "legacy", "entered_by"],
-  evaluations:  ["date", "evaluation", "with", "grade", "pending", "legacy", "entered_by"],
+  evaluations:  ["date", "evaluation", "with", "grade", "legacy", "entered_by"],
   solo_flights: ["slot", "sortie", "date", "ng", "grade", "instructor", "legacy", "entered_by"],
-  fpc:          ["date", "flight_code", "evaluator", "result", "grade", "pending", "legacy", "entered_by"],
-  cef:          ["date", "flight_code", "evaluator", "result", "grade", "pending", "legacy", "entered_by"],
+  fpc:          ["date", "flight_code", "evaluator", "result", "grade", "legacy", "entered_by"],
+  cef:          ["date", "flight_code", "evaluator", "result", "grade", "legacy", "entered_by"],
 };
-/* only these sections may carry `pending` — exactly where the form draws the
-   tick box, so a pending badge on the CO's dashboard can always be cleared */
-WA.PENDING_SECTIONS = ["fail", "almost_good", "evaluations", "fpc", "cef"];
 
 /* ── AN EMPTY FIXED SLOT (round 5) ─────────────────────────────────────────
    The eight solos and the eight checkrides are rows the SYLLABUS puts in the
@@ -786,9 +853,10 @@ WA.slotEmpty = function (sec, e) {
     return !empty(e.slot) && empty(e.date) && empty(e.grade) &&
            empty(e.instructor) && empty(e.sortie) && !e.ng;
   }
+  /* ROUND 8: the pending tick is gone, so an evaluation slot is empty when it
+     carries nothing but its identity — which is all it ever meant. */
   if (sec === "evaluations") {
-    return !empty(e.evaluation) && empty(e.date) && empty(e.grade) &&
-           empty(e.with) && !e.pending;
+    return !empty(e.evaluation) && empty(e.date) && empty(e.grade) && empty(e.with);
   }
   return false;
 };
@@ -832,11 +900,19 @@ WA.migrateRecord = function (rec) {
     }
   } else out.nfs = [];
 
-  /* SMS — the pending flag is gone; if it was set, keep the fact as a note */
+  /* SMS — the v1 pending flag is gone; if it was set, keep the fact as a note.
+     ROUND 8: the entrance names its ΚΕΠΕ condition (3-01 ΚΕΦ.2 §32β). A row
+     written before that rule has none: it is READ with its note intact,
+     flagged, and the form asks which of the seven it was — nothing is guessed.
+     MIRROR: db/schema.sql → wa.sms_reason_fix. */
   out.sms = (arr(src.sms) || []).map((e) => {
     const o = { ...e };
-    if (o.pending && !o.note) o.note = "was flagged pending in the previous form";
+    if (o.pending && !o.note) o.note = "was flagged as awaiting a result in the previous form";
     delete o.pending;
+    if (!WA.smsReason(o.reason)) {
+      if (o.reason !== null && o.reason !== undefined && o.reason !== "") o.reason = null;
+      o.legacy = true;
+    }
     if (!isDate(o.entrance_date)) o.legacy = true;
     return o;
   });
@@ -977,7 +1053,6 @@ WA.recStats = function (rec) {
     nfs: n("nfs"), sms: n("sms"), fail: n("fail"), almost_good: n("almost_good"),
     airsickness: n("airsickness"), solos: n("solo_flights"),
     fpc: n("fpc"), cef: n("cef"),
-    pending: WA.pendingItems(r).length,
     legacy: WA.legacyItems(r).length,
     /* HOW MANY entries the CO entered — never WHETHER the record is "the
        CO's": that verdict needs the total too, and lives in WA.coSource */
@@ -1009,7 +1084,7 @@ WA.evalRows = function (rec) {
       i, id: def ? def.id : null, def,
       cat: def ? def.cat : null, order: def ? def.order : 99,
       grade: (e.grade === null || e.grade === undefined || e.grade === "" || !isFinite(g)) ? null : g,
-      with: e.with || "", date: e.date || "", pending: !!e.pending, legacy: !def,
+      with: e.with || "", date: e.date || "", legacy: !def,
       flown: !WA.slotEmpty("evaluations", e),
       entered_by: e.entered_by || null,
     };
@@ -1025,8 +1100,7 @@ WA.evalRows = function (rec) {
    MIRROR: the solo_flights block of wa.validate_record. */
 WA.soloWho = function (e) {
   const who = String((e && e.instructor) || "").trim();
-  if (!who) return "not recorded";
-  return who + (e && e.ng ? " (authorising)" : "");
+  return who || "not recorded";
 };
 WA.SOLO_WHO_TIP =
   "Every solo is authorised by somebody — this row was recorded before round 6 asked for the name, and the record cannot be saved again until it is supplied";
@@ -1035,19 +1109,32 @@ WA.soloWhoHTML = function (e) {
   if (!who) {
     return `<span class="badge badge-bad" title="${esc(WA.SOLO_WHO_TIP)}">not recorded</span>`;
   }
-  return esc(who) + (e && e.ng
-    ? ` <span class="k" title="A non-graded solo: this is the instructor who AUTHORISED the flight">(authorising)</span>`
-    : "");
+  return esc(who);
 };
 /* the same fact as a PHRASE, for the running lines of the brief and the
    instructor card, where a bare "w/" in front of "not recorded" reads wrong */
 WA.soloWhoPhrase = function (e) {
   const who = String((e && e.instructor) || "").trim();
   if (!who) {
-    return `<span class="k" title="${esc(WA.SOLO_WHO_TIP)}">instructor not recorded</span>`;
+    return `<span class="k" title="${esc(WA.SOLO_WHO_TIP)}">not recorded</span>`;
   }
-  return `<span class="k">${e && e.ng ? "auth." : "w/"} ${esc(who)}</span>`;
+  return `<span class="k">authorised by ${esc(who)}</span>`;
 };
+/* ── HOW A SOLO SLOT STARTS (round 8) ──────────────────────────────────────
+   The CONTACT solos are the adaptation solos: the student goes round on their
+   own and nobody is in the other seat to score it, so the squadron records
+   them NG and names whoever authorised the launch. The FORMATION solos are
+   flown and graded as a pair, so those start graded. This is the state a slot
+   takes THE FIRST TIME IT IS FILLED — the Graded/NG chips stay live, and a row
+   the owner has already answered is never moved. Slot ids carry their own
+   track in their first letter (wa.solo_slots(): C4790-91-S1, C4801-04-S1,
+   C4901-05-S1, C5201-04-S1, C5301-04-S1, F4301-06-S1/-S2, F4501-03-S1), so
+   nothing has to be typed into the generated catalogue for this. */
+WA.soloDefaultNG = function (slotId) {
+  return String(slotId || "").charAt(0) === "C";
+};
+WA.SOLO_NG_DEFAULT_TIP =
+  "The contact (adaptation) solos are recorded NG — nobody is in the other seat to grade them — so the row starts NG and names who authorised it. Switch it to Graded % if this one was graded.";
 
 /* ══════════════════════════════════════════════════════════════════════════
    EVALUATIONS FOLLOW THE SYLLABUS ORDER (round 6).
@@ -1110,7 +1197,7 @@ WA.fpcRows = function (rec) {
       return {
         i: x.i, id: "fpc#" + (k + 1), def: null, cat: "fpc", order: k + 1,
         grade: (x.e.grade === null || x.e.grade === undefined || x.e.grade === "" || !isFinite(g)) ? null : g,
-        with: x.e.evaluator || "", date: x.e.date || "", pending: !!x.e.pending,
+        with: x.e.evaluator || "", date: x.e.date || "",
         trigger: x.e.flight_code || "", flown: true,
         result: x.e.result || "", legacy: !!x.e.legacy, entered_by: x.e.entered_by || null,
       };
@@ -1157,26 +1244,10 @@ WA.evalLatest = function (rows, id) {
   return best;
 };
 
-/* every pending-flagged entry, described — for highlights and badges */
-WA.pendingItems = function (rec) {
-  const r = rec || {};
-  const out = [];
-  const walk = (k, mk) => {
-    (Array.isArray(r[k]) ? r[k] : []).forEach((e) => {
-      if (e && e.pending) out.push(WA.secLabel(k) + ": " + mk(e));
-    });
-  };
-  const on = (e) => (e.date ? " (" + fmtD(e.date) + ")" : "");
-  walk("fail", (e) => WA.itemsLabel(e) + on(e));
-  walk("almost_good", (e) => WA.itemsLabel(e) + on(e));
-  walk("evaluations", (e) => WA.evalShort(e.evaluation) +
-       (e.with ? " with " + e.with : "") + on(e));
-  walk("fpc", (e) => (e.flight_code ? "(" + e.flight_code + ") " : "") +
-       (e.date ? fmtD(e.date) : "entry") + (e.evaluator ? " — " + e.evaluator : ""));
-  walk("cef", (e) => (e.flight_code ? "(" + e.flight_code + ") " : "") +
-       (e.date ? fmtD(e.date) : "entry") + (e.evaluator ? " — " + e.evaluator : ""));
-  return out;
-};
+/* NOTE (round 8): there is no WA.pendingItems and no `pending` count in
+   recStats. The flag is gone from the data model — an unfilled fixed slot
+   simply has no date, which every surface already reads as "not flown yet",
+   and a result still awaited is a grade not written yet. */
 
 /* entries a v1 record could not fully describe — the student is asked to
    complete them; the CO sees how many are still incomplete. */

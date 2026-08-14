@@ -172,7 +172,7 @@ def main():
     # NOT a judgement call and NOT date order: the FILE ORDER of the sortie
     # entries in flowchart2.json, which is the order the printed Training Flow
     # Chart lays the stage out in. A later evaluation may not be filled while
-    # an earlier one is still pending, so this list IS the rule.
+    # an earlier one has not been flown, so this list IS the rule.
     eval_order = [s["id"] for s in fc["sorties"] if s.get("checkride")]
 
     # sortie codes per track — the FAIL / ALMOST GOOD "flight code" picker
@@ -221,7 +221,7 @@ def main():
     lines.append("   WA_EVAL_ORDER[]  \u2014 the eight checkrides in SYLLABUS ORDER: the FILE")
     lines.append("             ORDER of the sortie entries of flowchart2.json, i.e. the order")
     lines.append("             of the printed Training Flow Chart. A later evaluation cannot")
-    lines.append("             be filled while an earlier one is still pending (round 6).")
+    lines.append("             be filled while an earlier one has not been flown (round 6).")
     lines.append("")
     lines.append("   %d items, %d sortie codes and %d solo slots across %d categories,"
                  % (total, n_sorties, len(slots), len(out_cats)))
@@ -276,7 +276,7 @@ def main():
     lines.append("/* THE SYLLABUS ORDER OF THE EIGHT CHECKRIDES (round 6) \u2014 the FILE ORDER of")
     lines.append("   the sortie entries in flowchart2.json, which is the order the printed")
     lines.append("   Training Flow Chart lays the stage out in. Never date order: a later")
-    lines.append("   evaluation cannot be FILLED while an earlier one is still pending, on the")
+    lines.append("   evaluation cannot be FILLED while an earlier one has not been flown, on the")
     lines.append("   client and on the server alike.")
     lines.append("   MIRROR: db/schema.sql \u2192 wa.eval_ids() / wa.eval_pos(). */")
     lines.append("var WA_EVAL_ORDER = [%s];"
