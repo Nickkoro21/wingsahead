@@ -2075,6 +2075,7 @@ declare
   v public.people;
   row public.people;
   r public.wa_role;
+  v_oid text;
 begin
   v := wa.auth_role(p_token, 'admin');
   perform wa.chk(p is not null and jsonb_typeof(p) = 'object', 'person', 'payload must be an object');
@@ -2089,10 +2090,25 @@ begin
   perform wa.chk_text(p->'external_oid', 'external_oid', false, 60);
   perform wa.chk_bool(p->'test_pilot', 'test_pilot');
   -- enum casts below raise on any illegal value (duty/leadership/status/role)
+  -- ROUND 9 RESIDUAL — THE OBJECT ID IS UNIQUE, AND SAYS SO IN OUR OWN WORDS.
+  -- `people.external_oid` carries a unique index, so handing a person an id
+  -- that already belongs to somebody else used to surface as a raw Postgres
+  -- 23505 ("duplicate key value violates unique constraint …_key") — a message
+  -- about an index, in a dialog about a person. The check below refuses it in
+  -- the house style, naming the id, BEFORE the write is attempted.
+  -- NULL IS NOT A DUPLICATE: a hand-made person legitimately has no roster id,
+  -- and `external_oid: null` stays exactly what it was — the silent no-op the
+  -- update's coalesce() already implements. Only a REAL id is checked.
   if p_id is null then
     r := (p->>'role')::public.wa_role;
     perform wa.chk(r in ('student', 'instructor'), 'role', 'only student/instructor can be created');
     perform wa.chk(nullif(wa.norm_line(p->>'last_name'), '') is not null, 'last_name', 'required');
+    v_oid := nullif(wa.norm_code(coalesce(p->>'external_oid', '')), '');
+    if v_oid is not null then
+      perform wa.chk(not exists (select 1 from public.people q where q.external_oid = v_oid),
+                     'external_oid',
+                     format('external_oid %s is already assigned to another person', v_oid));
+    end if;
     insert into public.people
            (role, mn, rank, first_name, last_name, class, duty, leadership, status,
             external_oid, call_sign, country, test_pilot)
@@ -2124,6 +2140,17 @@ begin
                      or row.external_oid = nullif(wa.norm_code(coalesce(p->>'external_oid', '')), ''),
                      'external_oid',
                      format('the roster object id is immutable — this person is %s', row.external_oid));
+    end if;
+    -- ADOPTION (null → 'R-nnnn') is the only way this column is ever written
+    -- on an existing row, and it is the only place a clash can appear.
+    if row.external_oid is null and p ? 'external_oid' then
+      v_oid := nullif(wa.norm_code(coalesce(p->>'external_oid', '')), '');
+      if v_oid is not null then
+        perform wa.chk(not exists (select 1 from public.people q
+                                   where q.external_oid = v_oid and q.id <> p_id),
+                       'external_oid',
+                       format('external_oid %s is already assigned to another person', v_oid));
+      end if;
     end if;
     update public.people set
       mn         = case when p ? 'mn'         then nullif(wa.norm_line(coalesce(p->>'mn', '')), '')         else mn end,

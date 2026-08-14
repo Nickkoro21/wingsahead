@@ -66,7 +66,9 @@ has written yet. See §4f.
 - **FAIL** / **ALMOST GOOD**: [{date*, category* (one of the four syllabus
   tracks), flight_code? (**round 5**: a select of THAT track's sorties +
   "Other…" free text; a code of another track is refused server-side),
-  items[]* (multi-select of that track's gradesheet items + custom),
+  items[]* (**round 6**: a multi-select of THAT track's printed gradesheet
+  items and nothing else — the custom "Other…" item is gone and the server
+  refuses any name outside `wa.item_names(category)`; see §4e·2),
   instructor?, grade? (0-100 %, **whole numbers**; **round 8**: a NEW row opens
   at 40 for a FAIL and 50 for an ALMOST GOOD, editable)}]
 - **AIRSICKNESS**: [{date*, instructor?, phase?}] — the brief shows WHEN and
@@ -606,6 +608,55 @@ forgot: `duty`, `leadership` and `status` are Postgres enums shared with the
 roster's own vocabulary. Extending them is one line in `db/schema.sql`, and
 `gen-people-import.py` fails loudly, naming the offending value and pointing at
 that line, rather than letting Postgres reject the paste with a cast error.
+
+### AUDIT TABLE — EVERY DROPDOWN IN THE APP
+
+The rule is not a statement of intent, so here is the enumeration, read out of
+the source rather than sampled: **every** `<select>` and `<datalist>` of
+`app/student.js`, `app/admin.js`, `app/app.js` and `app/instructor.js`.
+Widgets are listed **by field**, because the repeatable sections render the
+same picker once per row. Located by selector, not by line number, so a grep
+re-verifies the table after any edit.
+
+| # | Dropdown (surface · field) | Selector / builder (file) | Values | "Other…" escape? | If CLOSED — why |
+|---|---|---|---|---|---|
+| 1 | NFS · Reason | `pickerF` → `reasonF` (student.js) · `WA.NFS_REASONS` | the 6 printed causes of form Α0473: questionnaire · briefing · flight · F/S · illness · **other cause** | **YES — the sheet's own** «ΑΛΛΗ ΑΙΤΙΑ» line (a `note` is then required) | — |
+| 2 | SMS · Entrance condition | `pickerF` → `smsReasonF` · `WA.SMS_REASONS` | the 6 thresholds of 3-01 ΚΕΦ.2 §32β + the **Squadron CO / DO judgement** opener (7) | **YES — the regulation's own** discretion clause (a `note` is then required) | — |
+| 3 | FAIL / ALMOST GOOD · Category | `catF` · `WA_ITEMS.categories` | Contact · Instrument · Formation · Navigation (+ the legacy `other` placeholder, shown only while a row still carries it) | NO | **syllabus vocabulary** — there is no fifth track; the placeholder must be resolved, not extended |
+| 4 | FAIL / ALMOST GOOD · Flight code | `pickerF` → `codeF` · `WA.sorties(cat)` | the sorties of **that track only** (disabled until the track is chosen) | **YES** — "Other… (type the code)" | — |
+| 5 | **FAIL / ALMOST GOOD · Items** | `select.ms-add[data-msadd]` · `itemOptions()` over `WA.itemCat(cat).items` ⇄ `wa.item_names(cat)` | the printed gradesheet items of that track | **NO — ✱ RULED EXCEPTION** | **round 6**: an item nobody else can have is an item nobody can compare, count across the class, or look up in the remarks bank. Client and server share one list; a legacy typed string is greyed *legacy* and blocks the save until replaced (§4e·2) |
+| 6 | FPC · Due to which stage flight | `pickerF` → `triggerF` · `TRIGGER_GROUPS` | every sortie of the stage, grouped by the four tracks, checkrides included | **YES** — "Other… (type the code)" | — |
+| 7 | CEF · Due to which stage flight | `pickerF` → `triggerF` · `TRIGGER_GROUPS` | as above | **YES** | — |
+| 8 | AIRSICKNESS · Flight | `pickerF` → `airFlightF` · `TRIGGER_GROUPS` | as above (required since round 6b) | **YES** | — |
+| 9 | Solo · Sortie flown solo | `pickerF` → `soloSortieF` · `slot.codes` | the candidate sorties the syllabus names for **that** solo slot | **YES** — reality is not bound by the candidate list | — |
+| 10 | CEF · Evaluator | `pickerF` → `evaluatorF` · `WA.EVALUATOR_ROLES` + `INS` | DO · Squadron CO, then the squadron's instructor surnames | **YES** — free text; a CEF is flown with a Squadron Evaluator, so the list stays open | — |
+| 11 | **FPC · Evaluator** | `pickerF` → `fpcEvaluatorF` · `WA.FPC_EVALUATORS` | Squadron CO · DO — **exactly two** | **NO — ✱ RULED EXCEPTION** | **round 6**: an FPC is conducted by the Squadron CO or the DO. A third name would make the record say something the regulation does not allow. A legacy value is named under the box and refused until it is resolved to one of the two |
+| 12 | **Evaluations · which checkride** | `evalF` · `WA.EVALUATIONS` grouped by `WA.EVAL_CATS` | the **eight** stage checkrides in syllabus order — C4590 · C4790 · C5090 · C5490 · I4490 · I4890 · F4690 · N4690 | **NO — ✱ RULED EXCEPTION** | the slots are **fixed**: eight rows, no add, no remove. A ninth checkride does not exist in the stage; a progress check flight is an **FPC**, which has its own section |
+| 13 | Instructor / "Authorised by" boxes | `input[list=dl-ins]` · `insF` → `textF` | the squadron's instructor surnames | **YES** — the input is free text throughout; the datalist is quick-pick | — |
+| 14 | Admin · Compare on this evaluation | `select#evalsel` · `WA.EVALUATIONS` | the same eight | **NO — ✱ same exception as #12** | a chart axis over recorded checkrides — a free value would select nothing |
+| 15 | Admin · Person — Duty | `select#pm-duty` (admin.js) | Squadron Commander · DO · Flight Commander · Evaluator · Instructor | NO | **closed by construction** — Postgres enum `wa.duty`; extending it is one line in `db/schema.sql` and `gen-people-import.py` fails loudly on an unknown value |
+| 16 | Admin · Person — Leadership | `select#pm-leadership` | Wingman · 2-ship · 4-ship · Mission Commander | NO | **closed by construction** — Postgres enum (as above) |
+| 17 | Admin · Person — Status | `select#pm-status` | Assigned · Attached · Departed | NO | **closed by construction** — Postgres enum (as above) |
+| 18 | Admin · Person — Country | `select#pm-country[data-other]` · `selOther()` | HAF · ITAF | **YES** — round 9; the column is TEXT precisely so the third air force needs no migration | — |
+| 19 | Admin · Person — Rank | `input#pm-rank[list=pm-ranks]` · `RANKS` | Cdt · 2Lt · 1Lt · Capt · Maj · Lt Col · S.Ten · Lt | **YES** — the box is free text; the datalist is quick-pick | — |
+
+**Entity pickers are not a category here**: Wings Ahead has none. A student
+reaches their own record through a personal link and the CO reaches people
+through the People tab's rows, so no dropdown in this app names a person as a
+foreign key — the only person-shaped boxes (#10, #13) are free text with a
+datalist, which is why they carry an escape at all.
+
+**The fourth ruled exception — the solo slots — is not a dropdown**: the eight
+slots of `WA_SOLO_SLOTS` are rendered as **fixed rows**, never as a list to
+choose from, so the closed list is expressed by the shape of the form. What
+*is* choosable inside a slot is #9, and it has its escape. A solo the syllabus
+did not foresee is an **additional solo**, the one solo row that can be added.
+
+**`app/app.js` and `app/instructor.js` carry no `<select>` and no `<datalist>`
+at all** — the shared library defines vocabularies but renders no form control,
+and the instructor board is tap-to-place (its "positions" are buttons, and the
+theme gallery's cards are `role="option"` buttons, not a select). That is the
+whole surface: **19 dropdown fields, 2 datalists, 4 ruled exceptions.**
 
 ## 4. Screens
 
