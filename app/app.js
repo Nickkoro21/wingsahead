@@ -460,7 +460,7 @@ WA.fpcEvaluatorOK = function (v) {
 WA.SECTIONS_META = {
   nfs:          { label: "NFS", tip: "NFS = Φύλλο μη Πτήσης (ΦΜΠ) — one dated entry per event, with the reason printed on form Α0473 (3-01 ΚΕΦ.9): failed questionnaire / failed pre-flight briefing / failed flight / failed F/S / illness / other cause. The count is derived." },
   sms:          { label: "SMS", tip: "SMS = Safety Management System — one entry per entrance, with the exit date when it closes." },
-  airsickness:  { label: "Airsickness", tip: "One dated entry per airsickness event — the FLIGHT it happened on and with whom, so the squadron can see the pattern. (Round 6 replaced the free-text phase-of-flight note with the flight code; a note already written is kept as legacy information.)" },
+  airsickness:  { label: "Airsickness", tip: "One dated entry per airsickness event — the FLIGHT it happened on and with whom, so the squadron can see the pattern. The flight is required on every entry. (Round 6 replaced the free-text phase-of-flight note with the flight code; a note already written is kept as legacy information, and its row asks for the flight before the record can be saved again.)" },
   fail:         { label: "FAIL", tip: "FAIL = a syllabus item graded below the desired performance — the flight, the items, the instructor and the grade. The items are the printed gradesheet items of the chosen track and nothing else (round 6)." },
   almost_good:  { label: "ALMOST GOOD", tip: "ALMOST GOOD = an item that only just reached the desired performance — same detail as a FAIL, and the same syllabus-only item list." },
   evaluations:  { label: "Evaluations", tip: "The eight checkrides of the stage — fixed rows, present from day one and pending until flown, so every student is compared on the same flight. They are filled in SYLLABUS ORDER: a later checkride cannot be recorded while an earlier one is still pending (round 6)." },
@@ -866,9 +866,12 @@ WA.migrateRecord = function (rec) {
      that still carries the retired phase-of-flight note keeps it (nothing is
      destroyed behind its owner's back), is shown with it greyed as legacy
      information, and is flagged so the form asks for the flight.
+     ROUND 6b — the flight is MANDATORY, so EVERY flight-less row is flagged,
+     not only the note-carriers: a pre-round-6 entry that simply never had a
+     flight is exactly as incomplete as one that carries a note instead of it.
      MIRROR: db/schema.sql → wa.migrate_record (airsickness). */
   out.airsickness = (arr(src.airsickness) || []).map((e) =>
-    (isDate(e.date) && !(String(e.phase || "").trim() && !e.flight_code))
+    (isDate(e.date) && String(e.flight_code || "").trim())
       ? e : { ...e, legacy: true });
 
   /* EVALUATIONS — v1 rows carry no identity; they stay, flagged, until the

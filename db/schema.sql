@@ -762,6 +762,7 @@ declare
   pos int;
   prev_id text;
   done boolean[];
+  is_ng boolean;
   allowed text[] := wa.sections();
 begin
   perform wa.chk(p is not null and jsonb_typeof(p) = 'object', 'root', 'payload must be an object');
@@ -874,14 +875,27 @@ begin
           perform wa.chk_entry_date(e, w);
           perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
           perform wa.chk_text(e->'flight_code', w || '.flight_code', false, 40);
-          perform wa.chk((e->>'flight_code') is null
-                         or length(trim(e->>'flight_code')) > 0,
-                         w || '.flight_code', 'the flight cannot be blank');
           perform wa.chk_text(e->'phase', w || '.phase', false, 300);
-          perform wa.chk(nullif(trim(coalesce(e->>'phase', '')), '') is null
-                         or (e->>'flight_code') is not null,
+          -- THE FLIGHT IS MANDATORY (round 6b). "Add the flight" was the point
+          -- of the round: an airsickness event with no sortie on it is a date
+          -- and a name, and no pattern can be seen in that. ABSENT, null, ""
+          -- and "   " are the SAME absence and all four are refused — the
+          -- value has already been through wa.norm_code at the write boundary,
+          -- so a padded string arrives here as ''.
+          -- REQUIRED EVEN ON A LEGACY ROW, exactly like the solo instructor
+          -- below: the legacy flag excuses what the OLD form never asked for,
+          -- it does not excuse a rule of this round, or the rule would be
+          -- optional for precisely the rows that break it. Such a row stays
+          -- READABLE everywhere and is refused on the next save until the
+          -- flight is supplied — the standing "keep it, ask for it" contract.
+          -- The row that still carries the retired note gets the sentence that
+          -- explains what happened to it; every other one gets the rule.
+          perform wa.chk(nullif(trim(coalesce(e->>'flight_code', '')), '') is not null,
                          w || '.flight_code',
-                         'the phase-of-flight note is no longer collected — this entry keeps it as legacy information, but it cannot be saved again until you choose the FLIGHT the airsickness happened on');
+                         case when nullif(trim(coalesce(e->>'phase', '')), '') is not null
+                              then 'the phase-of-flight note is no longer collected — this entry keeps it as legacy information, but it cannot be saved again until you choose the FLIGHT the airsickness happened on'
+                              else 'every airsickness entry names the FLIGHT it happened on — choose the sortie the student was sick on (round 6 replaced the phase-of-flight note with the flight)'
+                         end);
 
         elsif k = 'evaluations' then
           -- FIXED SLOT RULE (round 5): the eight checkrides are always present.
@@ -926,20 +940,38 @@ begin
           -- non-graded row the name is the AUTHORISING instructor, on a graded
           -- one it is the instructor / evaluator who graded it.
           if not wa.slot_empty(k, e) then
+            is_ng := coalesce(case when jsonb_typeof(e->'ng') = 'boolean'
+                                   then (e->>'ng')::boolean else false end, false);
             perform wa.chk_date(e->'date', w || '.date', not wa.is_legacy(e));
             -- REQUIRED EVEN ON A LEGACY ROW. The legacy flag excuses what the
             -- OLD form never asked for; it does not excuse a round-6 rule, or
             -- the rule would be optional for exactly the rows that break it.
             -- A row without the name is readable everywhere and refused on the
             -- next save until it is supplied ("keep it, ask for it").
-            perform wa.chk_text(e->'instructor', w || '.instructor', true, 200);
-            if coalesce(case when jsonb_typeof(e->'ng') = 'boolean'
-                             then (e->>'ng')::boolean else false end, false) then
+            -- The type/length check first, so a number in the box is answered
+            -- with "must be text" and not with the rule below…
+            perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
+            -- …and then THE NAME ITSELF, on every FLOWN row, graded or NG.
+            -- ROUND 6b: one absence, four spellings. The key ABSENT, an
+            -- explicit null, "" and "   " all mean nobody signed for this
+            -- solo, so all four are refused — the value has already been
+            -- through wa.norm_line at the write boundary, so a padded string
+            -- arrives here as ''. (Before this, a graded row could carry
+            -- instructor:"" past the required-text check, which only asks
+            -- whether a STRING is there; and absent/null were refused with a
+            -- generic "required text missing" instead of the rule.) The
+            -- sentence names which kind of row it is, because the two are
+            -- different duties: the NG row wants the AUTHORISING instructor,
+            -- the graded one the instructor / evaluator who scored it.
+            perform wa.chk(nullif(trim(coalesce(e->>'instructor', '')), '') is not null,
+                           w || '.instructor',
+                           case when is_ng
+                                then 'a non-graded (NG) solo still names the AUTHORISING instructor — NG removes the grade, not the person who authorised the flight'
+                                else 'a flown solo names the instructor / evaluator who signed for it — a student never launches alone on their own authority'
+                           end);
+            if is_ng then
               perform wa.chk(e->'grade' is null or jsonb_typeof(e->'grade') = 'null',
                              w || '.grade', 'a non-graded (NG) solo carries no grade');
-              perform wa.chk(nullif(trim(coalesce(e->>'instructor', '')), '') is not null,
-                             w || '.instructor',
-                             'a non-graded (NG) solo still names the AUTHORISING instructor — NG removes the grade, not the person who authorised the flight');
             else
               perform wa.chk_grade(e->'grade', w || '.grade', not wa.is_legacy(e));
             end if;
@@ -1194,14 +1226,18 @@ begin
   -- is NOT thrown away: it is read, shown greyed as legacy information, and
   -- the row is flagged so the form asks for the flight — the same "keep it,
   -- ask for it" contract every other legacy row has.
+  -- ROUND 6b — THE FLIGHT IS MANDATORY, so EVERY flight-less row is flagged,
+  -- not only the ones that carry the retired note: a pre-round-6 entry that
+  -- simply never had a flight is exactly as incomplete as one that has a note
+  -- instead of it. Both stay readable, both are asked for, both are refused on
+  -- the next save (wa.validate_record). MIRROR: app/app.js → WA.migrateRecord.
   if jsonb_typeof(p->'airsickness') = 'array' then
     arr := '[]'::jsonb;
     for i in 0 .. jsonb_array_length(p->'airsickness') - 1 loop
       e := p->'airsickness'->i;
       if jsonb_typeof(e) <> 'object' then continue; end if;
       if not wa.is_iso_date(e->>'date')
-         or (nullif(trim(coalesce(e->>'phase', '')), '') is not null
-             and (e->>'flight_code') is null) then
+         or nullif(trim(coalesce(e->>'flight_code', '')), '') is null then
         e := e || jsonb_build_object('legacy', true);
       end if;
       arr := arr || jsonb_build_array(e);

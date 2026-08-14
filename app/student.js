@@ -48,16 +48,16 @@ WA.renderStudent = async function (view, me, opts) {
 
   /* ── is this entry complete enough to stop being a legacy leftover? ──
      ROUND 6 adds four conditions to this one table, and every "please fix it
-     first" in the form comes back to them: an airsickness row that still
-     carries the retired phase note needs its FLIGHT, a FAIL / ALMOST GOOD row
-     needs SYLLABUS items only, every flown solo needs its instructor (NG
-     included — somebody authorised it), and an FPC needs an evaluator that is
-     one of the two appointments. */
+     first" in the form comes back to them: an airsickness row needs its
+     FLIGHT (round 6b: EVERY row, not only the ones that still carry the
+     retired phase note), a FAIL / ALMOST GOOD row needs SYLLABUS items only,
+     every flown solo needs its instructor (NG included — somebody authorised
+     it), and an FPC needs an evaluator that is one of the two appointments. */
   const COMPLETE = {
     nfs: (e) => isDate(e.date) && !!WA.nfsReason(e.reason) &&
       (e.reason !== "other" || !!txt(e.note)),
     sms: (e) => isDate(e.entrance_date),
-    airsickness: (e) => isDate(e.date) && (!txt(e.phase) || !!txt(e.flight_code)),
+    airsickness: (e) => isDate(e.date) && !!txt(e.flight_code),
     fail: (e) => isDate(e.date) && !!WA.itemCat(e.category) &&
       (e.items || []).length > 0 && !WA.itemsLegacy(e).length,
     almost_good: (e) => isDate(e.date) && !!WA.itemCat(e.category) &&
@@ -84,7 +84,9 @@ WA.renderStudent = async function (view, me, opts) {
      server's in wa.validate_record. */
   function blocksSave(sec, e) {
     if (sec === "fail" || sec === "almost_good") return WA.itemsLegacy(e).length > 0;
-    if (sec === "airsickness") return !!txt(e.phase) && !txt(e.flight_code);
+    /* ROUND 6b — the flight is MANDATORY on every airsickness row, so a row
+       without one blocks the save whether or not it carries the retired note */
+    if (sec === "airsickness") return !txt(e.flight_code);
     if (sec === "solo_flights") {
       return !WA.slotEmpty("solo_flights", e) && !txt(e.instructor);
     }
@@ -266,11 +268,14 @@ WA.renderStudent = async function (view, me, opts) {
      respect the syllabus, so the picker offers EVERY sortie of the stage, the
      four tracks grouped, plus the same "Other…" escape the other pickers have.
      The phase-of-flight note it replaces is gone from the form: what is
-     already stored is shown greyed under the row, as legacy information. */
+     already stored is shown greyed under the row, as legacy information.
+     ROUND 6b — REQUIRED, hence the asterisk: an airsickness event with no
+     sortie on it is a date and a name, and no pattern can be read out of it.
+     The server refuses the same row in the same words. */
   function airFlightF(i, e) {
     return pickerF("airsickness", i, e, "flight_code", "Flight",
       TRIGGER_GROUPS,
-      { free: true, ph: "— on which flight? —",
+      { free: true, req: true, ph: "— on which flight? —",
         otherLabel: "Other… (type the code)", freePh: "e.g. C4302" });
   }
 
@@ -461,7 +466,7 @@ WA.renderStudent = async function (view, me, opts) {
       blank: () => ({ entrance_date: "", exit_date: "" }) },
 
     { id: "airsickness",
-      hint: "One entry per airsickness event — when it happened, on WHICH FLIGHT and with whom, so the squadron can see the pattern. (The free-text phase-of-flight note was replaced by the flight in round 6; a note already written is kept below the row as legacy information.)",
+      hint: "One entry per airsickness event — when it happened, on WHICH FLIGHT and with whom, so the squadron can see the pattern. The flight is required on every entry. (It replaced the free-text phase-of-flight note in round 6; a note already written is kept below the row as legacy information, and the row asks for its flight before the record can be saved again.)",
       row: (e, i) => `
         <div class="rgrid2">
           ${dateF("airsickness", i, "date", e.date, "Date", true)}
@@ -680,9 +685,13 @@ WA.renderStudent = async function (view, me, opts) {
       if (!WA.nfsReason(e.reason)) out.push("the reason");
       else if (e.reason === "other" && !txt(e.note)) out.push("the cause");
     }
-    /* ROUND 6 — the airsickness note became the flight it happened on */
-    if (sec === "airsickness" && txt(e.phase) && !txt(e.flight_code)) {
-      out.push("the flight it happened on (the phase note is kept as legacy information)");
+    /* ROUND 6 — the airsickness note became the flight it happened on, and
+       round 6b makes the flight mandatory on EVERY row: the one that still
+       carries a note says what happened to it, the rest just name the gap. */
+    if (sec === "airsickness" && !txt(e.flight_code)) {
+      out.push(txt(e.phase)
+        ? "the flight it happened on (the phase note is kept as legacy information)"
+        : "the flight it happened on");
     }
     if (sec === "evaluations" && !WA.evalById(e.evaluation)) out.push("which checkride it was");
     if (sec === "solo_flights") {
@@ -913,11 +922,20 @@ WA.renderStudent = async function (view, me, opts) {
         ? "It stays readable everywhere in the meantime, but the record cannot be saved again until this is done."
         : "Nothing is lost in the meantime — the rest of the form saves as it is."}`;
   }
+  /* THE BANNER COUNTS LEGACY LEFTOVERS, AND "N OF THEM" MEANS N OF THOSE.
+     `blocking` is therefore counted over the SAME rows as `n` — a row the
+     student is in the middle of adding also blocks the save (a new airsickness
+     row has no flight yet, a new FPC row no evaluator), but it was never
+     "recorded on an earlier version of this form", and counting it here
+     produced "2 entries were recorded … 3 of them have to be corrected". A
+     half-typed new row is answered where it belongs: by the save, which names
+     the row and what it is missing. */
   function showLegacyNote() {
     let n = 0, blocking = 0;
     for (const sec of SECTIONS) {
       for (const e of S.data[sec.id]) {
-        if (stillLegacy(sec.id, e)) n++;
+        if (!stillLegacy(sec.id, e)) continue;
+        n++;
         if (blocksSave(sec.id, e)) blocking++;
       }
     }
@@ -1260,11 +1278,17 @@ WA.renderStudent = async function (view, me, opts) {
     /* AIRSICKNESS — THE FLIGHT, NOT THE PHASE (round 6). The note the form no
        longer collects is carried through untouched when the row already had
        one (nothing is destroyed behind the owner's back), and such a row is
-       refused until the flight is chosen — the server says the same. */
+       refused until the flight is chosen — the server says the same.
+       ROUND 6b — THE FLIGHT IS REQUIRED ON EVERY ROW, legacy included: the
+       flag excuses what the OLD form never asked for, not a rule of this
+       round. The note-carrier is told what happened to its note; every other
+       row is told the rule. Both sentences mirror wa.validate_record. */
     d.airsickness.forEach((e, i) => {
       if (!isDate(e.date) && !e.legacy) { need("airsickness", i, "the date is required"); return; }
-      if (txt(e.phase) && !txt(e.flight_code)) {
-        need("airsickness", i, "choose the FLIGHT this airsickness happened on — the phase-of-flight note is no longer collected, and this entry keeps its own as legacy information");
+      if (!txt(e.flight_code)) {
+        need("airsickness", i, txt(e.phase)
+          ? "choose the FLIGHT this airsickness happened on — the phase-of-flight note is no longer collected, and this entry keeps its own as legacy information"
+          : "every airsickness entry names the FLIGHT it happened on — choose the sortie the student was sick on (round 6 replaced the phase-of-flight note with the flight)");
         return;
       }
       push("airsickness", { date: e.date || null, instructor: WA.normLine(e.instructor) || null,

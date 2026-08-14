@@ -299,16 +299,27 @@ while the student works through the rest. Which of the two a row is, the row
 itself says — `blocksSave()` in the form is the single function behind the
 row's note, the banner's count and the refusal alike.
 
-**1 · AIRSICKNESS NAMES THE FLIGHT.** The entry is `{date*, flight_code,
+**1 · AIRSICKNESS NAMES THE FLIGHT.** The entry is `{date*, flight_code*,
 instructor}` — a picker over **every sortie of the stage** (airsickness does not
 respect the syllabus track) with the round-5 "Other…" free-text escape. The
 free-text *phase of flight / note* is gone: the form draws no box for it, and
-the admin table / brief / print / CSV columns say **Flight**. A note already
-written is **not destroyed**: it is read, rendered greyed as "legacy note" on
-every surface, and its row is refused on the next save until the flight is
-chosen. `wa.phase_count` additionally refuses any payload that GROWS the number
-of rows carrying one, so the retired field cannot come back through a hand-made
-payload either — the same "may only be used up" rule the legacy flag has.
+the admin table / brief / print / CSV columns say **Flight**.
+**Round 6b — THE FLIGHT IS MANDATORY** (the round-6 intent was *"add the
+flight"*; an event with no sortie on it is a date and a name, and no pattern can
+be read out of that). The label carries the asterisk, the save is blocked with
+the rule in words, and the server refuses `absent` / `null` / `""` / `"   "`
+alike — the value passes `wa.norm_code` at the write boundary, so a padded
+string arrives as `''`. **Required on legacy rows too**, exactly like rule 4:
+the flag excuses what the old form never asked for, never a rule of this round.
+A note already written is **not destroyed**: it is read, rendered greyed as
+"legacy note" on every surface, and its row is refused on the next save until
+the flight is chosen — with the sentence that explains what happened to the
+note, where a plain flight-less row gets the rule itself. Migration
+(`wa.migrate_record` / `WA.migrateRecord`) flags **every** flight-less row, not
+only the note-carriers. `wa.phase_count` additionally refuses any payload that
+GROWS the number of rows carrying a note, so the retired field cannot come back
+through a hand-made payload either — the same "may only be used up" rule the
+legacy flag has.
 
 **2 · FAIL / ALMOST GOOD ITEMS ARE SYLLABUS ONLY.** The custom
 "Other… (type it yourself)" item **dies**. `items[]` may hold only the printed
@@ -343,6 +354,13 @@ it. **NG removes the GRADE, never the person.** The label follows the row —
 *"Authorising instructor"* on an NG row, *"Evaluator / instructor"* on a graded
 one — and the name is required on both sides. It is asked of legacy rows too:
 the flag excuses what the old form never asked for, never a rule of this round.
+**Round 6b — one absence, four spellings.** `absent` / `null` / `""` / `"   "`
+all mean nobody signed for the solo and all four are refused, on the NG side and
+the graded side, each with its own sentence (the AUTHORISING instructor · the
+instructor / evaluator who signed for it). Before this, `chk_text(required)`
+only asked whether a STRING was present, so a graded row could carry
+`instructor:""` through; and an absent key was refused with a generic
+"required text missing" instead of the rule.
 Migration flags a stored NG solo with nobody's name, and every surface prints
 "not recorded" instead of an empty cell (`WA.soloWho` / `WA.soloWhoHTML` /
 `WA.soloWhoPhrase` — one helper, so table, brief, card, print and CSV cannot
