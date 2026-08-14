@@ -38,7 +38,10 @@ and editable by its owner until the brief.
 class (students) · duty (**Squadron Commander | DO** (Director of Operations — ο ΑΕ) **|
 Flight Commander | Evaluator | Instructor**) + leadership (**Wingman | 2-ship |
 4-ship | Mission Commander**) + status (**Assigned | Attached | Departed** —
-decision 2026-08-13) for instructors · active.
+decision 2026-08-13) for instructors · active ·
+**round 9 (2026-08-14): external_oid** (the shared roster's IMMUTABLE object
+id — unique, nullable, the join key of every import) **· call_sign · country ·
+test_pilot** (see §4g).
 
 **Access ruling (2026-08-13): PERSONAL links only — no general link.** Rollout is
 PHASED: Phase 1 = the 9 students (target: links out the NEXT MORNING), Phase 2 =
@@ -481,8 +484,8 @@ The vocabulary gains a fourth word: **ranked 1st / 2nd / 3rd · NOT RECOMMENDED
 · untouched**, the first two mutually exclusive (server check + table
 constraint `proposals_nr_excl`). It is stored (`proposals.nr_*`), it reaches
 the drill-down as its own cell, and the three silences never share a sentence:
-**"Maj Koroniadis does not recommend Fighters for this student"** (a judgement)
-vs *"Capt Paloukos has not recommended Fighters …"* (a proposal that does not
+**"Maj Alfa does not recommend Fighters for this student"** (a judgement)
+vs *"Capt Bravo has not recommended Fighters …"* (a proposal that does not
 name the branch) vs *"Capt X has not submitted a recommendation …"* (no
 proposal at all). The aggregates keep the sets disjoint (`not_recommended` is
 excluded from `not_this_branch`). **WORDING SWEEP:** "A.GOOD" / "A.Good" →
@@ -528,6 +531,82 @@ re-stamps it admin — which locks it.** The record-level derived stamp follows:
 entries cannot settle (a record the CO opened that nobody has filled) stays on
 the CO path, because an empty record locks nothing.
 
+## 4g. Round 9 (2026-08-14) — ONE ROSTER FOR EVERY FDMS APP
+
+Until now each app kept its own copy of the squadron. Round 9 makes the
+squadron a **single private file** that every FDMS app reads, and turns both
+apps into consumers of it.
+
+**THE FILE.** `D:\FDMS-roster\roster.json`, schema `global-roster-v1`. It lives
+OUTSIDE both public repos and always will. Per person: `oid` (immutable),
+`mn` (null until the user supplies them), `rank`, `last_name`, `first_name`,
+`duty`, `leadership`, `call_sign`, `country` (HAF | ITAF), `test_pilot`,
+`status`, `duty_eligible {SOF, RSU, RSU_solo}`, `experienced`. `students[]` is
+empty for now (they arrive next week) and the generator already handles them.
+
+**THE OID IS THE IDENTITY, AND IT IS IMMUTABLE.** People move, get promoted,
+change call signs and leave; the object id does not. It is therefore the join
+key of every import, and the ONE field neither app lets anybody rewrite:
+`people.external_oid` (unique, nullable — a person added by hand simply has
+none). `admin_save_person` refuses to change a non-null one by name, and
+allows a null one to be set ONCE so the CO can **adopt** a hand-made person
+into the roster instead of ending up with a duplicate after the next import.
+
+**THE SCHEMA GAINS FOUR COLUMNS** (idempotent, upgrade-safe):
+`external_oid` · `call_sign` · `country` · `test_pilot`. `country` is TEXT and
+deliberately not an enum — the country dropdown carries HAF / ITAF plus the
+"Other…" free-text escape (§4h), and the third air force must not need a
+migration. All four travel in `wa.person_json`, so every surface that already
+names a person can name them the way the squadron does.
+
+**`tools/gen-people-import.py`** reads a roster path and writes
+`people-import.sql` for the SQL editor:
+- **upsert BY `external_oid`** — known id updated in place, new id created,
+  **anybody the roster does not mention left exactly as they are** (departures
+  stay a decision somebody makes on purpose);
+- **the token is never in the update list** — a personal link already
+  distributed keeps working through any number of re-runs, and a new person
+  gets a token from the column default. Re-running is safe by construction,
+  which is the only way an import is ever used twice;
+- **a field the roster is silent about is not written** (`coalesce(new, old)`),
+  so the null `mn` of today cannot blank an MN typed into the People tab;
+- `active` is set on INSERT only — a link the CO revoked stays revoked;
+- a **role guard** stops the script before it writes if one of the ids is
+  already in the database as the other kind of person;
+- the final SELECT prints **surname · rank · role · roster id · call sign ·
+  personal link** for EVERY person — the CO's copy-paste distribution sheet.
+
+**THE PRIVACY GATE IS CODE, NOT A COMMENT.** The generated SQL carries real
+names, so the tool writes next to the private roster by default and **refuses**
+to write anywhere inside a git working tree; `people-import.sql` is git-ignored
+here as well; and the demo data of this repo keeps its fake people for ever.
+No name, call sign or roster-derived string may ever enter this repository —
+the two instructor surnames this document used as examples were coincidental
+fakes and are now **Alfa / Bravo**, so that nobody can mistake them for people.
+
+**WHERE THE ROSTER SHOWS.** People tab: call sign, country and a TP badge per
+row, a "roster" badge on the rows the shared file owns, and an editor that
+carries call sign · country (HAF / ITAF / Other…) · test pilot · the immutable
+object id. Proposal drill-down and the instructor list name people as
+**"Maj Alfa (TEST-01)"**; the proposals CSV gains Call sign · Country · Test pilot.
+
+## 4h. Round 9 — THE DROPDOWN RULE
+
+**Every dropdown carries only the values the unit needs, plus an "Other…"
+free-text escape** — with the exceptions the user ruled CLOSED, which stay
+closed because a free value would make them lie: **FAIL / ALMOST GOOD items**
+(syllabus only — «Τίποτα άλλο»), **the eight evaluation slots**, **the FPC
+evaluator** (Squadron CO / DO), and **the solo slots**. The NFS reason keeps
+its six causes **plus the "other cause" printed on form Α0473** — the escape is
+the sheet's own blank line, not an invention; the SMS condition likewise keeps
+the six of §32β plus the regulation's own opening discretion.
+
+Three more lists are closed **by construction** and are not escapes anybody
+forgot: `duty`, `leadership` and `status` are Postgres enums shared with the
+roster's own vocabulary. Extending them is one line in `db/schema.sql`, and
+`gen-people-import.py` fails loudly, naming the offending value and pointing at
+that line, rather than letting Postgres reject the paste with a cast error.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -569,16 +648,16 @@ the CO path, because an empty record locks nothing.
         (Fighters · Helicopters · Transport–Firefighting). A rank selector
         (1st / 2nd / 3rd choice chips) applies to ALL three boxes and refreshes
         them SIMULTANEOUSLY; each box lists the SURNAMES of the instructors who
-        gave the student that rank for that branch ("Koroniadis, Paloukos …").
+        gave the student that rank for that branch ("Alfa, Bravo …").
         Under each box, every NON-proposal appears as a POLITELY WORDED bullet —
-        e.g. "• Maj Koroniadis has not recommended Fighters for this student" and,
+        e.g. "• Maj Alfa has not recommended Fighters for this student" and,
         for instructors with no submission at all, "• Capt X has not submitted a
         recommendation for this student yet". **Round 8** adds the third and
-        strongest bullet: "• Maj Koroniadis **does not recommend** Fighters for
+        strongest bullet: "• Maj Alfa **does not recommend** Fighters for
         this student" — the branch he explicitly refused, which is a judgement
         and not a silence. Weighted score per branch (default
         3/2/1, formula shown), count of 1st choices, % of proposers who flew
-        with them; drill-down list (who, duty, leadership, status, flew_with,
+        with them; drill-down list (who + **call sign**, duty, leadership, status, flew_with,
         comment).
       - **Prev / Next student arrows (and keyboard ←/→)** — the CO walks
         student-by-student during the actual Wing Commander brief.

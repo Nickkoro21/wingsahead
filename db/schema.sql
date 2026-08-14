@@ -30,6 +30,13 @@
 -- unflown fixed slot needs no flag to say it has not been flown.
 -- ROUND 8 — a proposal branch has FOUR states: 1st / 2nd / 3rd, explicitly
 -- NOT RECOMMENDED (proposals.nr_*), or untouched.
+-- ROUND 9 — THE SHARED ROSTER. One private roster file feeds every FDMS app.
+-- people gains external_oid (the roster's IMMUTABLE object id — unique,
+-- nullable, the join key of tools/gen-people-import.py) plus call_sign,
+-- country and test_pilot. An import upserts BY external_oid and never touches
+-- the token, so re-running it does not invalidate a link already handed out.
+-- NOTHING roster-derived may ever enter this repo: the generated SQL is
+-- written next to the private roster and is git-ignored here as well.
 -- ROUND 6 — FIVE STRICTNESS RULES. Each of them replaces something the form
 -- used to accept out of politeness with the thing the squadron can actually
 -- use, and each keeps what is already stored READABLE while refusing to write
@@ -192,6 +199,33 @@ do $$ begin
     and (rank_transport_ff is null or nr_transport_ff = false)
   );
 exception when duplicate_object then null; end $$;
+
+-- ── ROUND 9 — THE GLOBAL ROSTER ───────────────────────────────────────────
+-- ONE roster now feeds every FDMS app (the scheduler and this one). It is a
+-- PRIVATE file that lives outside both public repos and carries an IMMUTABLE
+-- object id per person (external_oid, 'R-nnnn'). Wings Ahead does not own
+-- that id, it BORROWS it: it is the join key an import upserts on, so the same
+-- person is the same row after the tenth re-run, and everything else about
+-- them (rank, duty, call sign, country, test-pilot flag) may change freely.
+--   · external_oid is UNIQUE and NULLABLE — a person added by hand in the
+--     People tab simply has none, and Postgres allows any number of NULLs in
+--     a unique column, so hand-made people never collide with each other.
+--   · The TOKEN is never part of an import's update list: a re-import must not
+--     invalidate a link the CO has already distributed.
+--   · call_sign / country / test_pilot are what the roster adds to a person;
+--     country is TEXT and not an enum on purpose — the country dropdown of
+--     both apps carries HAF / ITAF plus the "Other…" free-text escape, and the
+--     third air force that arrives tomorrow must not need a migration.
+alter table public.people add column if not exists external_oid text;
+alter table public.people add column if not exists call_sign    text;
+alter table public.people add column if not exists country      text;
+alter table public.people add column if not exists test_pilot   boolean not null default false;
+
+-- (a UNIQUE constraint creates an index of the same name, so a re-run raises
+--  duplicate_TABLE, not duplicate_object — both mean "already there")
+do $$ begin
+  alter table public.people add constraint people_external_oid_key unique (external_oid);
+exception when duplicate_object or duplicate_table then null; end $$;
 
 -- ranking positions must be pairwise distinct inside one proposal
 do $$ begin
@@ -1480,13 +1514,18 @@ begin
   return arr;
 end $$;
 
--- person as public jsonb (never leaks the token)
+-- person as public jsonb (never leaks the token).
+-- ROUND 9: the roster fields travel with the person — external_oid so the CO
+-- can see WHICH row the shared roster owns, call_sign / country / test_pilot
+-- because they are how the squadron actually names and sorts its instructors.
 create or replace function wa.person_json(p public.people) returns jsonb
 language sql immutable as $$
   select jsonb_build_object(
     'id', p.id, 'role', p.role, 'mn', p.mn, 'rank', p.rank,
     'first_name', p.first_name, 'last_name', p.last_name, 'class', p.class,
     'duty', p.duty, 'leadership', p.leadership, 'status', p.status,
+    'external_oid', p.external_oid, 'call_sign', p.call_sign,
+    'country', p.country, 'test_pilot', p.test_pilot,
     'active', p.active)
 $$;
 
@@ -2044,13 +2083,19 @@ begin
   perform wa.chk_text(p->'first_name', 'first_name', false, 120);
   perform wa.chk_text(p->'last_name', 'last_name', p_id is null, 120);
   perform wa.chk_text(p->'class', 'class', false, 40);
+  -- ROUND 9 — the roster fields
+  perform wa.chk_text(p->'call_sign', 'call_sign', false, 40);
+  perform wa.chk_text(p->'country', 'country', false, 40);
+  perform wa.chk_text(p->'external_oid', 'external_oid', false, 60);
+  perform wa.chk_bool(p->'test_pilot', 'test_pilot');
   -- enum casts below raise on any illegal value (duty/leadership/status/role)
   if p_id is null then
     r := (p->>'role')::public.wa_role;
     perform wa.chk(r in ('student', 'instructor'), 'role', 'only student/instructor can be created');
     perform wa.chk(nullif(wa.norm_line(p->>'last_name'), '') is not null, 'last_name', 'required');
     insert into public.people
-           (role, mn, rank, first_name, last_name, class, duty, leadership, status)
+           (role, mn, rank, first_name, last_name, class, duty, leadership, status,
+            external_oid, call_sign, country, test_pilot)
     values (r,
             nullif(wa.norm_line(coalesce(p->>'mn', '')), ''),
             nullif(wa.norm_line(coalesce(p->>'rank', '')), ''),
@@ -2059,12 +2104,27 @@ begin
             nullif(wa.norm_line(coalesce(p->>'class', '')), ''),
             (nullif(p->>'duty', ''))::public.wa_duty,
             (nullif(p->>'leadership', ''))::public.wa_leadership,
-            (nullif(p->>'status', ''))::public.wa_status)
+            (nullif(p->>'status', ''))::public.wa_status,
+            nullif(wa.norm_code(coalesce(p->>'external_oid', '')), ''),
+            nullif(wa.norm_code(coalesce(p->>'call_sign', '')), ''),
+            nullif(wa.norm_line(coalesce(p->>'country', '')), ''),
+            coalesce((p->>'test_pilot')::boolean, false))
     returning * into row;
   else
     select * into row from public.people where id = p_id;
     if not found then raise exception 'WA: unknown person'; end if;
     perform wa.chk(not (p ? 'role'), 'role', 'role cannot be changed');
+    -- ROUND 9 — THE OBJECT ID IS IMMUTABLE. It belongs to the shared roster,
+    -- not to this database: the CO may ADOPT a hand-made person into the
+    -- roster by giving them the id once (null → 'R-nnnn'), and after that the
+    -- id is the one thing on the row he cannot rewrite. Re-sending the same
+    -- value is not a change and is accepted, so a plain "Save" never fails.
+    if p ? 'external_oid' then
+      perform wa.chk(row.external_oid is null
+                     or row.external_oid = nullif(wa.norm_code(coalesce(p->>'external_oid', '')), ''),
+                     'external_oid',
+                     format('the roster object id is immutable — this person is %s', row.external_oid));
+    end if;
     update public.people set
       mn         = case when p ? 'mn'         then nullif(wa.norm_line(coalesce(p->>'mn', '')), '')         else mn end,
       rank       = case when p ? 'rank'       then nullif(wa.norm_line(coalesce(p->>'rank', '')), '')       else rank end,
@@ -2073,7 +2133,13 @@ begin
       class      = case when p ? 'class'      then nullif(wa.norm_line(coalesce(p->>'class', '')), '') else class end,
       duty       = case when p ? 'duty'       then (nullif(p->>'duty', ''))::public.wa_duty         else duty end,
       leadership = case when p ? 'leadership' then (nullif(p->>'leadership', ''))::public.wa_leadership else leadership end,
-      status     = case when p ? 'status'     then (nullif(p->>'status', ''))::public.wa_status     else status end
+      status     = case when p ? 'status'     then (nullif(p->>'status', ''))::public.wa_status     else status end,
+      call_sign  = case when p ? 'call_sign'  then nullif(wa.norm_code(coalesce(p->>'call_sign', '')), '') else call_sign end,
+      country    = case when p ? 'country'    then nullif(wa.norm_line(coalesce(p->>'country', '')), '') else country end,
+      test_pilot = case when p ? 'test_pilot' then coalesce((p->>'test_pilot')::boolean, false) else test_pilot end,
+      external_oid = coalesce(external_oid,
+                       case when p ? 'external_oid'
+                            then nullif(wa.norm_code(coalesce(p->>'external_oid', '')), '') end)
     where id = p_id
     returning * into row;
   end if;
@@ -2242,6 +2308,10 @@ begin
                  'instructor_id', ip.id,
                  'last_name', ip.last_name, 'rank', ip.rank,
                  'duty', ip.duty, 'leadership', ip.leadership, 'status', ip.status,
+                 -- ROUND 9: the drill-down names the instructor the way the
+                 -- squadron does — the call sign beside the surname
+                 'call_sign', ip.call_sign, 'country', ip.country,
+                 'test_pilot', ip.test_pilot,
                  'ranks', jsonb_build_object(
                    'fighters', pr.rank_fighters,
                    'helicopters', pr.rank_helicopters,

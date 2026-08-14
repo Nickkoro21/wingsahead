@@ -279,6 +279,11 @@ input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent);
 /* ── round 5: the shared picker, the fixed slots, the marked values ── */
 /* the free-text box a picker reveals when "Other…" is chosen */
 .freein { margin-top: 4px; }
+/* round 9 — the People modal toggles its "Other…" box IN PLACE instead of
+   re-rendering the form under the CO's fingers, so it needs a plain hider.
+   The two pre-existing users (.veil.hidden, .thm-pop.hidden) already resolve
+   to display:none, so this generalises the rule without changing them. */
+.hidden { display: none; }
 /* the small line under a field: the Greek printed on the ΦΜΠ, an
    off-catalogue warning, the raw value behind a rounded grade */
 .fnote { font-size: 11px; color: var(--muted); line-height: 1.4; }

@@ -1283,6 +1283,32 @@ WA.personName = function (p, withRank) {
   return bits.join(" ").trim();
 };
 
+/* ROUND 9 — the shared roster's three visible facts about a person, as one
+   helper so the People table, the drill-down and any later surface cannot
+   drift apart: the CALL SIGN (how the squadron actually says the name), the
+   TP badge, and the marker that says this row is owned by the global roster
+   (its object id is immutable here). Empty for anybody the roster has never
+   mentioned, which is every demo person and every hand-made one. */
+WA.callSign = function (p) {
+  return p && p.call_sign ? String(p.call_sign) : "";
+};
+WA.rosterTags = function (p) {
+  if (!p) return "";
+  let out = "";
+  if (p.call_sign) out += ` <span class="badge" title="call sign">${esc(p.call_sign)}</span>`;
+  if (p.test_pilot) out += ` <span class="badge" title="test pilot">TP</span>`;
+  if (p.external_oid) {
+    out += ` <span class="badge" title="from the shared roster — object id ${esc(p.external_oid)}, immutable">roster</span>`;
+  }
+  return out;
+};
+/* "Maj Alfa (TEST-01)" — the drill-down identity line */
+WA.personCall = function (p, withRank) {
+  const n = WA.personName(p || {}, withRank);
+  const cs = WA.callSign(p);
+  return cs ? n + " (" + cs + ")" : n;
+};
+
 /* copy to clipboard with fallback */
 WA.copyText = async function (text) {
   try {

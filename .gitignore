@@ -12,3 +12,10 @@ Thumbs.db
 .DS_Store
 # Claude session files
 .claude/
+# ROUND 9 — THE PRIVACY GATE. The global roster and anything generated from it
+# carry REAL names: they live outside this repo and must never enter it.
+# tools/gen-people-import.py already refuses to write inside a git tree; this
+# is the second lock on the same door.
+roster.json
+people-import.sql
+*people-import*.sql

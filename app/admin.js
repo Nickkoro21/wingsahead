@@ -18,6 +18,13 @@ WA.renderAdmin = async function (view, me) {
 
   const BR = WA.BRANCHES;   // [{id,label}] — defined in instructor.js
   const RW = WA.RANK_WORD;  // {1:"1st",2:"2nd",3:"3rd"}
+  /* ROUND 9 — the sentinel of the "Other…" option, the same idea (and the
+     same word) as the student form's PICK_OTHER */
+  const PM_OTHER = "__other__";
+  /* the ranks the squadron actually carries, offered as a datalist over a box
+     that stays free text — the same list the FDMS scheduler's rank chips use,
+     "Lt Col" included (the global roster holds two). */
+  const RANKS = ["Cdt", "2Lt", "1Lt", "Capt", "Maj", "Lt Col", "S.Ten", "Lt"];
 
   /* Countable metrics only — round-2 R4 removed the evaluation COUNT chip
      (every student converges to the same eight checkrides) and the mean
@@ -184,7 +191,7 @@ WA.renderAdmin = async function (view, me) {
         : done === 0 ? `<span class="badge badge-bad">nothing yet</span>`
         : done < all ? `<span class="badge badge-warn">${done}/${all}</span>`
         : `<span class="badge badge-good">✓ ${done}/${all}</span>`;
-      return `<span style="margin-right:14px; white-space:nowrap">${esc(WA.personName(i, true))} ${badge}</span>`;
+      return `<span style="margin-right:14px; white-space:nowrap">${esc(WA.personCall(i, true))} ${badge}</span>`;
     }).join(" ");
 
     return `
@@ -655,7 +662,7 @@ WA.renderAdmin = async function (view, me) {
             <th>Fighters</th><th>Helicopters</th><th>Transport–FF</th><th>Flew with</th><th>Comment</th>
             <th>Source</th></tr></thead>
           <tbody>${s.proposals.map((p) => `
-            <tr><td><b>${esc((p.rank ? p.rank + " " : "") + p.last_name)}</b></td>
+            <tr><td><b>${esc(WA.personCall(p, true))}</b>${p.test_pilot ? ` <span class="badge" title="test pilot">TP</span>` : ""}</td>
               <td>${esc(p.duty || "—")}</td><td>${esc(p.leadership || "—")}</td><td>${esc(p.status || "—")}</td>
               ${BR.map((b) => `<td>${propCell(p, b.id)}</td>`).join("")}
               <td>${p.flew_with ? "✓" : "—"}</td><td>${esc(p.comment || "")}</td>
@@ -1055,10 +1062,10 @@ WA.renderAdmin = async function (view, me) {
     return list.map((p) => {
       const extra = kind === "student"
         ? [p.mn ? "MN " + p.mn : "", p.class ? "Class " + p.class : ""].filter(Boolean).join(" · ")
-        : [p.duty, p.leadership, p.status].filter(Boolean).join(" · ");
+        : [p.duty, p.leadership, p.status, p.country].filter(Boolean).join(" · ");
       return `
         <tr>
-          <td><b>${esc(WA.personName(p, true))}</b></td>
+          <td><b>${esc(WA.personName(p, true))}</b>${WA.rosterTags(p)}</td>
           <td>${esc(extra || "—")}</td>
           <td>${p.active ? `<span class="badge badge-good">active</span>` : `<span class="badge badge-bad">revoked</span>`}</td>
           <td class="linkcell">…${esc(String(p.token).slice(-8))}</td>
@@ -1119,10 +1126,40 @@ WA.renderAdmin = async function (view, me) {
         <option value="">—</option>
         ${opts.map((o) => `<option value="${esc(o)}"${cur === o ? " selected" : ""}>${esc(o)}</option>`).join("")}
       </select></label>`;
+    /* ROUND 9 — a closed list PLUS the "Other…" free-text escape. The two air
+       forces in the squadron today are named; the third one that arrives
+       tomorrow is typed, and needs no release to be recordable. */
+    const selOther = (id, label, opts, cur, ph) => {
+      const v = cur ? String(cur) : "";
+      const other = v !== "" && opts.indexOf(v) < 0;
+      return `
+      <label class="f"><span>${esc(label)}</span>
+        <select id="${esc(id)}" data-other="${esc(id)}">
+          <option value=""${v === "" ? " selected" : ""}>—</option>
+          ${opts.map((o) => `<option value="${esc(o)}"${!other && v === o ? " selected" : ""}>${esc(o)}</option>`).join("")}
+          <option value="${esc(PM_OTHER)}"${other ? " selected" : ""}>Other…</option>
+        </select>
+        <input type="text" class="freein${other ? "" : " hidden"}" id="${esc(id)}-other"
+               value="${esc(other ? v : "")}" placeholder="${esc(ph || "type it")}"
+               aria-label="${esc(label)} — typed"></label>`;
+    };
+    /* THE ROSTER OBJECT ID IS IMMUTABLE (server-enforced). It can be given
+       ONCE, to adopt a person who was added here by hand into the shared
+       roster; after that the box is read-only and says so. */
+    const oidF = p.external_oid
+      ? `<label class="f"><span>Roster object id — immutable</span>
+           <input type="text" id="pm-oid" value="${esc(p.external_oid)}" readonly
+             title="this person comes from the shared roster; the id is the one thing that never changes"></label>`
+      : `<label class="f"><span>Roster object id — optional, set once</span>
+           <input type="text" id="pm-oid" value="" placeholder="e.g. R-0000"
+             title="give this person the id the shared roster uses, and the next roster import will update them instead of creating a duplicate"></label>`;
     $("adm-modal").innerHTML = `
       <h3>${person ? "Edit" : "Add"} ${esc(role)}</h3>
       <div class="fgrid">
-        <label class="f"><span>Rank</span><input type="text" id="pm-rank" value="${esc(p.rank || "")}" placeholder="e.g. ${isStu ? "Cdt" : "Maj"}"></label>
+        <label class="f"><span>Rank</span><input type="text" id="pm-rank" list="pm-ranks"
+          value="${esc(p.rank || "")}" placeholder="e.g. ${isStu ? "Cdt" : "Maj"}"
+          title="the ranks the squadron uses are offered — the box stays free text, which is the escape"></label>
+        <datalist id="pm-ranks">${RANKS.map((r) => `<option value="${esc(r)}"></option>`).join("")}</datalist>
         <label class="f"><span>Military Number</span><input type="text" id="pm-mn" value="${esc(p.mn || "")}"></label>
         <label class="f"><span>Last name *</span><input type="text" id="pm-last" value="${esc(p.last_name || "")}"></label>
         <label class="f"><span>First name</span><input type="text" id="pm-first" value="${esc(p.first_name || "")}"></label>
@@ -1130,7 +1167,13 @@ WA.renderAdmin = async function (view, me) {
           ? `<label class="f"><span>Class</span><input type="text" id="pm-class" value="${esc(p.class || "")}" placeholder="e.g. 2026B"></label>`
           : sel("pm-duty", "Duty", ["Squadron Commander", "DO", "Flight Commander", "Evaluator", "Instructor"], p.duty) +
             sel("pm-leadership", "Leadership", ["Wingman", "2-ship", "4-ship", "Mission Commander"], p.leadership) +
-            sel("pm-status", "Status", ["Assigned", "Attached", "Departed"], p.status)}
+            sel("pm-status", "Status", ["Assigned", "Attached", "Departed"], p.status) +
+            `<label class="f"><span>Call sign</span><input type="text" id="pm-callsign" value="${esc(p.call_sign || "")}" placeholder="e.g. TEST-01"></label>` +
+            selOther("pm-country", "Country — air force", ["HAF", "ITAF"], p.country, "e.g. FAF") +
+            `<label class="f"><span>Test pilot</span>
+               <div class="ck"><input type="checkbox" id="pm-tp"${p.test_pilot ? " checked" : ""}>
+                 <b title="test pilot — badged TP wherever this person is named">yes</b></div></label>`}
+        ${oidF}
       </div>
       <div class="mfoot">
         <button type="button" class="btn" data-act="modal-cancel">Cancel</button>
@@ -1144,6 +1187,9 @@ WA.renderAdmin = async function (view, me) {
   async function savePersonModal(btn) {
     const role = btn.dataset.role, id = btn.dataset.id || null;
     const val = (i) => { const el = $(i); return el ? el.value.trim() : ""; };
+    /* the "Other…" pair reads back as ONE value — what was picked, or what was
+       typed into the box the option reveals */
+    const valOther = (i) => (val(i) === PM_OTHER ? val(i + "-other") : val(i));
     const payload = {
       rank: val("pm-rank"), mn: val("pm-mn"),
       last_name: val("pm-last"), first_name: val("pm-first"),
@@ -1154,7 +1200,15 @@ WA.renderAdmin = async function (view, me) {
       payload.duty = val("pm-duty");
       payload.leadership = val("pm-leadership");
       payload.status = val("pm-status");
+      payload.call_sign = val("pm-callsign");
+      payload.country = valOther("pm-country");
+      payload.test_pilot = !!($("pm-tp") && $("pm-tp").checked);
     }
+    /* an EMPTY id box is not an instruction to clear the roster id — it is a
+       person the roster has never mentioned. Only a typed value is sent, and
+       the server refuses to change one that is already there. */
+    const oid = val("pm-oid");
+    if (oid) payload.external_oid = oid;
     if (!id) payload.role = role;
     btn.disabled = true;
     try {
@@ -1275,11 +1329,14 @@ WA.renderAdmin = async function (view, me) {
        empty for a branch the instructor said nothing about */
     const cell = (p, bid) => p.ranks[bid] ? RW[p.ranks[bid]]
       : ((p.not_recommended && p.not_recommended[bid]) ? "not recommended" : "");
-    const rows = [["Student", "Class", "Instructor", "Duty", "Leadership", "Status",
+    const rows = [["Student", "Class", "Instructor", "Call sign", "Country", "Test pilot",
+      "Duty", "Leadership", "Status",
       "Fighters", "Helicopters", "Transport-FF", "Flew with", "Comment", "Updated", "Entered by"]];
     for (const s of A.data.students) for (const p of s.proposals) {
       rows.push([WA.personName(s.person, true), s.person.class,
-        (p.rank ? p.rank + " " : "") + p.last_name, p.duty, p.leadership, p.status,
+        (p.rank ? p.rank + " " : "") + p.last_name,
+        p.call_sign || "", p.country || "", p.test_pilot ? "yes" : "no",
+        p.duty, p.leadership, p.status,
         cell(p, "fighters"), cell(p, "helicopters"), cell(p, "transport_ff"),
         p.flew_with ? "yes" : "no", p.comment || "", fmtDT(p.updated_at), WA.coWord(p)]);
     }
@@ -1420,6 +1477,17 @@ WA.renderAdmin = async function (view, me) {
   /* the evaluation selector of the per-evaluation comparison */
   adm.addEventListener("change", (ev) => {
     if (ev.target.id === "evalsel") { A.evalSel = ev.target.value; render(); }
+    /* ROUND 9 — "Other…" reveals its free-text box in place (the modal is
+       never re-rendered, so what is typed survives until Save) */
+    const os = ev.target.closest && ev.target.closest("[data-other]");
+    if (os) {
+      const box = $(os.dataset.other + "-other");
+      if (box) {
+        const on = os.value === PM_OTHER;
+        box.classList.toggle("hidden", !on);
+        if (on) box.focus(); else box.value = "";
+      }
+    }
   });
 
   /* a plot point → the matching row of the summary table */
