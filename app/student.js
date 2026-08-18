@@ -432,7 +432,10 @@ WA.renderStudent = async function (view, me, opts) {
      marked, and asked to be replaced. */
   function itemOptions(catId) {
     const cat = WA.itemCat(catId);
-    if (!cat) return "";
+    /* Round 9 residual (verify item D) — with no track chosen the select used
+       to render zero options: a blank grey control saying nothing. It now says
+       what to do first. */
+    if (!cat) return `<option value="" selected disabled>&mdash; choose the track first &mdash;</option>`;
     return `<option value="" selected>&mdash; add an item &mdash;</option>` +
       cat.items.map((it) =>
         `<option value="${esc(it.name)}">${esc((it.n ? it.n + " — " : "") + it.name)}</option>`).join("");
@@ -1277,6 +1280,20 @@ WA.renderStudent = async function (view, me, opts) {
        explains the NG has no business appearing after an explicit tap */
     return e._ngset ? "answer" : "default";
   }
+  /* Round 9 residual (verify item B) — the MIRROR of soloFirstFill: clearing
+     the last real value of a solo row would otherwise leave ng:true holding
+     the slot "flown" on no date, with the Graded chip as the only way back.
+     An emptied row returns to "not flown yet"; the NG answer is REMEMBERED
+     (_ngset/_ngwant) exactly like an answer given on a still-empty row, so a
+     refill takes it again without asking twice. */
+  function soloEmptyReset(sec, e) {
+    if (sec !== "solo_flights" || !e.ng) return false;
+    if (!WA.slotEmpty("solo_flights", Object.assign({}, e, { ng: false }))) return false;
+    e.ng = false;
+    e._ngset = true;
+    e._ngwant = true;
+    return true;
+  }
 
   /* one edit → drop the legacy flag if the row is now complete, mark dirty */
   function afterEdit(secId, entry, row) {
@@ -1341,6 +1358,7 @@ WA.renderStudent = async function (view, me, opts) {
           if (soloFirstFill(entry, soloWasEmpty) === "default") {
             toast("Contact solos are recorded NG — switch the row to Graded % if this one was graded");
           }
+          soloEmptyReset(sec, entry);
           redrawRow(sec, i, `[data-field="@${key}"]`);
         }
       } else {
@@ -1352,6 +1370,7 @@ WA.renderStudent = async function (view, me, opts) {
             toast("Contact solos are recorded NG — switch the row to Graded % if this one was graded");
           }
         }
+        soloEmptyReset(sec, entry);
         refreshSlotBadge(sec, i);
         refreshCodeNote(sec, i, key);
       }
@@ -1379,6 +1398,7 @@ WA.renderStudent = async function (view, me, opts) {
     const wasLegacy = !!entry.legacy;
     /* the opening grading of a solo slot, applied the first time it is filled */
     const ngDefaulted = soloFirstFill(entry, soloWasEmpty);
+    soloEmptyReset(sec, entry);
     dropLegacy(sec, entry);
     /* the category drives BOTH lists this row depends on: the syllabus items
        and the flight codes. A code chosen under the old track cannot survive

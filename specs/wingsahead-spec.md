@@ -539,6 +539,15 @@ re-stamps it admin — which locks it.** The record-level derived stamp follows:
 entries cannot settle (a record the CO opened that nobody has filled) stays on
 the CO path, because an empty record locks nothing.
 
+*Καταγραφή (Round 9 verify, item C):* ένα **ΝΕΟ** entry του owner που φτάνει με
+πλαστό `entered_by:'admin'` γίνεται δεκτό και η σφραγίδα **αφαιρείται σιωπηλά**
+από το `wa.carry_stamps` (μη-ταιριασμένο entry ⇒ provenance null). Αυτό είναι
+**σκόπιμο**, όχι κενό: το κλειδί ανήκει στο whitelist επειδή τα ΥΠΑΡΧΟΝΤΑ
+CO-entries ταξιδεύουν μέσα στο payload του owner και πρέπει να περάσουν
+αναλλοίωτα· μια ονομαστική άρνηση για το ίδιο κλειδί σε νέα entries θα έσπαγε
+αυτή τη διαδρομή για μηδενικό όφελος ασφάλειας — τίποτα πλαστό δεν φτάνει ποτέ
+στη βάση ως 'admin'.
+
 **ΑΠΟΦΑΝΣΗ 2026-08-18: το owner-reclaim ΠΑΡΑΜΕΝΕΙ στις προτάσεις — η CO-υπεροχή
 ισχύει μόνο στα στοιχεία μαθητών.** Η αντιστροφή υπεροχής παραπάνω κλειδώνει
 **entries μέσα σε student records**, όπου η γραμμή του Διοικητή είναι διόρθωση
