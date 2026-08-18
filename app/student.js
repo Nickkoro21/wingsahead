@@ -1228,7 +1228,12 @@ WA.renderStudent = async function (view, me, opts) {
       /* ROUND 6 — NG drops the GRADE and nothing else: the instructor who
          authorised the solo stays on the row, because he authorised it */
       if (e.ng) e.grade = null;
-      dropLegacy(sec, e);
+      /* ROUND 9 residuals-verify item 9 — this handler is the one place that
+         itself DESTROYS a value: on a row whose only real value was that
+         grade, the line above just emptied it while setting ng, and ng alone
+         must not hold the slot "flown" on nothing (the save would refuse a
+         date the student never meant to give, with no field left to clear). */
+      soloEmptyReset(sec, e);
       redrawRow(sec, Number(i));
       showLegacyNote();
       markDirty();
