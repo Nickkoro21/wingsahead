@@ -21,6 +21,10 @@ WA.renderStudent = async function (view, me, opts) {
   const O = opts || {};
   const asCO = !!O.asCO;
   const S = { data: null, lastUpdate: null, dirty: false, enteredBy: null };
+  /* the fingerprint of the record as it was last SAVED, and what the status
+     line says while the form matches it — see markDirty() / markSaved() */
+  let SAVED = "";
+  let CLEAN_ST = "All changes are kept only after you press Save.";
   const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ""));
   const txt = (v) => String(v === null || v === undefined ? "" : v).trim();
   /* ROUND 6: there is no CUSTOM item sentinel any more — the FAIL / ALMOST
@@ -36,7 +40,16 @@ WA.renderStudent = async function (view, me, opts) {
     S.data = WA.migrateRecord(got.data);
     S.lastUpdate = got.last_update || null;
     S.enteredBy = got.entered_by || null;
-    INS = await WA.instructorNames();
+    /* ROUND 9 — THE PICKER RIDES IN WITH THE FORM. get_student_form and its
+       admin twin carry `instructors`: the ACTIVE instructors' surnames and
+       nothing else (wa.instructor_surnames). It is one round trip instead of
+       two, and the boxes that ask WHO can no longer render before their list
+       arrives. An instance still running an older schema sends no such key —
+       that, and only that, falls back to the standalone RPC, so the form
+       degrades to the round-8 behaviour rather than to no list at all. */
+    INS = Array.isArray(got.instructors)
+      ? WA.insNames(got.instructors)
+      : await WA.instructorNames();
   } catch (e) {
     view.innerHTML = `<div class="landing"><h2>Could not load ${asCO ? "this record" : "your form"}</h2>
       <p>${esc(e.message)}</p>${asCO ? `<p>${backBtn}</p>` : ""}</div>`;
@@ -326,12 +339,18 @@ WA.renderStudent = async function (view, me, opts) {
   }
 
   /* CEF — who conducted it: DO · Squadron CO · the squadron's instructors ·
-     typed. A CEF is flown with a Squadron Evaluator, so the list stays open. */
+     typed. A CEF is flown with a Squadron Evaluator, so the list stays open.
+     ROUND 9 — ONE BOX WITH A LIST BEHIND IT, like every other name on this
+     form. The round-5 shape here was a <select> whose escape was a second
+     step ("Other…" → a box appears → type), which for a field whose list was
+     never closed is two acts where the squadron does one. The list is now the
+     two appointments followed by the active instructors' surnames, offered as
+     a datalist: choosing is a tap, typing a name nobody has listed is just
+     typing it. Nothing about what is STORED changed — one string, normalised
+     by WA.normLine on save, exactly as before. */
   function evaluatorF(sec, i, e) {
-    return pickerF(sec, i, e, "evaluator", "Evaluator",
-      [{ label: "Appointment", items: WA.EVALUATOR_ROLES.map((v) => ({ v, t: v })) },
-       { label: "Instructors", items: INS.map((v) => ({ v, t: v })) }],
-      { free: true, ph: "— who conducted it? —", freePh: "surname or appointment" });
+    return textF(sec, i, "evaluator", e.evaluator, "Evaluator",
+                 INS.length ? "choose or type" : "surname or appointment", "dl-eval");
   }
 
   /* FPC — EXACTLY TWO OPTIONS (round 6): the Squadron CO or the DO. No
@@ -411,20 +430,16 @@ WA.renderStudent = async function (view, me, opts) {
      the MIF, and every surface that shows items was quietly showing two kinds
      of thing. Nothing was lost with it — what is already stored is READ,
      marked, and asked to be replaced. */
-  function itemOptions(catId, filter) {
+  function itemOptions(catId) {
     const cat = WA.itemCat(catId);
     if (!cat) return "";
-    const q = String(filter || "").trim().toLowerCase();
-    let list = cat.items;
-    if (q) list = list.filter((it) =>
-      it.name.toLowerCase().indexOf(q) >= 0 || String(it.n || "").indexOf(q) >= 0);
     return `<option value="" selected>&mdash; add an item &mdash;</option>` +
-      list.map((it) => `<option value="${esc(it.name)}">${esc((it.n ? it.n + " — " : "") + it.name)}</option>`).join("") +
-      (q && !list.length ? `<option value="" disabled>no item matches &ldquo;${esc(filter)}&rdquo;</option>` : "");
+      cat.items.map((it) =>
+        `<option value="${esc(it.name)}">${esc((it.n ? it.n + " — " : "") + it.name)}</option>`).join("");
   }
 
-  /* the multi-select block of ONE row — re-rendered on its own so the
-     filter box never loses what the student is typing */
+  /* the multi-select block of ONE row — re-rendered on its own so adding an
+     item never redraws the whole section under the student's fingers */
   function msHTML(sec, i, e) {
     const chips = (e.items || []).map((n, k) => {
       const known = WA.itemKnown(e.category, n);
@@ -446,10 +461,15 @@ WA.renderStudent = async function (view, me, opts) {
         &mdash; remove ${stale === 1 ? "it" : "them"} and choose the matching
         ${esc(WA.itemCatLabel(e.category))} item${stale === 1 ? "" : "s"} below.
         This entry cannot be saved until ${stale === 1 ? "it is" : "they are"} replaced.</p>` : ""}
-      <input type="search" class="ms-q" placeholder="filter ${esc(WA.itemCatLabel(e.category))} items&hellip;"
-             value="${esc(e._q || "")}" data-msq="${esc(sec)}:${i}" aria-label="Filter items">
+      ${/* ROUND 9 — THE FILTER BOX IS GONE. A box that says "filter items"
+           beside a box that says "add an item" reads as two ways to enter an
+           item, and the squadron's own reading of it was that it would confuse
+           more than it helped: the one thing typing into it could never do was
+           put an item on the row. The select below is the whole of the act,
+           and it is the syllabus list of the chosen track in printed order —
+           the browser's own type-to-jump still finds a name inside it. */ ""}
       <select class="ms-add" data-msadd="${esc(sec)}:${i}" aria-label="Add an item">
-        ${itemOptions(e.category, e._q)}
+        ${itemOptions(e.category)}
       </select>`;
   }
 
@@ -581,11 +601,23 @@ WA.renderStudent = async function (view, me, opts) {
 
     /* ── FIXED SLOTS: the solos the syllabus prescribes ── */
     { id: "solo_flights", fixed: true,
-      hint: "The solos of the stage, one row each — they are fixed by the syllabus and stay EMPTY until flown. Fill in the date and then either the grade or NG (non-graded); every flown row names who authorised it. The CONTACT (adaptation) solos open as NG the first time you fill one — nobody is in the other seat to grade them — and the FORMATION solos open graded; either can be switched. A solo the syllabus did not foresee goes in as an additional solo at the end.",
+      hint: "The solos of the stage, one row each — they are fixed by the syllabus and stay EMPTY until flown. Fill in the date and then either the grade or NG (non-graded); every flown row names who authorised it. EVERY CONTACT (adaptation) solo opens as NG — nobody is in the other seat to grade them — and the FORMATION solos open graded; either can be switched with one tap. A solo the syllabus did not foresee goes in as an additional solo at the end.",
       row: (e, i, meta) => {
         const m = meta || {};
         const slot = e.slot ? WA.soloSlot(e.slot) : null;
         const flown = !WA.slotEmpty("solo_flights", e);
+        /* ROUND 9 — THE ROW OPENS IN THE STATE IT WILL TAKE. Round 8 gave the
+           contact solos their NG default in the DATA, applied the first time a
+           slot stopped being empty; on screen every unflown contact row still
+           showed "Graded %" lit with a grade box beside it, so the student met
+           the wrong default before the right one and five of the eight rows
+           invited a number nobody can award. `ng` here is what the row DRAWS:
+           an empty contact slot draws NG. It stays a default — one tap on
+           Graded % answers the row (_ngset) and is never overridden — and it
+           writes nothing: the data still takes ng only when the slot stops
+           being empty, because WA.slotEmpty counts ng and an unflown slot
+           must not start counting as flown. */
+        const ng = soloNG(e);
         return `
         <div class="slot-h">
           <span class="slot-nm" title="${esc(WA.soloSlotTip(e.slot))}">${esc(WA.soloSlotLabel(e.slot))}</span>
@@ -599,11 +631,11 @@ WA.renderStudent = async function (view, me, opts) {
             <span class="hint">Not one of the syllabus solos — recorded as an extra.</span></div>`}
         </div>
         <div class="f"><span>Grading</span>
-          <span class="chiprow segrow">
-            <button type="button" class="chip${e.ng ? "" : " is-on"}" data-ng="solo_flights:${i}:0"
-                    aria-pressed="${e.ng ? "false" : "true"}">Graded&nbsp;%</button>
-            <button type="button" class="chip${e.ng ? " is-on" : ""}" data-ng="solo_flights:${i}:1"
-                    aria-pressed="${e.ng ? "true" : "false"}">NG (non-graded)</button>
+          <span class="chiprow segrow"${ng && !e.ng ? ` title="${esc(WA.SOLO_NG_DEFAULT_TIP)}"` : ""}>
+            <button type="button" class="chip${ng ? "" : " is-on"}" data-ng="solo_flights:${i}:0"
+                    aria-pressed="${ng ? "false" : "true"}">Graded&nbsp;%</button>
+            <button type="button" class="chip${ng ? " is-on" : ""}" data-ng="solo_flights:${i}:1"
+                    aria-pressed="${ng ? "true" : "false"}">NG (non-graded)</button>
           </span></div>
         ${/* ROUND 6 — THE PERSON IS ON EVERY ROW, NG INCLUDED. NG removes the
              GRADE, never the person: a student does not launch alone on their
@@ -611,15 +643,16 @@ WA.renderStudent = async function (view, me, opts) {
              when nobody was in the other seat to score it. ROUND 8 gives that
              one label everywhere — "Authorised by". */ ""}
         <div class="rgrid2">
-          ${e.ng
+          ${ng
             ? `<div class="f"><span>&nbsp;</span><span class="hint">Non-graded solo — no grade is
                  recorded; who authorised it still is.</span></div>`
             : gradeF("solo_flights", i, "grade", e.grade, "Grade (%)", flown)}
           ${insF("solo_flights", i, "instructor", e.instructor,
                  "Authorised by" + (flown ? " *" : ""))}
         </div>
-        ${e.ng ? `<p class="hint">He may not have flown along — he authorised the solo, and the
-          squadron records who did.</p>` : ""}`;
+        ${ng ? `<p class="hint">${e.ng
+          ? "He may not have flown along — he authorised the solo, and the squadron records who did."
+          : esc(WA.SOLO_NG_DEFAULT_TIP)}</p>` : ""}`;
       },
       blank: () => ({ slot: null, sortie: "", date: "", ng: false, grade: null, instructor: "" }) },
 
@@ -801,9 +834,24 @@ WA.renderStudent = async function (view, me, opts) {
       </section>`;
   }
 
-  /* datalist: the instructor surnames behind every "with whom" box */
+  /* ── THE TWO LISTS BEHIND EVERY "WHO" BOX (round 9) ───────────────────────
+     dl-ins  — the ACTIVE instructors' surnames, exactly as the roster stores
+               them (upper case). It sits behind the airsickness instructor,
+               the FAIL and ALMOST GOOD instructor, the evaluation's evaluator
+               and the solo's "Authorised by".
+     dl-eval — the same surnames with the two APPOINTMENTS in front of them,
+               behind the CEF evaluator: a CEF is flown with a Squadron
+               Evaluator, so the appointment is as likely an answer as a name.
+     Both are <datalist>: a suggestion, never a rule. Every one of these boxes
+     is a plain text input and takes any name typed into it — the squadron
+     flies with people this database has never been told about, and a form
+     that refused their names would be a form nobody could finish. The FPC
+     evaluator is NOT here: round 6 closed that list to the two appointments
+     and it stays a <select>. */
+  const dlOpts = (list) => list.map((n) => `<option value="${esc(n)}"></option>`).join("");
   const DATALISTS =
-    `<datalist id="dl-ins">${INS.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>`;
+    `<datalist id="dl-ins">${dlOpts(INS)}</datalist>` +
+    `<datalist id="dl-eval">${dlOpts(WA.EVALUATOR_ROLES.concat(INS))}</datalist>`;
 
   view.innerHTML = `
     <div class="wrap" id="stu-form">
@@ -837,6 +885,14 @@ WA.renderStudent = async function (view, me, opts) {
       ${SECTIONS.map(secHTML).join("")}
     </div>
     ${DATALISTS}
+    ${/* ROUND 9 — THE SAVE THAT COMES TO YOU. The bar below is at the bottom
+         of a form several screens long; this one is fixed at the top right
+         and exists only while there is something to save. Same act, same
+         validation, same button — it calls the one save() below. */ ""}
+    <div class="savefloat" id="stu-float" hidden>
+      <span class="sf-hint">unsaved changes</span>
+      <button type="button" class="btn btn-primary" id="stu-float-save">Save${asCO ? " as CO" : ""}</button>
+    </div>
     <div class="savebar">
       ${asCO ? backBtn : ""}
       <button type="button" class="btn btn-primary" id="stu-save">Save${asCO ? " as CO" : ""}</button>
@@ -847,6 +903,15 @@ WA.renderStudent = async function (view, me, opts) {
   for (const k of WA.COUNTED) CO_BASE[k] = (S.data[k] || []).filter(WA.isCO).length;
   /* the FIRST render is a render like any other — the locks apply to it too */
   applyLocks();
+  /* the baseline every later edit is measured against: the record as it was
+     loaded, AFTER the fixed syllabus slots were filled in (they are part of
+     the form's idea of the record, and an untouched form must read clean) */
+  markSaved();
+  placeFloat();
+  if (!WA._stuFloatHooked) {
+    WA._stuFloatHooked = true;
+    window.addEventListener("resize", () => placeFloat());
+  }
 
   function redraw(secId) {
     $("rows-" + secId).innerHTML = rowsHTML(secById(secId));
@@ -949,11 +1014,45 @@ WA.renderStudent = async function (view, me, opts) {
     if (row) row.classList.toggle("is-empty", !flown);
     $("cnt-" + secId).textContent = cntHTML(secId);
   }
+  /* ── DIRTY IS A COMPARISON, NOT A FLAG (round 9) ──────────────────────────
+     The bottom save bar is at the bottom of a form that is several screens
+     long, so a student who changes something halfway down can leave without
+     ever seeing it. A SECOND Save therefore floats at the top right for
+     exactly as long as the form differs from what is stored — and "differs"
+     is measured, not assumed: every edit re-fingerprints the record
+     (WA.recordFingerprint) and compares it with the fingerprint of the last
+     save. Type a character and delete it again and the button LEAVES, because
+     the record really is the stored one again. `SAVED` is re-taken after every
+     successful save, from the record as the SERVER normalised it. (SAVED and
+     CLEAN_ST are declared at the top of this function — the first render
+     takes the baseline before this line is ever reached.) */
   function markDirty() {
-    S.dirty = true;
+    S.dirty = WA.recordFingerprint(S.data) !== SAVED;
     const st = $("stu-status");
     st.className = "st";
-    st.textContent = "Unsaved changes — press Save.";
+    st.textContent = S.dirty ? "Unsaved changes — press Save." : CLEAN_ST;
+    showFloat();
+  }
+  /* the floating Save is drawn once and shown or hidden — never re-created,
+     so it cannot steal the focus or flicker under a fast typist */
+  function showFloat() {
+    const f = document.getElementById("stu-float");
+    if (f) f.hidden = !S.dirty;
+  }
+  /* THE FORM NOW MATCHES THE RECORD — after a save, and at load */
+  function markSaved() {
+    SAVED = WA.recordFingerprint(S.data);
+    S.dirty = false;
+    showFloat();
+  }
+  /* the floating bar must clear the sticky top bar, whatever height it has
+     wrapped to on this screen — measured, because on a 375 px phone the top
+     bar is two rows tall and a hardcoded offset would sit on top of it */
+  function placeFloat() {
+    const f = document.getElementById("stu-float");
+    if (!f) return;
+    const top = document.querySelector(".topbar");
+    f.style.top = ((top ? top.getBoundingClientRect().height : 0) + 10) + "px";
   }
   /* an imported row stops being a leftover the moment it is complete — the
      flag is dropped in place, so typing is never interrupted by a redraw */
@@ -1109,9 +1208,20 @@ WA.renderStudent = async function (view, me, opts) {
     if (ng) {
       const [sec, i, on] = ng.dataset.ng.split(":");
       const e = S.data[sec][Number(i)];
-      e.ng = on === "1";
+      const want = on === "1";
       /* an explicit answer — the slot's opening default never overrides it */
       e._ngset = true;
+      e._ngwant = want;
+      /* ROUND 9 — ON AN UNFLOWN SLOT, NG IS AN ANSWER ABOUT A FLIGHT THAT HAS
+         NOT HAPPENED. Writing ng:true into an empty slot would make it FLOWN —
+         WA.slotEmpty counts ng — so a tap on the NG chip of a row nobody has
+         filled would add a solo on no date, refused by the save in words about
+         a date the student never meant to give. The answer is therefore
+         REMEMBERED (_ngwant) and the data takes it the moment the row stops
+         being empty (soloFirstFill). Everything else writes as before. */
+      if (!(want && sec === "solo_flights" && WA.slotEmpty("solo_flights", e))) {
+        e.ng = want;
+      }
       /* ROUND 6 — NG drops the GRADE and nothing else: the instructor who
          authorised the solo stays on the row, because he authorised it */
       if (e.ng) e.grade = null;
@@ -1143,13 +1253,29 @@ WA.renderStudent = async function (view, me, opts) {
      slot stops being empty — never to a row the owner has already answered,
      and never over an explicit tap on the Graded/NG chips. The chips stay
      live either way: this is a default, not a rule. */
+  /* WHAT THIS SOLO ROW'S GRADING SAYS — the answer if the chips were tapped,
+     the slot's opening default if they were not. ONE function, so the chips,
+     the grade box, the hint and the value the data eventually takes cannot
+     disagree with each other. */
+  function soloNG(e) {
+    if (e.ng) return true;                    /* answered, and already stored */
+    if (e._ngset) return !!e._ngwant;         /* answered on a row still empty */
+    return !!e.slot && WA.slotEmpty("solo_flights", e) && WA.soloDefaultNG(e.slot);
+  }
   function soloFirstFill(e, wasEmpty) {
-    if (!wasEmpty || !e.slot || e._ngset || e.ng) return false;
+    if (!wasEmpty || !e.slot || e.ng) return false;
     if (WA.slotEmpty("solo_flights", e)) return false;
-    if (!WA.soloDefaultNG(e.slot)) return false;
+    /* WHICH GRADING THE ROW WAS SHOWING WHEN IT WAS STILL EMPTY — deliberately
+       NOT soloNG(e), which is about the row as it is NOW: by the time this
+       runs the row has stopped being empty, and soloNG's default arm would
+       have said "no default here" for the very row that needs one. That
+       mismatch left the data at ng:false while the screen still drew NG. */
+    if (!(e._ngset ? !!e._ngwant : WA.soloDefaultNG(e.slot))) return false;
     e.ng = true;
     e.grade = null;
-    return true;
+    /* "default" only when nobody answered the chips first — the toast that
+       explains the NG has no business appearing after an explicit tap */
+    return e._ngset ? "answer" : "default";
   }
 
   /* one edit → drop the legacy flag if the row is now complete, mark dirty */
@@ -1170,17 +1296,11 @@ WA.renderStudent = async function (view, me, opts) {
   form.addEventListener("input", (ev) => {
     const el = ev.target;
 
-    /* multi-select: filter box (re-renders only the options) */
-    if (el.dataset.msq !== undefined) {
-      const [sec, i] = el.dataset.msq.split(":");
-      const e = S.data[sec][Number(i)];
-      e._q = el.value;
-      const box = form.querySelector(`[data-ms="${sec}:${i}"] .ms-add`);
-      if (box) box.innerHTML = itemOptions(e.category, e._q);
-      return;
-    }
     /* SYLLABUS ONLY (round 6): the only thing this select can add is a
-       catalogue item — there is no "Other…" option left to branch on */
+       catalogue item — there is no "Other…" option left to branch on.
+       ROUND 9 removed the filter box that used to sit above it, so the focus
+       after an add goes back to the select itself: the student's next act is
+       almost always the next item. */
     if (el.dataset.msadd !== undefined) {
       const [sec, i] = el.dataset.msadd.split(":");
       const e = S.data[sec][Number(i)];
@@ -1191,7 +1311,7 @@ WA.renderStudent = async function (view, me, opts) {
       if (!e.items.includes(v)) e.items.push(v);
       const box = redrawMS(sec, Number(i));
       if (box) {
-        const focusOn = box.querySelector(".ms-q");
+        const focusOn = box.querySelector(".ms-add");
         if (focusOn) focusOn.focus();
       }
       afterEdit(sec, e, row);
@@ -1218,16 +1338,19 @@ WA.renderStudent = async function (view, me, opts) {
         } else {
           entry["_o_" + key] = false;
           entry[key] = el.value || null;
-          if (soloFirstFill(entry, soloWasEmpty)) {
+          if (soloFirstFill(entry, soloWasEmpty) === "default") {
             toast("Contact solos are recorded NG — switch the row to Graded % if this one was graded");
           }
           redrawRow(sec, i, `[data-field="@${key}"]`);
         }
       } else {
         entry[key] = el.value;
-        if (soloFirstFill(entry, soloWasEmpty)) {
+        const ngFill = soloFirstFill(entry, soloWasEmpty);
+        if (ngFill) {
           redrawRow(sec, i, `[data-field="~${key}"]`);
-          toast("Contact solos are recorded NG — switch the row to Graded % if this one was graded");
+          if (ngFill === "default") {
+            toast("Contact solos are recorded NG — switch the row to Graded % if this one was graded");
+          }
         }
         refreshSlotBadge(sec, i);
         refreshCodeNote(sec, i, key);
@@ -1262,7 +1385,6 @@ WA.renderStudent = async function (view, me, opts) {
        the change — keeping it is exactly the impossible pair this round
        removes — so it is dropped, out loud. */
     if (f === "category") {
-      entry._q = "";
       const code = WA.normCode(entry.flight_code);
       if (code && WA.codeTrack(code) !== entry.category) {
         entry.flight_code = ""; entry._o_flight_code = false;
@@ -1299,7 +1421,9 @@ WA.renderStudent = async function (view, me, opts) {
       const at0 = document.activeElement;
       const back0 = at0 && at0.dataset ? at0.dataset.field : null;
       redrawRow(sec, i, back0 ? `[data-field="${back0}"]` : null);
-      toast("Contact solos are recorded NG — switch the row to Graded % if this one was graded");
+      if (ngDefaulted === "default") {
+        toast("Contact solos are recorded NG — switch the row to Graded % if this one was graded");
+      }
     } else if (f === "note" && sec === "nfs") {
       /* the note IS the cause when the reason is "Other" — the row's own
          completeness note has to follow what is typed into it */
@@ -1551,7 +1675,12 @@ WA.renderStudent = async function (view, me, opts) {
     return { clean, rows, problems, leftovers };
   }
 
-  $("stu-save").addEventListener("click", async () => {
+  /* ── THE ONE SAVE (round 9) ───────────────────────────────────────────────
+     Two buttons, one act: the bar at the bottom and the floating one at the
+     top right both land here, so the validation, the stamping and the receipt
+     can never differ between them. Both are disabled while the call is in
+     flight — a double-tap on a phone must not send the record twice. */
+  async function save() {
     const st = $("stu-status");
     const { clean, rows, problems, leftovers } = buildPayload();
     if (problems.length) {
@@ -1560,8 +1689,8 @@ WA.renderStudent = async function (view, me, opts) {
       toast(problems[0], true);
       return;
     }
-    const btn = $("stu-save");
-    btn.disabled = true;
+    const btns = [$("stu-save"), document.getElementById("stu-float-save")].filter(Boolean);
+    btns.forEach((b) => { b.disabled = true; });
     st.className = "st";
     st.textContent = "Saving…";
     try {
@@ -1571,7 +1700,6 @@ WA.renderStudent = async function (view, me, opts) {
         : await rpc("save_student_record", { p_token: WA.token, p_payload: clean });
       S.lastUpdate = res.last_update;
       S.enteredBy = res.entered_by || null;
-      S.dirty = false;
       /* THE STAMPS, as the server decided them (round 4b). A CO save is diffed
          against the stored record — only the entries he added or changed get
          the tag — so the client can no longer work them out from the payload
@@ -1610,12 +1738,18 @@ WA.renderStudent = async function (view, me, opts) {
       const coTot = (typeof res.entries === "number")
         ? res.entries
         : SECTIONS.reduce((a, sec) => a + S.data[sec.id].length, 0);
+      /* THE FORM NOW MATCHES THE RECORD — and it matches the record as the
+         SERVER normalised it, which is why this is taken AFTER the adoption
+         loop above and not before it: a value the server trimmed would
+         otherwise read as an edit and bring the floating Save straight back. */
+      markSaved();
       st.className = "st ok";
-      st.textContent = "Saved ✓ " + fmtDT(S.lastUpdate) +
+      CLEAN_ST = "Saved ✓ " + fmtDT(S.lastUpdate) +
         (asCO ? " — " + coN + " of " + coTot + " entr" + (coTot === 1 ? "y" : "ies") +
           " tagged as entered by CO" : "") +
         (leftovers.length ? " — " + leftovers.length + " earlier entr" +
           (leftovers.length === 1 ? "y is" : "ies are") + " still incomplete" : "");
+      st.textContent = CLEAN_ST;
       toast(leftovers.length
         ? "Record saved — " + leftovers.length + " earlier entries still need a detail"
         : (asCO ? "Record saved — " + coN + " entr" + (coN === 1 ? "y" : "ies") +
@@ -1625,8 +1759,13 @@ WA.renderStudent = async function (view, me, opts) {
       st.textContent = "Save failed: " + e.message;
       toast("Save failed: " + e.message, true);
     }
-    btn.disabled = false;
-  });
+    btns.forEach((b) => { b.disabled = false; });
+    /* a failed save leaves the record unsaved, and the floating button must
+       still be there to try again — the fingerprint says so either way */
+    showFloat();
+  }
+  $("stu-save").addEventListener("click", save);
+  $("stu-float-save").addEventListener("click", save);
 
   WA._stuState = S;
   if (!WA._stuUnloadHooked) {

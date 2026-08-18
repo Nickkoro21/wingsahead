@@ -1043,6 +1043,44 @@ WA.migrateRecord = function (rec) {
 WA.COUNTED = ["nfs", "sms", "fail", "almost_good", "airsickness",
               "evaluations", "solo_flights", "fpc", "cef"];
 
+/* ── IS THIS RECORD DIFFERENT FROM THAT ONE? (round 9) ──────────────────────
+   One string per record, so "has anything actually changed since the last
+   save?" is a string comparison and not a flag somebody has to remember to
+   lower. The floating Save of the student form rides on exactly this: it
+   appears when the fingerprint moves away from the saved one and leaves when
+   it comes back — typing a character and deleting it again ends where it
+   started, which a set-once dirty flag could never see.
+   WHAT IS DELIBERATELY NOT IN IT:
+     · keys prefixed "_" — the picker's _o_x memory and every other UI-only
+       crumb. REVEALING a free-text box is not an edit of the record.
+     · the DIFFERENCE between null, undefined and "" — an empty box and an
+       absent field are the same absence, and typing into a box and clearing
+       it again must land back on clean.
+     · leading / trailing whitespace — the server normalises it away
+       (wa.norm_line), so a stray space changes nothing that gets stored.
+   Key order is sorted, so two objects built in different orders — a stored
+   entry and one the form rebuilt — still fingerprint alike. */
+WA.fpValue = function (v) {
+  if (v === null || v === undefined) return null;
+  if (Array.isArray(v)) return v.map(WA.fpValue);
+  if (typeof v === "string") { const s = v.trim(); return s === "" ? null : s; }
+  if (typeof v === "object") return WA.fpEntry(v);
+  return v;
+};
+WA.fpEntry = function (e) {
+  const out = {};
+  for (const k of Object.keys(e || {}).sort()) {
+    if (k.charAt(0) === "_") continue;
+    out[k] = WA.fpValue(e[k]);
+  }
+  return out;
+};
+WA.recordFingerprint = function (rec) {
+  const r = rec || {};
+  return JSON.stringify(WA.COUNTED.map((k) =>
+    (Array.isArray(r[k]) ? r[k] : []).map(WA.fpEntry)));
+};
+
 WA.recStats = function (rec) {
   const r = rec || {};
   /* ROUND 5 — FILLED SLOTS ONLY. The solo and evaluation sections always
@@ -1262,13 +1300,35 @@ WA.legacyItems = function (rec) {
   return out;
 };
 
-/* instructor surnames for the pickers — one RPC per session, cached.
-   The RPC exposes surnames and nothing else (db/schema.sql). */
+/* ── THE INSTRUCTOR PICKER'S LIST, CLIENT SIDE (round 9) ────────────────────
+   The server sends a JSON array of surnames and nothing else; this is the one
+   place that turns it into the list the form draws. It takes STRINGS only —
+   an object that ever appeared in that array would be dropped here rather
+   than stringified into "[object Object]" beside real names — trims them,
+   drops the empties, de-duplicates and sorts. Whatever the transport, the
+   form sees the same shape.
+   MIRROR: db/schema.sql → wa.instructor_surnames(). */
+WA.insNames = function (raw) {
+  const seen = Object.create(null), out = [];
+  for (const x of (Array.isArray(raw) ? raw : [])) {
+    if (typeof x !== "string") continue;
+    const n = x.trim();
+    if (!n || seen[n]) continue;
+    seen[n] = true;
+    out.push(n);
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+};
+
+/* THE STANDALONE QUESTION — the round-8 path, kept as the FALLBACK for an
+   instance whose schema does not yet fold the list into the form payload
+   (get_student_form.instructors). One RPC per session, cached. The RPC
+   exposes surnames and nothing else (db/schema.sql). */
 WA.instructorNames = async function () {
   if (WA._insNames) return WA._insNames;
   try {
     const r = await rpc("list_instructor_names", { p_token: WA.token });
-    WA._insNames = Array.isArray(r) ? r.filter((x) => typeof x === "string") : [];
+    WA._insNames = WA.insNames(r);
   } catch (e) {
     WA._insNames = [];      /* free text still works — the picker is a comfort */
   }

@@ -6,6 +6,7 @@ you paste into the Supabase SQL editor.
 
     python tools/gen-people-import.py <roster.json> [-o people-import.sql]
                                       [--base-url https://<user>.github.io/wingsahead]
+                                      [--classes "98B HAF"]
 
 ═══ THE PRIVACY GATE — READ THIS FIRST ═══════════════════════════════════════
 The roster is the squadron's real personnel list. It lives OUTSIDE this repo
@@ -37,6 +38,32 @@ WHAT THE GENERATED SQL DOES
     the database — the CO's copy-paste distribution sheet.
 
 The SQL is idempotent: run it as many times as you like.
+
+═══ --classes : WHO GOES LIVE FIRST ══════════════════════════════════════════
+The squadron does not start with everybody. The first class to use this app is
+one class, and the rest join when that one has proved it — so the import can be
+narrowed to the classes that are actually going live:
+
+    --classes "98B HAF"                 one class
+    --classes "98B HAF" --classes 99A   repeatable
+    --classes "98B HAF,99A"             or comma-separated, same thing
+
+WHAT IT DOES AND DOES NOT DO
+  · It filters STUDENTS ONLY. Every instructor in the roster is imported every
+    time: an instructor flies with whoever is on the programme, the student
+    form offers their surnames as its picker, and a squadron half-imported
+    would show a student a half-list of the people they fly with.
+  · WITHOUT the flag NOTHING changes: everybody in the roster is imported,
+    exactly as before.
+  · Matching is on the roster's `class` field, case- and space-insensitive
+    ("98b haf" finds "98B HAF"). A class nobody is in is a TYPO and stops the
+    run — a silent zero-student import is the one failure this script must
+    never hand somebody at launch.
+  · It filters what the SQL WRITES, never what is already in the database:
+    students of another class already imported are left exactly as they are
+    (as is anybody the roster does not mention). Widening the scope later is
+    just another run with more classes named.
+══════════════════════════════════════════════════════════════════════════════
 """
 
 import argparse
@@ -91,6 +118,53 @@ def person_rows(roster):
     return out
 
 
+def norm_class(v):
+    """Class names are typed by people: '98b  haf' and '98B HAF' are one class."""
+    return " ".join(str(v or "").split()).upper()
+
+
+def wanted_classes(chunks):
+    """--classes accepts the flag repeatedly AND commas inside one value; both
+    end up here as one set of normalised names. Empty set = no filter."""
+    out = set()
+    for chunk in chunks or []:
+        for part in str(chunk).split(","):
+            c = norm_class(part)
+            if c:
+                out.add(c)
+    return out
+
+
+def filter_students(rows, wanted):
+    """Keep every instructor; keep the students of the named classes only.
+
+    Returns (kept_rows, dropped_count, per_class_counts). A named class that
+    matches nobody raises: at launch, a typo that silently imports zero
+    students is worse than any error message."""
+    kept, dropped = [], 0
+    found = {c: 0 for c in wanted}
+    for role, r in rows:
+        if role != "student":
+            kept.append((role, r))
+            continue
+        c = norm_class(r.get("class"))
+        if c in wanted:
+            found[c] += 1
+            kept.append((role, r))
+        else:
+            dropped += 1
+    empty = sorted(c for c, n in found.items() if n == 0)
+    if empty:
+        have = sorted({norm_class(r.get("class")) for role, r in rows
+                       if role == "student" and norm_class(r.get("class"))})
+        raise SystemExit(
+            "--classes: no student is in %s.\n"
+            "The roster's student classes are: %s\n"
+            "Nothing was written — fix the spelling and run it again."
+            % (", ".join(repr(c) for c in empty), ", ".join(have) or "(none)"))
+    return kept, dropped, found
+
+
 def value_tuple(role, r):
     oid = str(r.get("oid") or "").strip()
     if not oid:
@@ -128,6 +202,9 @@ HEADER = """\
 -- call_sign, country, test_pilot. Run schema.sql first if this errors.
 --
 -- {n} person(s): {counts}
+-- SCOPE: {scope}. Students of any other class are NOT in this file — anybody
+-- already in the database stays exactly as they are, and widening the scope
+-- later is simply another run with more classes named.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 begin;
@@ -211,6 +288,11 @@ def main(argv=None):
                     help="output .sql (default: people-import.sql next to the roster)")
     ap.add_argument("--base-url", default="<PAGES-URL>",
                     help="the app's base URL, used to print the personal links")
+    ap.add_argument("--classes", action="append", metavar="CLASS[,CLASS…]",
+                    help="import the STUDENTS of these classes only (repeatable, "
+                         "commas allowed, case-insensitive). Instructors are "
+                         "always imported. Omit it to import everybody — the "
+                         "default, unchanged. Example: --classes \"98B HAF\"")
     ap.add_argument("--force-unsafe-path", action="store_true",
                     help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
@@ -238,6 +320,22 @@ def main(argv=None):
     rows = person_rows(roster)
     if not rows:
         raise SystemExit("roster: no instructors and no students — nothing to import")
+
+    # LAUNCH SCOPE (round 9) — students of the named classes only; instructors
+    # always. No flag, no filter: the run is exactly what it was before.
+    wanted = wanted_classes(a.classes)
+    scope = "every class"
+    if wanted:
+        rows, dropped, per_class = filter_students(rows, wanted)
+        scope = "classes " + ", ".join(
+            "%s (%d student%s)" % (c, per_class[c], "" if per_class[c] == 1 else "s")
+            for c in sorted(wanted))
+        if not any(role == "student" for role, _ in rows):
+            raise SystemExit("--classes: the filter left no students at all — "
+                             "nothing was written")
+        print("class filter: %s — %d other student(s) left out of this import"
+              % (scope, dropped))
+
     values = ",\n".join(value_tuple(role, r) for role, r in rows)
     role_pairs = ",\n".join("    (%s, %s)" % (q(r.get("oid")), q(role))
                             for role, r in rows)
@@ -246,11 +344,12 @@ def main(argv=None):
         sum(1 for role, _ in rows if role == "student"))
 
     sql = HEADER.format(when=date.today().isoformat(), src=src, n=len(rows),
-                        counts=counts, values=values, role_pairs=role_pairs,
+                        counts=counts, scope=scope, values=values,
+                        role_pairs=role_pairs,
                         base=a.base_url.rstrip("/").replace("'", "''"))
     with open(out, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(sql)
-    print("wrote %s — %s" % (out, counts))
+    print("wrote %s — %s (%s)" % (out, counts, scope))
     print("PRIVATE FILE: real names. Do not commit it, do not paste it anywhere public.")
     return 0
 

@@ -1963,6 +1963,26 @@ language sql stable as $$
       where s.role = 'student' and s.active), '[]'::jsonb))
 $$;
 
+-- ── THE ACTIVE INSTRUCTORS, SURNAMES ONLY (round 9) ────────────────────────
+-- Every box on the student form that asks WHO — the airsickness instructor,
+-- the FAIL / ALMOST GOOD instructor, the solo's "Authorised by", the
+-- evaluation's evaluator, the CEF's — is a typed name with a list behind it.
+-- The list is THIS, and it is deliberately the whole of what leaves the
+-- database for it: a JSON ARRAY OF SURNAME STRINGS, sorted, distinct, active
+-- instructors only. No id, no token, no rank, no external_oid, no duty — a
+-- student may legitimately see who their instructors are, and nothing beyond
+-- that follows the surname out. One definition, three callers
+-- (get_student_form, admin_get_student_form and the standalone
+-- list_instructor_names), so the picker cannot drift between them.
+create or replace function wa.instructor_surnames() returns jsonb
+language sql stable as $$
+  select coalesce((
+    select jsonb_agg(distinct p.last_name order by p.last_name)
+    from public.people p
+    where p.role = 'instructor' and p.active
+      and p.last_name is not null and btrim(p.last_name) <> ''), '[]'::jsonb)
+$$;
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- PUBLIC RPC — the only API surface
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -1997,6 +2017,11 @@ begin
   return jsonb_build_object(
     'me', wa.person_json(v),
     'data', rec,
+    -- ROUND 9 — THE FORM ARRIVES WITH ITS OWN PICKER. The instructor list is
+    -- part of the form's payload, not a second question the client has to
+    -- remember to ask: one round trip, and a form that can never render its
+    -- name boxes without the names. Surnames only (wa.instructor_surnames).
+    'instructors', wa.instructor_surnames(),
     'entered_by', wa.record_stamp(rec, r.entered_by),
     'co_entries', wa.co_entry_count(rec),
     'entries_total', wa.entry_count(rec),
@@ -2006,16 +2031,15 @@ end $$;
 -- the squadron's active instructors, SURNAMES ONLY — the picker behind
 -- "with whom" on FAIL / ALMOST GOOD / airsickness / evaluation rows.
 -- Readable by ANY valid token (students included) and it exposes nothing
--- else: no ids, no ranks, no duties, no tokens.
+-- else: no ids, no ranks, no duties, no tokens. Round 9 folded the same list
+-- into the two get_*_student_form payloads; this call stays as the standalone
+-- question, over the SAME wa.instructor_surnames().
 create or replace function public.list_instructor_names(p_token text) returns jsonb
 language plpgsql stable security definer set search_path = public, wa, pg_temp as $$
 declare v public.people;
 begin
   v := wa.auth(p_token);
-  return coalesce((
-    select jsonb_agg(distinct p.last_name order by p.last_name)
-    from public.people p
-    where p.role = 'instructor' and p.active and p.last_name is not null), '[]'::jsonb);
+  return wa.instructor_surnames();
 end $$;
 
 -- the OWNER saving (round 8): their own entries stay theirs, and every entry
@@ -2250,6 +2274,8 @@ begin
   return jsonb_build_object(
     'me', wa.person_json(s),
     'data', rec,
+    -- the CO fills in the SAME form and gets the SAME picker (round 9)
+    'instructors', wa.instructor_surnames(),
     'entered_by', wa.record_stamp(rec, r.entered_by),
     'co_entries', wa.co_entry_count(rec),
     'entries_total', wa.entry_count(rec),

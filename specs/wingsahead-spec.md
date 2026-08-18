@@ -102,9 +102,15 @@ carried with `legacy:true`; the form highlights it, says exactly what is
 missing, and still saves the rest. The flag can only be USED UP: a save may
 never contain more legacy rows in a section than the stored record had.
 
-**RPC `list_instructor_names(token)`** — any valid token (students included)
-may read the ACTIVE INSTRUCTORS' SURNAMES, and nothing else, to fill the
-instructor pickers. Free text remains accepted everywhere.
+**THE ACTIVE INSTRUCTORS' SURNAMES** — `wa.instructor_surnames()` is the one
+function that produces them: a JSON array of strings, sorted, distinct, active
+instructors, and **nothing else** (no id, no token, no rank, no duty, no
+`external_oid`). Any valid token may read them, students included — a student
+may legitimately see who their instructors are. Round 9 folds the same array
+into the form payload as `get_student_form(...).instructors` (and its admin
+twin), so the form arrives with its own picker; **RPC
+`list_instructor_names(token)`** stays as the standalone question over the same
+function. Free text remains accepted in every box they fill (§4i·1).
 
 **proposals** (instructor × student, upsert-once-per-pair):
 - ranks: {fighters: 1|2|3|null, helicopters: …, transport_ff: …} — **ranking,
@@ -638,15 +644,15 @@ re-verifies the table after any edit.
 | 2 | SMS · Entrance condition | `pickerF` → `smsReasonF` · `WA.SMS_REASONS` | the 6 thresholds of 3-01 ΚΕΦ.2 §32β + the **Squadron CO / DO judgement** opener (7) | **YES — the regulation's own** discretion clause (a `note` is then required) | — |
 | 3 | FAIL / ALMOST GOOD · Category | `catF` · `WA_ITEMS.categories` | Contact · Instrument · Formation · Navigation (+ the legacy `other` placeholder, shown only while a row still carries it) | NO | **syllabus vocabulary** — there is no fifth track; the placeholder must be resolved, not extended |
 | 4 | FAIL / ALMOST GOOD · Flight code | `pickerF` → `codeF` · `WA.sorties(cat)` | the sorties of **that track only** (disabled until the track is chosen) | **YES** — "Other… (type the code)" | — |
-| 5 | **FAIL / ALMOST GOOD · Items** | `select.ms-add[data-msadd]` · `itemOptions()` over `WA.itemCat(cat).items` ⇄ `wa.item_names(cat)` | the printed gradesheet items of that track | **NO — ✱ RULED EXCEPTION** | **round 6**: an item nobody else can have is an item nobody can compare, count across the class, or look up in the remarks bank. Client and server share one list; a legacy typed string is greyed *legacy* and blocks the save until replaced (§4e·2) |
+| 5 | **FAIL / ALMOST GOOD · Items** | `select.ms-add[data-msadd]` · `itemOptions()` over `WA.itemCat(cat).items` ⇄ `wa.item_names(cat)` | the printed gradesheet items of that track, in printed order (round 9 removed the free-text *filter* box that used to sit above this select — §4i·2) | **NO — ✱ RULED EXCEPTION** | **round 6**: an item nobody else can have is an item nobody can compare, count across the class, or look up in the remarks bank. Client and server share one list; a legacy typed string is greyed *legacy* and blocks the save until replaced (§4e·2) |
 | 6 | FPC · Due to which stage flight | `pickerF` → `triggerF` · `TRIGGER_GROUPS` | every sortie of the stage, grouped by the four tracks, checkrides included | **YES** — "Other… (type the code)" | — |
 | 7 | CEF · Due to which stage flight | `pickerF` → `triggerF` · `TRIGGER_GROUPS` | as above | **YES** | — |
 | 8 | AIRSICKNESS · Flight | `pickerF` → `airFlightF` · `TRIGGER_GROUPS` | as above (required since round 6b) | **YES** | — |
 | 9 | Solo · Sortie flown solo | `pickerF` → `soloSortieF` · `slot.codes` | the candidate sorties the syllabus names for **that** solo slot | **YES** — reality is not bound by the candidate list | — |
-| 10 | CEF · Evaluator | `pickerF` → `evaluatorF` · `WA.EVALUATOR_ROLES` + `INS` | DO · Squadron CO, then the squadron's instructor surnames | **YES** — free text; a CEF is flown with a Squadron Evaluator, so the list stays open | — |
+| 10 | CEF · Evaluator | `input[list=dl-eval]` · `evaluatorF` → `textF` · `WA.EVALUATOR_ROLES` + `INS` (round 9; was `pickerF`) | DO · Squadron CO, then the ACTIVE instructor surnames from the form payload | **YES** — the input is free text; a CEF is flown with a Squadron Evaluator, so the list stays open | — |
 | 11 | **FPC · Evaluator** | `pickerF` → `fpcEvaluatorF` · `WA.FPC_EVALUATORS` | Squadron CO · DO — **exactly two** | **NO — ✱ RULED EXCEPTION** | **round 6**: an FPC is conducted by the Squadron CO or the DO. A third name would make the record say something the regulation does not allow. A legacy value is named under the box and refused until it is resolved to one of the two |
 | 12 | **Evaluations · which checkride** | `evalF` · `WA.EVALUATIONS` grouped by `WA.EVAL_CATS` | the **eight** stage checkrides in syllabus order — C4590 · C4790 · C5090 · C5490 · I4490 · I4890 · F4690 · N4690 | **NO — ✱ RULED EXCEPTION** | the slots are **fixed**: eight rows, no add, no remove. A ninth checkride does not exist in the stage; a progress check flight is an **FPC**, which has its own section |
-| 13 | Instructor / "Authorised by" boxes | `input[list=dl-ins]` · `insF` → `textF` | the squadron's instructor surnames | **YES** — the input is free text throughout; the datalist is quick-pick | — |
+| 13 | Instructor / evaluator / "Authorised by" boxes | `input[list=dl-ins]` · `insF` → `textF` (airsickness · FAIL · ALMOST GOOD · evaluation "With" · solo "Authorised by") | the ACTIVE instructor surnames, carried in the form payload as `instructors` (§4i·1) | **YES** — the input is free text throughout; the datalist is quick-pick | — |
 | 14 | Admin · Compare on this evaluation | `select#evalsel` · `WA.EVALUATIONS` | the same eight | **NO — ✱ same exception as #12** | a chart axis over recorded checkrides — a free value would select nothing |
 | 15 | Admin · Person — Duty | `select#pm-duty` (admin.js) | Squadron Commander · DO · Flight Commander · Evaluator · Instructor | NO | **closed by construction** — Postgres enum `wa.duty`; extending it is one line in `db/schema.sql` and `gen-people-import.py` fails loudly on an unknown value |
 | 16 | Admin · Person — Leadership | `select#pm-leadership` | Wingman · 2-ship · 4-ship · Mission Commander | NO | **closed by construction** — Postgres enum (as above) |
@@ -670,7 +676,132 @@ did not foresee is an **additional solo**, the one solo row that can be added.
 at all** — the shared library defines vocabularies but renders no form control,
 and the instructor board is tap-to-place (its "positions" are buttons, and the
 theme gallery's cards are `role="option"` buttons, not a select). That is the
-whole surface: **19 dropdown fields, 2 datalists, 4 ruled exceptions.**
+whole surface: **19 dropdown fields, 3 datalists, 4 ruled exceptions.**
+(Round 9's form polish moved #10 from a `<select>` to a datalist input and
+added `dl-eval`; the field count is unchanged, the ruled exceptions are
+unchanged, and #5 lost the free-text filter box that used to sit above it —
+see §4i.)
+
+## 4i. Round 9 — FORM POLISH FOR THE REAL-STUDENT ERA (2026-08-18)
+
+The database now holds the squadron's real people, so the forms were reviewed
+against real use for the first time. Four rulings, recorded verbatim as they
+were given, with what each one means in the code.
+
+### 1. The instructor boxes get a list — and keep free text
+
+> «Στα instructor, τωρα που ξερουμε τους περισσοτερους να εχουμε dropdown, αλλα
+> και να μπορει να γραψει ελευθερο κειμενο (ονομα).»
+
+**Every box on the student form that asks WHO** is a text input with a
+`<datalist>` of the ACTIVE instructors' surnames behind it, and every one of
+them still takes **any** name typed into it. The boxes, enumerated from
+`app/student.js`: the **airsickness** instructor, the **FAIL** instructor, the
+**ALMOST GOOD** instructor, the **evaluation** evaluator ("With"), the solo's
+**"Authorised by"**, and the **CEF evaluator**. The CEF box changed shape for
+this: it was a `<select>` whose escape was a second step ("Other…" reveals a
+box, then type), which for a list that was never closed is two acts where the
+squadron does one — it is now one input behind `dl-eval` (the two appointments,
+then the surnames). **The FPC evaluator is deliberately not in this list**:
+round 6 closed it to Squadron CO / DO and it stays a `<select>` of exactly two.
+
+**THE DATA PATH — the form arrives with its own picker.** `get_student_form`
+and `admin_get_student_form` now carry an `instructors` key, built by the one
+function `wa.instructor_surnames()`, which `list_instructor_names()` also calls
+(the standalone RPC stays as the fallback for an older schema). One round trip
+instead of two, and a form that cannot render its name boxes before the names
+arrive. **Surnames only, and that is the whole of it**: a JSON array of
+strings — sorted, distinct, active instructors — with no id, no token, no rank,
+no duty and no `external_oid`. Students may legitimately see who their
+instructors are; nothing beyond the surname follows it out. The shape, with
+fake names:
+
+```json
+"instructors": ["ANDREOU", "BEKAS", "CHRISTOU", "DELIS", "EFTHIMIOU"]
+```
+
+Client mirror: `WA.insNames()` normalises whatever arrives (strings only,
+trimmed, de-duplicated, sorted) and `student.js` builds both datalists from it.
+
+### 2. The item filter box is gone
+
+> «Βγαλε το filter απο τα item γιατι θα μπερδευει, παρα θα βοηθα.»
+
+The FAIL / ALMOST GOOD rows had a free-text "filter … items" box above the
+"— add an item —" select. Two boxes side by side read as two ways to enter an
+item, and the one thing typing into the filter could never do was put an item
+on the row. It is removed — from the markup, from the input handler, from the
+entry's `_q` state and from `styles.css`. What remains is the select (the
+syllabus list of the chosen track, in printed order) and the chips, which is
+the round-6 closed ruling unchanged. The browser's own type-to-jump still finds
+a name inside an open select, and focus returns to the select after each add.
+
+### 3. A floating Save appears the moment the form is dirty
+
+> «Μολις κανει αλλαγες το save να εμφανιζεται πανω δεξια γιατι αλλιως μπορει να
+> μην το προσεξει καποιος.»
+
+The form is several screens long and its Save bar is at the bottom, so a change
+made halfway down could be left unsaved without the student ever seeing the
+button. A **second Save** is now `position: fixed` at the **top right**, with a
+small "unsaved changes" hint, for exactly as long as the form differs from what
+is stored. The bottom bar stays; both buttons call the one `save()`, so the
+validation, the stamping and the receipt cannot differ between them.
+
+**Dirty is measured, not assumed.** `WA.recordFingerprint()` serialises the
+record — sorted keys, UI-only `_`-prefixed keys skipped, `null`/`undefined`/`""`
+folded together, strings trimmed — and every edit compares it against the
+fingerprint of the last save. So: type a character and delete it again and the
+button **leaves**; add a trailing space and it never appears, because the
+server normalises that away anyway. The baseline is re-taken after each
+successful save **from the record as the server normalised it**, which is why
+it is taken after the adoption loop and not before. The pill uses palette
+tokens (correct in all eight palettes, light and dark), its `top` is measured
+from the sticky top bar at render and on resize so it never sits on it at
+375 px, and it is hidden in print.
+
+### 4. Every contact solo opens NG — not just the first one
+
+> «Τα contact solo να εχουν προεπιλογη non graded.»
+
+Round 8 gave the contact (adaptation) solos their NG default **in the data**,
+applied the first time a slot stopped being empty. On screen, every unflown
+contact row still showed "Graded %" lit with a grade box beside it, so the
+student met the wrong default before the right one and five of the eight rows
+invited a number nobody can award. **The row now opens in the state it will
+take**: all five CONTACT slots (C4790-91-S1, C4801-04-S1, C4901-05-S1,
+C5201-04-S1, C5301-04-S1) draw NG with the grade box gone; the three FORMATION
+slots (F4301-06-S1/-S2, F4501-03-S1) draw Graded, unchanged.
+
+It stays a **default**, not a rule — one tap on "Graded %" answers the row and
+is never overridden — and it **writes nothing**: `WA.slotEmpty()` counts `ng`,
+so `ng: true` on an unflown slot would turn it into a solo flown on no date.
+The data therefore takes the value only when the row stops being empty
+(`soloFirstFill`), and a tap on the already-lit NG chip of an empty row is
+recorded in the UI (`_ngwant`) and nowhere else. **Existing saved entries are
+untouched**: a stored row carries its own `ng` and the default never looks at it.
+
+### LAUNCH SCOPE — 98B first
+
+> «Αρχικα δουλευουμε μονο για 98Β»
+
+The squadron does not start with everybody. `tools/gen-people-import.py` gains
+`--classes` (repeatable, commas allowed, case- and space-insensitive):
+
+```
+python tools/gen-people-import.py <roster.json> --classes "98B HAF"
+```
+
+It filters **students only** — every instructor is imported every time, because
+an instructor flies with whoever is on the programme and the student form's
+picker is built from that list. **Without the flag nothing changes**: everybody
+in the roster is imported, exactly as before. A class nobody is in **stops the
+run** and prints the roster's actual class names — at launch, a typo that
+silently imports zero students is the one failure the script must never hand
+somebody. It filters what the SQL **writes**, never what the database already
+holds: students of another class already imported are left exactly as they are,
+and widening the scope later is simply another run with more classes named. The
+generated file states its scope in its own header.
 
 ## 4. Screens
 
