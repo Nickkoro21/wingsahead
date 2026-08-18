@@ -533,6 +533,20 @@ re-stamps it admin — which locks it.** The record-level derived stamp follows:
 entries cannot settle (a record the CO opened that nobody has filled) stays on
 the CO path, because an empty record locks nothing.
 
+**ΑΠΟΦΑΝΣΗ 2026-08-18: το owner-reclaim ΠΑΡΑΜΕΝΕΙ στις προτάσεις — η CO-υπεροχή
+ισχύει μόνο στα στοιχεία μαθητών.** Η αντιστροφή υπεροχής παραπάνω κλειδώνει
+**entries μέσα σε student records**, όπου η γραμμή του Διοικητή είναι διόρθωση
+στοιχείου. Μια **πρόταση** (`proposals`, instructor × student) είναι κάτι άλλο:
+είναι η **κρίση του συγκεκριμένου εκπαιδευτή** για τον μαθητή του, μία γραμμή
+που φέρει το όνομά του. Ο CO που τη γράφει «εκ μέρους του» δεν διορθώνει
+στοιχείο — καταγράφει γνώμη· και ο εκπαιδευτής **πρέπει** να μπορεί να την
+ξαναπάρει και να τη διατυπώσει όπως πραγματικά κρίνει. Άρα το
+`admin_save_proposal` εξακολουθεί να σφραγίζει `entered_by:'admin'` (διαφάνεια),
+αλλά η **επόμενη αποθήκευση από τον κάτοχο-εκπαιδευτή την ανακτά** — καμία
+κλειδαριά, κανένα refusal. **Καμία αλλαγή κώδικα σε αυτόν τον γύρο**: η γραμμή
+καταγράφει ότι η υπάρχουσα συμπεριφορά είναι **η θελημένη** και δεν πρέπει να
+«διορθωθεί» σε επόμενο πέρασμα ευθυγράμμισης με το §4f.
+
 ## 4g. Round 9 (2026-08-14) — ONE ROSTER FOR EVERY FDMS APP
 
 Until now each app kept its own copy of the squadron. Round 9 makes the
