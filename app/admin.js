@@ -1587,13 +1587,17 @@ WA.renderAdmin = async function (view, me) {
      stored number — a fractional legacy grade is never rounded away here. */
   function exportEntriesCSV() {
     const rows = [["Student", "Class", "Section", "Date", "Detail", "Flight code",
-      "Items", "Item count", "With whom / authorised by", "Grade", "To correct", "Entered by"]];
-    const add = (s, sec, e, detail, code, items, who, grade, date) =>
+      "Items", "Item count", "With whom / authorised by", "Grade", "To correct", "Entered by", "Counts"]];
+    /* "Counts" — round 11 residual (verify item 10): a re-flown checkride
+       exports BOTH attempts; this column says which one the numbers use,
+       decided by the same helper as every other surface. Non-evaluation rows
+       leave it empty. */
+    const add = (s, sec, e, detail, code, items, who, grade, date, counts) =>
       rows.push([WA.personName(s.person, true), s.person.class, WA.secLabel(sec),
         fmtD(date === undefined ? e.date : date), detail, code || "",
         items || "", WA.itemsN(e) || "", who || "",
         WA.pctRaw(grade),
-        e.legacy ? "yes" : "", WA.coWord(e)]);
+        e.legacy ? "yes" : "", WA.coWord(e), counts || ""]);
     for (const s of visible()) {
       const r = s.record;
       (r.nfs || []).forEach((e) => add(s, "nfs", e,
@@ -1611,9 +1615,17 @@ WA.renderAdmin = async function (view, me) {
         (r[k] || []).forEach((e) => add(s, k, e, WA.itemCatLabel(e.category),
           e.flight_code, (e.items || []).join(", "), e.instructor, e.grade));
       }
+      const evRows = WA.evalRows(r);
+      const opIdx = {};
+      for (const d of WA.EVALUATIONS) {
+        const w = WA.evalOperativeOf(evRows, d.id).row;
+        if (w) opIdx[d.id] = w.i;
+      }
       WA.filled("evaluations", r.evaluations).forEach((e) => add(s, "evaluations", e,
         e.evaluation ? WA.evalLabel(e.evaluation) : "(not identified)", e.evaluation, "",
-        e.with, e.grade));
+        e.with, e.grade, undefined,
+        e.evaluation ? (opIdx[e.evaluation] === r.evaluations.indexOf(e)
+          ? "yes" : "no — another attempt counts") : ""));
       WA.filled("solo_flights", r.solo_flights).forEach((e) => add(s, "solo_flights", e,
         (e.slot ? WA.soloSlotLabel(e.slot) : "additional solo") +
         (e.ng ? " — NG (non-graded)" : " — graded"),

@@ -586,8 +586,11 @@ WA.fpcResultText = function (v) {
    reads it, which a flat 5/4/3/2/1 would not.
 
      id     the stored key (proposals.level)
-     label  the words, character-exact, shown wherever there is room
-     short  the distribution form — «2× Strongly · 1× Alternate»
+     label  the words, character-exact — THE ONLY FORM THAT EVER RENDERS
+     short  kept as an API seam but ΑΠΟΦΑΝΣΗ 2026-08-19 made it identical to
+            label: «Παντού ολόκληρες» — no abbreviation anywhere, because the
+            abbreviated fifth ("Strongly Other Assignments") dropped the very
+            word the naming session fought for. Tight surfaces wrap instead.
      w      the weight
 
    MIRROR: db/schema.sql → wa.level_keys() / wa.level_weight() /
@@ -595,15 +598,15 @@ WA.fpcResultText = function (v) {
    ══════════════════════════════════════════════════════════════════════════ */
 WA.LEVELS = [
   { id: "strongly_recommended", w: 10,
-    label: "Strongly Recommended", short: "Strongly" },
+    label: "Strongly Recommended", short: "Strongly Recommended" },
   { id: "recommended", w: 8,
     label: "Recommended", short: "Recommended" },
   { id: "alternate", w: 5,
-    label: "Recommended as Alternate", short: "Alternate" },
+    label: "Recommended as Alternate", short: "Recommended as Alternate" },
   { id: "other_assignments", w: 3,
-    label: "Recommended for Other Assignments", short: "Other Assignments" },
+    label: "Recommended for Other Assignments", short: "Recommended for Other Assignments" },
   { id: "strongly_other_assignments", w: 1,
-    label: "Strongly Recommended for Other Assignments", short: "Strongly Other Assignments" },
+    label: "Strongly Recommended for Other Assignments", short: "Strongly Recommended for Other Assignments" },
 ];
 /* THE FIFTH IS A DIFFERENT KIND OF STATEMENT, not merely the next step down —
    the four above place a student on the fighter track or beside it, the fifth

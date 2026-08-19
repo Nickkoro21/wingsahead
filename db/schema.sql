@@ -1455,6 +1455,21 @@ language sql immutable as $$
       and nullif(trim(coalesce(e->>'result', '')), '') is not null), 0)
 $$;
 
+-- the legacy result TEXTS themselves, sorted — round 11 residual (verify item
+-- 9): the count guard alone stopped a result being ADDED but not a stored one
+-- being quietly REWRITTEN under an equal count. Kept-or-dropped means the
+-- surviving texts must be the stored texts.
+create or replace function wa.fpc_results(p jsonb) returns text[]
+language sql immutable as $$
+  select coalesce((
+    select array_agg(r order by r) from (
+      select trim(e->>'result') as r
+      from jsonb_array_elements(
+        case when jsonb_typeof(p) = 'array' then p else '[]'::jsonb end) e
+      where jsonb_typeof(e) = 'object'
+        and nullif(trim(coalesce(e->>'result', '')), '') is not null) t), '{}')
+$$;
+
 -- how many entries of ONE section still carry the legacy escape hatch
 create or replace function wa.legacy_count(p jsonb) returns int
 language sql immutable as $$
@@ -2046,6 +2061,17 @@ begin
   perform wa.chk(wa.fpc_result_count(pl->'fpc') <= wa.fpc_result_count(old->'fpc'),
                  'fpc',
                  'the free-text result was removed — an FPC''s result is its grade against the printed scale (60 % and above is the successful characterisation, PD 151/13). A result already written is kept as a legacy note, but a new one cannot be added');
+  -- ... and the surviving texts must be the STORED texts (kept or dropped,
+  -- never rewritten) — round 11 residual, verify item 9: a sub-multiset check,
+  -- so equal counts can no longer smuggle a replacement string through.
+  perform wa.chk(
+    (select coalesce(bool_and(
+       (select count(*) from unnest(wa.fpc_results(old->'fpc')) o where o = n.r) >=
+       n.c), true)
+     from (select r, count(*) as c
+           from unnest(wa.fpc_results(pl->'fpc')) r group by r) n),
+    'fpc',
+    'a legacy result note may be kept or dropped, never rewritten — the removed Result box cannot be edited through a hand-made payload');
 
   -- THE STAMP — decided per entry, against what is STORED, on BOTH paths.
   -- CO path (round 4b, unchanged): only what he actually wrote carries his
