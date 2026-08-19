@@ -1104,5 +1104,13 @@ stays literally true in code.
 
 ## 7. Open items
 
-- Weighted-score formula visible & adjustable? (default 3/2/1)
+- ~~Weighted-score formula visible & adjustable? (default 3/2/1)~~ — ΑΠΑΝΤΗΘΗΚΕ
+  στον Γύρο 10 (§4j): βάρη **10/8/5/3/1** ορισμένα από τη διοίκηση, τύπος ορατός
+  σε κάθε επιφάνεια· «adjustable» ΔΕΝ ζητήθηκε — η κλίμακα είναι κλειστή.
 - Deadline mechanism (freeze submissions before the brief)? — v2 unless asked.
+- Σημείωση μετάπτωσης (R10 verify item 4): η one-shot μετάπτωση των 9 demo
+  proposals ανανέωσε το `updated_at` των γραμμών που άγγιξε — τα «πότε υπέβαλε»
+  των demo δεν είναι πλέον τα αρχικά (οι παγωμένες rank_* στήλες μένουν το
+  πλήρες ίχνος). Στο πραγματικό 98B ο πίνακας ξεκινά άδειος, οπότε δεν αφορά
+  κανένα αληθινό δεδομένο· μελλοντικές μεταπτώσεις να τυλίγονται σε
+  trigger-disable ώστε να μην αγγίζουν χρονοσφραγίδες.
