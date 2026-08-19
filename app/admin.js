@@ -1,9 +1,15 @@
 "use strict";
 /* ══════════════════════════════════════════════════════════════════════════
    Wings Ahead — ADMIN dashboard (desktop-first).
-   Overview · Student analysis (4-bar SVG comparison + trend + branch boxes)
+   Overview · Student analysis (4-bar SVG comparison + trend + the assessment)
    · Brief mode (large type, one student/screen, arrows + keyboard, print)
    · People & link management · CSV/JSON export.
+
+   ROUND 10 — ONE ASSESSMENT, ABOUT FIGHTERS. The three branch boxes and the
+   1st/2nd/3rd selector are gone with the branch ranking itself. What replaced
+   them is one box carrying the WEIGHTED MEAN of the five-level scale
+   (app.js → WA.LEVELS), the arithmetic that produced it, the distribution and
+   the names behind each level. Everything ranks on that mean.
    ══════════════════════════════════════════════════════════════════════════ */
 
 WA.renderAdmin = async function (view, me) {
@@ -13,11 +19,10 @@ WA.renderAdmin = async function (view, me) {
   WA._admReturn = null;
   const A = { data: null, people: null, tab: back.tab || "overview", sel: back.sel || 0,
               metric: "fail", evalSel: "C4590", plotCat: "contact",
-              rankSel: 1, loading: false, hi: null };
+              loading: false, hi: null };
   WA._adminState = A;
 
-  const BR = WA.BRANCHES;   // [{id,label}] — defined in instructor.js
-  const RW = WA.RANK_WORD;  // {1:"1st",2:"2nd",3:"3rd"}
+  const LV = WA.LEVELS;     // the five-level scale, in scale order — app.js
   /* ROUND 9 — the sentinel of the "Other…" option, the same idea (and the
      same word) as the student form's PICK_OTHER */
   const PM_OTHER = "__other__";
@@ -141,18 +146,34 @@ WA.renderAdmin = async function (view, me) {
   }
 
   /* ════════ OVERVIEW ════════ */
-  function propCounts(s) {
-    const c = { fighters: 0, helicopters: 0, transport_ff: 0 };
-    for (const p of s.proposals) for (const b of BR) if (p.ranks[b.id]) c[b.id]++;
-    return c;
+  /* the mean, rendered as the one number this dashboard now ranks on, with a
+     five-segment distribution beside it — one bar per level, in scale order,
+     coloured by the same tokens as the chips. A student with three
+     assessments and a student with nine are on the same axis because the mean
+     is a mean, which the round-8 SUM was not. */
+  function meanCell(s) {
+    const a = s.assessment || { n: 0, counts: {}, mean: null };
+    const c = s.completion;
+    const mb = (v) => Math.max(2, Math.min(18, v * 6));
+    const bars = LV.map((l) => {
+      const n = (a.counts || {})[l.id] || 0;
+      return `<i class="lb-${esc(l.id)}" style="height:${mb(n)}px"
+                 title="${esc(l.label)}: ${n}"></i>`;
+    }).join("");
+    return `<span class="meanpill${a.n ? "" : " is-none"}"
+                  title="${esc(a.n
+                    ? "weighted mean of " + a.n + " assessment" + (a.n === 1 ? "" : "s") +
+                      " — " + WA.levelFormula(a.counts, a.n) + " = " + WA.meanText(a.mean)
+                    : "no instructor has assessed this student yet")}">Ø ${esc(WA.meanText(a.mean))}</span>
+      <span class="minibars" title="${esc("distribution — " + (WA.levelDist(a.counts) || "nothing recorded"))}">${bars}</span>
+      <span class="badge">${a.n}/${c.instructors_total}</span>`;
   }
 
   function htmlOverview() {
     const students = A.data.students;
     const insTotal = A.data.instructors.filter((i) => i.active).length;
     const rows = students.map((s, i) => {
-      const st = s._stats, c = s.completion, pc = propCounts(s);
-      const mb = (v) => Math.max(2, Math.min(18, v * 5));
+      const st = s._stats, c = s.completion;
       /* NOTE (round-4 W3c): no "Evals" column — every student converges to the
          same eight checkrides, so the count ranks nobody. The per-evaluation
          grades (analysis + print matrix) carry the comparison. */
@@ -168,11 +189,7 @@ WA.renderAdmin = async function (view, me) {
           <td class="num">${st.airsickness}</td>
           <td class="num">${st.fpc}</td>
           <td class="num">${st.cef}</td>
-          <td><span class="minibars" title="proposals naming Fighters / Helicopters / Transport–FF">
-                <i style="height:${mb(pc.fighters)}px" title="Fighters: ${pc.fighters}"></i>
-                <i class="b2" style="height:${mb(pc.helicopters)}px" title="Helicopters: ${pc.helicopters}"></i>
-                <i class="b3" style="height:${mb(pc.transport_ff)}px" title="Transport–FF: ${pc.transport_ff}"></i>
-              </span> <span class="badge">${c.proposals_in}/${c.instructors_total}</span></td>
+          <td class="mcell">${meanCell(s)}</td>
           <td>${c.has_record
             ? `<span class="badge badge-good">✓ ${esc(fmtDT(s.last_update))}</span>`
             : `<span class="badge badge-bad">not submitted</span>`}
@@ -202,7 +219,7 @@ WA.renderAdmin = async function (view, me) {
         <span class="spacer"></span>
         <button type="button" class="btn btn-sm" data-act="csv-summary">Export CSV — summary</button>
         <button type="button" class="btn btn-sm" data-act="csv-entries">Export CSV — every entry</button>
-        <button type="button" class="btn btn-sm" data-act="csv-proposals">Export CSV — proposals</button>
+        <button type="button" class="btn btn-sm" data-act="csv-assessments">Export CSV — assessments</button>
         <button type="button" class="btn btn-sm" data-act="json-export">Export JSON — full</button>
       </div>
       <div class="tblwrap"><table class="tbl">
@@ -210,7 +227,7 @@ WA.renderAdmin = async function (view, me) {
           <th>Student</th><th>Class</th><th>Solos</th><th>NFS</th><th>SMS</th>
           <th>FAIL</th><th>Almost Good</th><th>Airsick</th>
           <th title="${esc(WA.secTip("fpc"))}">FPC</th><th title="${esc(WA.secTip("cef"))}">CEF</th>
-          <th>Proposals</th><th>Self-report</th><th>Enter for</th>
+          <th title="${esc(WA.LEVEL_TIP)}">Assessment (fighters)</th><th>Self-report</th><th>Enter for</th>
         </tr></thead><tbody>${rows}</tbody></table></div>
       <div class="grid2" style="margin-top:12px">
         <div class="card"><h3>Students without a self-report</h3>
@@ -585,64 +602,73 @@ WA.renderAdmin = async function (view, me) {
            blk("cef", ["Entry", "Evaluator", "Date", "Result", "Grade", "Source"], chk("cef"));
   }
 
-  /* one branch of one proposal, in the drill-down: the position, the explicit
-     refusal, or the silence — three different cells, never one (round 8) */
-  function propCell(p, bid) {
-    if (p.ranks[bid]) return esc(RW[p.ranks[bid]]);
-    if (p.not_recommended && p.not_recommended[bid]) {
-      return `<span class="nrtag" title="${esc(WA.NR_TIP)}">not recomm.</span>`;
+  /* ── THE LEVEL CHIP (round 10) ────────────────────────────────────────────
+     One assessment, in its own words, coloured by a token scale that descends
+     with the levels — and the fifth is NOT an error state. It never wears
+     --bad: "Strongly Recommended for Other Assignments" is the squadron
+     saying where a pilot belongs, not that something went wrong with him, and
+     a red chip would put back on the screen exactly the negative the wording
+     was written to keep off it. It gets --hf, a neutral cool token, filled
+     like the first level is filled — because both ends of this scale are
+     emphatic statements and the hue, not the intensity, says which direction.
+     A row with no level is the silence, and says so in words. */
+  function levelChip(level, small) {
+    const l = WA.level(level);
+    if (!l) {
+      return `<span class="lvchip lv-none" title="This instructor has submitted, but has not formed a view yet — nothing is assumed on his behalf.">no view yet</span>`;
     }
-    return "—";
+    return `<span class="lvchip lv-${esc(l.id)}" title="${esc(l.label + " — weight " + l.w)}">${
+      esc(small ? l.short : l.label)}<b>${l.w}</b></span>`;
   }
 
-  function branchBoxes(s, forBrief) {
+  /* ── THE ASSESSMENT BOX (round 10) ────────────────────────────────────────
+     One box where three branch boxes used to be, because there is one question
+     now. It prints the WEIGHTED MEAN, then the ARITHMETIC THAT PRODUCED IT —
+     "(10×2 + 5×1) ÷ 3 = 8.33" — so the Wing Commander can check the number
+     instead of trusting it, then the distribution and the names behind each
+     level in scale order.
+     ROUND 8'S RULE SURVIVES THE RESHAPE: the two silences are still not the
+     same silence, and still get their own sentences. "has submitted without
+     forming a view" is a person who looked and did not answer; "has not
+     submitted" is a person who has not looked. */
+  function assessBox(s, forBrief) {
+    const a = s.assessment || { n: 0, sum: 0, mean: null, counts: {}, by_level: {}, no_level: [] };
     const total = s.proposals.length;
     const flew = s.proposals.filter((p) => p.flew_with).length;
     const flewPct = total ? Math.round((flew / total) * 100) : 0;
-    return BR.map((b) => {
-      const ag = s.aggregates[b.id];
-      const firsts = (ag.by_rank["1"] || []).length;
-      /* ROUND 8 — THE THREE SILENCES, EACH IN ITS OWN WORDS.
-         "does not recommend" is a judgement the instructor made and typed;
-         "has not recommended" is a proposal that simply does not name this
-         branch; "has not submitted" is no proposal at all. The CO reads all
-         three differently, so they can never share a sentence. */
-      const nrList = ag.not_recommended || [];
-      const politeNR = nrList.map((n) =>
-        `<li class="is-nr"><b>${esc(n)} does not recommend ${esc(b.label)} for this student</b></li>`).join("");
-      const politeA = ag.not_this_branch.map((n) =>
-        `<li>${esc(n)} has not recommended ${esc(b.label)} for this student</li>`).join("");
-      const politeB = s.not_submitted.map((n) =>
-        `<li>${esc(n)} has not submitted a recommendation for this student yet</li>`).join("");
-      let names;
-      if (forBrief) {
-        names = [1, 2, 3].map((r) => {
-          const list = ag.by_rank[String(r)] || [];
-          return `<div>${esc(RW[r])}: ${list.length
-            ? (r === 1 ? "<b>" + esc(list.join(", ")) + "</b>" : esc(list.join(", ")))
-            : "<span class='none' style='color:var(--muted)'>—</span>"}</div>`;
-        }).join("");
-      } else {
-        const list = ag.by_rank[String(A.rankSel)] || [];
-        names = list.length
-          ? `<div class="names">${esc(list.join(", "))}</div>`
-          : `<div class="names none">No instructor gave ${esc(b.label)} as ${esc(RW[A.rankSel])} choice.</div>`;
-      }
-      return `
-        <div class="branchbox">
-          <h4>${esc(b.label)} <span class="score" title="weighted score — formula 3×1st + 2×2nd + 1×3rd">Σ ${esc(ag.weighted)}</span></h4>
-          ${names}
-          <div class="stats">weighted <b>${esc(ag.weighted)}</b> (3×1st + 2×2nd + 1×3rd) ·
-            ${firsts} first-choice ${firsts === 1 ? "vote" : "votes"} ·
-            ${nrList.length ? `<b>${nrList.length} not recommended</b> · ` : ""}
-            ${total ? flewPct + "% of proposers flew with them" : "no proposers yet"}</div>
-          ${forBrief
-            ? (nrList.length
-                ? `<div class="nrline" title="${esc(WA.NR_TIP)}">Not recommended by
-                     <b>${esc(nrList.join(", "))}</b></div>` : "")
-            : `<ul class="polite">${politeNR}${politeA}${politeB}</ul>`}
-        </div>`;
+    const rows = LV.map((l) => {
+      const names = (a.by_level || {})[l.id] || [];
+      return `<div class="lvrow${names.length ? "" : " is-empty"}">
+        ${levelChip(l.id, true)}
+        <span class="lvnames">${names.length ? esc(names.join(", ")) : "—"}</span>
+        <span class="lvn">${names.length || ""}</span>
+      </div>`;
     }).join("");
+    const noView = (a.no_level || []).map((n) =>
+      `<li>${esc(n)} has submitted but has not formed a view yet</li>`).join("");
+    const noSub = s.not_submitted.map((n) =>
+      `<li>${esc(n)} has not submitted an assessment for this student yet</li>`).join("");
+    const formula = a.n ? WA.levelFormula(a.counts, a.n) + " = " + WA.meanText(a.mean) : "";
+    return `
+      <div class="assessbox">
+        <div class="asshead">
+          <span class="assmean${a.n ? "" : " is-none"}">Ø ${esc(WA.meanText(a.mean))}</span>
+          <span class="asssub">${a.n
+            ? esc("weighted mean of " + a.n + " assessment" + (a.n === 1 ? "" : "s"))
+            : "no assessment yet"}</span>
+          ${a.n ? `<span class="assformula" title="the weights are 10 · 8 · 5 · 3 · 1, strongest first">${esc(formula)}</span>` : ""}
+        </div>
+        ${a.n ? `<div class="assdist">${esc(WA.levelDist(a.counts))}</div>` : ""}
+        <div class="lvrows">${rows}</div>
+        <div class="stats">${total
+          ? total + " submitted · " + flewPct + "% of them flew with this student"
+          : "no instructor has submitted yet"}</div>
+        ${forBrief
+          ? ((a.no_level || []).length
+              ? `<div class="assline">Submitted without a view: <b>${esc((a.no_level || []).join(", "))}</b></div>`
+              : "")
+          : `<ul class="polite">${noView}${noSub}</ul>`}
+      </div>`;
   }
 
   function htmlAnalysis() {
@@ -653,18 +679,17 @@ WA.renderAdmin = async function (view, me) {
     const chips = METRICS.map((m) =>
       `<button type="button" class="chip${m.id === A.metric ? " is-on" : ""}" data-metric="${esc(m.id)}"
         title="${esc((m.tip ? m.tip + " " : "") + "(" + DIRWORD[m.dir] + ")")}">${esc(m.label)}</button>`).join("");
-    const rsel = [1, 2, 3].map((r) =>
-      `<button type="button" class="chip${A.rankSel === r ? " is-on" : ""}" data-ranksel="${r}">${esc(RW[r])} choice</button>`).join("");
     const drill = s.proposals.length ? `
-      <details class="drill"><summary>Drill-down — every proposal for this student (${s.proposals.length})</summary>
+      <details class="drill"><summary>Drill-down — every assessment of this student (${s.proposals.length})</summary>
         <div class="tblwrap" style="margin-top:8px"><table class="tbl">
           <thead><tr><th>Instructor</th><th>Duty</th><th>Leadership</th><th>Status</th>
-            <th>Fighters</th><th>Helicopters</th><th>Transport–FF</th><th>Flew with</th><th>Comment</th>
-            <th>Source</th></tr></thead>
+            <th title="${esc(WA.LEVEL_TIP)}">Assessment (fighters)</th><th class="num">Weight</th>
+            <th>Flew with</th><th>Comment</th><th>Source</th></tr></thead>
           <tbody>${s.proposals.map((p) => `
             <tr><td><b>${esc(WA.personCall(p, true))}</b>${p.test_pilot ? ` <span class="badge" title="test pilot">TP</span>` : ""}</td>
               <td>${esc(p.duty || "—")}</td><td>${esc(p.leadership || "—")}</td><td>${esc(p.status || "—")}</td>
-              ${BR.map((b) => `<td>${propCell(p, b.id)}</td>`).join("")}
+              <td>${levelChip(p.level)}</td>
+              <td class="num">${WA.levelWeight(p.level) === null ? "—" : WA.levelWeight(p.level)}</td>
               <td>${p.flew_with ? "✓" : "—"}</td><td>${esc(p.comment || "")}</td>
               ${srcCell(p)}</tr>`).join("")}
           </tbody></table></div></details>` : "";
@@ -748,10 +773,9 @@ WA.renderAdmin = async function (view, me) {
         ${otherTables(s)}
       </div>
       <div class="card">
-        <h2>Proposals</h2>
-        <p class="hint">The position selector applies to all three branch boxes simultaneously.</p>
-        <div class="chiprow" style="margin:10px 0">${rsel}</div>
-        <div class="grid3">${branchBoxes(s, false)}</div>
+        <h2>Assessment for fighters</h2>
+        <p class="hint">${esc(WA.LEVEL_TIP)}</p>
+        ${assessBox(s, false)}
         ${drill}
       </div>`;
   }
@@ -850,7 +874,7 @@ WA.renderAdmin = async function (view, me) {
               WA.coTag(e)).join(" · ")
               : "<span class='k'>none reported</span>"}</div>
         </div>
-        <div class="grid3">${branchBoxes(s, true)}</div>
+        ${assessBox(s, true)}
       </div>`;
   }
 
@@ -861,22 +885,22 @@ WA.renderAdmin = async function (view, me) {
     const students = A.data.students;
     const pages = students.map((s) => {
       const st = s._stats;
-      const branchRows = BR.map((b) => {
-        const ag = s.aggregates[b.id];
-        return `<tr><td><b>${esc(b.label)}</b></td>
-          <td>${esc((ag.by_rank["1"] || []).join(", ") || "—")}</td>
-          <td>${esc((ag.by_rank["2"] || []).join(", ") || "—")}</td>
-          <td>${esc((ag.by_rank["3"] || []).join(", ") || "—")}</td>
-          <td>${esc((ag.not_recommended || []).join(", ") || "—")}</td>
-          <td>${esc(ag.weighted)}</td></tr>`;
+      /* ROUND 10 — ON PAPER THE LEVEL IS THE SENTENCE, NEVER A COLOUR. The
+         screen chips carry a token scale; a printed brief is monochrome, so
+         every row here says the level in full words and shows its weight and
+         its count. Nothing about this table needs a printer to be honest. */
+      const ass = s.assessment || { n: 0, sum: 0, mean: null, counts: {}, by_level: {}, no_level: [] };
+      const levelRows = LV.map((l) => {
+        const names = (ass.by_level || {})[l.id] || [];
+        return `<tr${names.length ? "" : ' class="is-unflown"'}>
+          <td><b>${esc(l.label)}</b></td><td>${l.w}</td>
+          <td>${names.length || "—"}</td>
+          <td>${esc(names.join(", ") || "—")}</td></tr>`;
       }).join("");
-      /* ROUND 8 — an explicit "not recommended" is a judgement and prints as
-         one; the two silences keep their own, weaker sentences */
-      const politeAll = BR.map((b) => (s.aggregates[b.id].not_recommended || []).map((n) =>
-        `<li><b>${esc(n)} does not recommend ${esc(b.label)} for this student</b></li>`).join("")).join("") +
-        BR.map((b) => s.aggregates[b.id].not_this_branch.map((n) =>
-        `<li>${esc(n)} has not recommended ${esc(b.label)} for this student</li>`).join("")).join("") +
-        s.not_submitted.map((n) => `<li>${esc(n)} has not submitted a recommendation for this student yet</li>`).join("");
+      /* the two silences, still each in its own words (round 8's rule, kept) */
+      const politeAll = (ass.no_level || []).map((n) =>
+        `<li>${esc(n)} has submitted but has not formed a view yet</li>`).join("") +
+        s.not_submitted.map((n) => `<li>${esc(n)} has not submitted an assessment for this student yet</li>`).join("");
       const comments = s.proposals.filter((p) => p.comment).map((p) =>
         `<li><b>${esc((p.rank ? p.rank + " " : "") + p.last_name)}:</b> ${esc(p.comment)}</li>`).join("");
       const prT = (head, rows) => rows.length
@@ -958,7 +982,7 @@ WA.renderAdmin = async function (view, me) {
               : "self-report" + (s._src.some
                 ? " (+" + s._src.n + " entered by the CO)" : "")}
             ${s.completion.has_record ? "updated " + esc(fmtDT(s.last_update)) : "NOT submitted"}
-            · proposals in: ${s.completion.proposals_in}/${s.completion.instructors_total}</div>
+            · assessments in: ${ass.n}/${s.completion.instructors_total}</div>
           <div class="pr-sec">Reported record — counts derived from the dated entries</div>
           <table class="pr-t"><thead><tr><th>Solos</th><th>NFS</th>
             <th>SMS</th><th>FAIL</th><th>Almost Good</th><th>Airsick</th><th>FPC</th><th>CEF</th></tr></thead>
@@ -984,10 +1008,12 @@ WA.renderAdmin = async function (view, me) {
           ${prT(["Entry", "Evaluator", "Date", "Result", "Grade"], ckRows("fpc"))}
           <div class="pr-sec">CEF — Εξέταση Καταλληλότητας (Squadron Evaluator)</div>
           ${prT(["Entry", "Evaluator", "Date", "Result", "Grade"], ckRows("cef"))}
-          <div class="pr-sec">Utilization proposals (weighted 3×1st + 2×2nd + 1×3rd)</div>
-          <table class="pr-t"><thead><tr><th>Branch</th><th>1st choice</th><th>2nd choice</th><th>3rd choice</th>
-            <th>Not recommended by</th><th>Σ</th></tr></thead>
-            <tbody>${branchRows}</tbody></table>
+          <div class="pr-sec">Assessment for fighters — weighted mean ${
+            ass.n ? esc(WA.levelFormula(ass.counts, ass.n) + " = " + WA.meanText(ass.mean))
+                  : "no assessment submitted yet"}</div>
+          <table class="pr-t"><thead><tr><th>Level</th><th>Weight</th><th>Count</th>
+            <th>Instructors</th></tr></thead>
+            <tbody>${levelRows}</tbody></table>
           ${comments ? `<div class="pr-sec">Instructor comments</div><ul class="pr-bullets">${comments}</ul>` : ""}
           ${politeAll ? `<div class="pr-sec">Outstanding</div><ul class="pr-bullets">${politeAll}</ul>` : ""}
         </div>`;
@@ -999,28 +1025,37 @@ WA.renderAdmin = async function (view, me) {
       const k = s.person.class || "—";
       (classes[k] = classes[k] || []).push(s);
     }
+    /* ROUND 10 — THE CLASS RANKS ON THE WEIGHTED MEAN. The round-8 branch
+       SUMS rewarded being talked about: four instructors placing a student
+       second out-scored two placing another first. With one assessment per
+       instructor the mean is the comparable number, and a student nobody has
+       assessed yet has no number at all — he sorts last rather than at zero,
+       because "not asked about" is not the same as "placed at the bottom". */
     const summary = Object.keys(classes).sort().map((cls) => {
+      const mn = (x) => (x.assessment && x.assessment.n) ? x.assessment.mean : null;
       const list = classes[cls].slice().sort((a, b) => {
-        const tw = (x) => BR.reduce((acc, br) => acc + x.aggregates[br.id].weighted, 0);
-        return tw(b) - tw(a);
+        const ma = mn(a), mb2 = mn(b);
+        if (ma === null && mb2 === null) return 0;
+        if (ma === null) return 1;
+        if (mb2 === null) return -1;
+        return mb2 - ma;
       });
       return `
-        <div class="pr-sec">Class ${esc(cls)} — summary ranking (weighted 3/2/1 per branch)</div>
+        <div class="pr-sec">Class ${esc(cls)} — summary ranking (weighted mean of the five-level
+          assessment for fighters; weights 10 · 8 · 5 · 3 · 1)</div>
         <p class="pr-src">Records: ${esc(sourceLine(list))}
           — &ldquo;CO&rdquo; marks a record the squadron CO entered in full,
           &ldquo;+N CO&rdquo; a self-reported record he added N entries to.</p>
         <table class="pr-t"><thead><tr><th>#</th><th>Student</th>
-          <th>Fighters Σ</th><th>Helicopters Σ</th><th>Transport–FF Σ</th>
-          <th>1st-choice votes</th><th>Proposals in</th><th>FAIL</th><th>Almost Good</th><th>FPC</th><th>CEF</th></tr></thead><tbody>
+          <th>Ø mean</th><th>Distribution</th><th>Assessments in</th>
+          <th>FAIL</th><th>Almost Good</th><th>FPC</th><th>CEF</th></tr></thead><tbody>
           ${list.map((s, i) => {
-            const firsts = BR.reduce((acc, b) => acc + (s.aggregates[b.id].by_rank["1"] || []).length, 0);
+            const a = s.assessment || { n: 0, counts: {}, mean: null };
             return `<tr><td>${i + 1}</td><td><b>${esc(WA.personName(s.person, true))}</b>${
                 WA.coRecordTag(s._src)}</td>
-              <td>${esc(s.aggregates.fighters.weighted)}</td>
-              <td>${esc(s.aggregates.helicopters.weighted)}</td>
-              <td>${esc(s.aggregates.transport_ff.weighted)}</td>
-              <td>${firsts}</td>
-              <td>${s.completion.proposals_in}/${s.completion.instructors_total}</td>
+              <td><b>${esc(WA.meanText(a.mean))}</b></td>
+              <td>${esc(WA.levelDist(a.counts) || "—")}</td>
+              <td>${a.n}/${s.completion.instructors_total}</td>
               <td>${s._stats.fail}</td><td>${s._stats.almost_good}</td>
               <td>${s._stats.fpc}</td><td>${s._stats.cef}</td></tr>`;
           }).join("")}</tbody></table>`;
@@ -1074,8 +1109,8 @@ WA.renderAdmin = async function (view, me) {
             <button type="button" class="btn btn-sm" data-edit="${esc(p.id)}">Edit</button>
             ${kind === "instructor" && p.active
               ? `<button type="button" class="btn btn-sm" data-editprop="${esc(p.id)}"
-                   title="Open this instructor's recommendation form and fill it in on their behalf — every proposal is tagged 'entered by CO'"
-                   >&#9998; Enter proposals as…</button>` : ""}
+                   title="Open this instructor's assessment form and fill it in on their behalf — every assessment is tagged 'entered by CO'"
+                   >&#9998; Enter assessments as…</button>` : ""}
             ${kind === "student" && p.active
               ? `<button type="button" class="btn btn-sm" data-editrec="${esc(p.id)}"
                    title="Open this student's form and enter data on their behalf — every entry is tagged 'entered by CO'"
@@ -1255,10 +1290,16 @@ WA.renderAdmin = async function (view, me) {
       "FPC", "CEF", "Entries to correct",
       "Record entered by", "CO-entered entries"]
       .concat(WA.EVALUATIONS.map((d) => d.id))
-      .concat(["W Fighters", "W Helicopters", "W Transport-FF",
-        "1st F", "1st H", "1st T-FF", "Proposals in", "Instructors total", "Self-report updated"])];
+      /* ROUND 10 — the assessment travels as the MEAN plus the raw material it
+         was computed from: the weight sum, the count, and one column per level
+         in scale order. A spreadsheet can therefore re-derive the mean, or
+         re-weight the scale entirely, without going back to the database. */
+      .concat(["Mean (fighters)", "Weight sum", "Assessments in", "Instructors total"])
+      .concat(WA.LEVELS.map((l) => l.label))
+      .concat(["Self-report updated"])];
     for (const s of A.data.students) {
-      const st = s._stats, ag = s.aggregates;
+      const st = s._stats;
+      const a = s.assessment || { n: 0, sum: 0, mean: null, counts: {} };
       rows.push([s.person.mn, s.person.rank, s.person.last_name, s.person.first_name, s.person.class,
         st.solos, st.nfs, st.sms, st.fail,
         st.almost_good, st.airsickness, st.fpc, st.cef, st.legacy,
@@ -1269,11 +1310,10 @@ WA.renderAdmin = async function (view, me) {
           const r = WA.evalLatest(s._evals, d.id);
           return r && r.grade !== null ? r.grade : "";
         }))
-        .concat([ag.fighters.weighted, ag.helicopters.weighted, ag.transport_ff.weighted,
-          (ag.fighters.by_rank["1"] || []).length, (ag.helicopters.by_rank["1"] || []).length,
-          (ag.transport_ff.by_rank["1"] || []).length,
-          s.completion.proposals_in, s.completion.instructors_total,
-          s.completion.has_record ? fmtDT(s.last_update) : "not submitted"]));
+        .concat([a.n ? WA.meanText(a.mean) : "", a.n ? a.sum : "",
+          a.n, s.completion.instructors_total])
+        .concat(WA.LEVELS.map((l) => (a.counts || {})[l.id] || 0))
+        .concat([s.completion.has_record ? fmtDT(s.last_update) : "not submitted"]));
     }
     download("wings-ahead-summary-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
   }
@@ -1324,23 +1364,24 @@ WA.renderAdmin = async function (view, me) {
     download("wings-ahead-entries-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
   }
 
-  function exportProposalsCSV() {
-    /* ROUND 8 — one cell, three answers: the position, "not recommended", or
-       empty for a branch the instructor said nothing about */
-    const cell = (p, bid) => p.ranks[bid] ? RW[p.ranks[bid]]
-      : ((p.not_recommended && p.not_recommended[bid]) ? "not recommended" : "");
+  /* ROUND 10 — one row per assessment, carrying BOTH the words and the weight.
+     The label is what the squadron says; the weight is what the brief adds up.
+     A row an instructor has submitted without forming a view keeps both cells
+     empty rather than scoring zero — the silence must not become a number. */
+  function exportAssessmentsCSV() {
     const rows = [["Student", "Class", "Instructor", "Call sign", "Country", "Test pilot",
       "Duty", "Leadership", "Status",
-      "Fighters", "Helicopters", "Transport-FF", "Flew with", "Comment", "Updated", "Entered by"]];
+      "Assessment (fighters)", "Weight", "Flew with", "Comment", "Updated", "Entered by"]];
     for (const s of A.data.students) for (const p of s.proposals) {
+      const l = WA.level(p.level);
       rows.push([WA.personName(s.person, true), s.person.class,
         (p.rank ? p.rank + " " : "") + p.last_name,
         p.call_sign || "", p.country || "", p.test_pilot ? "yes" : "no",
         p.duty, p.leadership, p.status,
-        cell(p, "fighters"), cell(p, "helicopters"), cell(p, "transport_ff"),
+        l ? l.label : "", l ? l.w : "",
         p.flew_with ? "yes" : "no", p.comment || "", fmtDT(p.updated_at), WA.coWord(p)]);
     }
-    download("wings-ahead-proposals-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
+    download("wings-ahead-assessments-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
   }
 
   async function exportJSON() {
@@ -1380,8 +1421,6 @@ WA.renderAdmin = async function (view, me) {
     if (pc) { A.plotCat = pc.dataset.plotcat; A.hi = null; render(); return; }
     const pt = t.closest("[data-pt]");
     if (pt) { highlightRow(pt.dataset.pt); return; }
-    const rs = t.closest("[data-ranksel]");
-    if (rs) { A.rankSel = Number(rs.dataset.ranksel); render(); return; }
 
     const act = t.closest("[data-act]");
     if (act) {
@@ -1389,7 +1428,7 @@ WA.renderAdmin = async function (view, me) {
       if (a === "print") { buildPrint(); window.print(); }
       else if (a === "csv-summary") exportSummaryCSV();
       else if (a === "csv-entries") exportEntriesCSV();
-      else if (a === "csv-proposals") exportProposalsCSV();
+      else if (a === "csv-assessments") exportAssessmentsCSV();
       else if (a === "json-export") exportJSON();
       else if (a === "add-student") openPersonModal("student", null);
       else if (a === "add-instructor") openPersonModal("instructor", null);
@@ -1460,7 +1499,7 @@ WA.renderAdmin = async function (view, me) {
       const p = (A.people || []).find((x) => x.id === del.dataset.del);
       if (!p) return;
       if (!window.confirm("DELETE " + WA.personName(p, true) +
-          " and ALL their data (record / proposals)? This cannot be undone.")) return;
+          " and ALL their data (record / assessments)? This cannot be undone.")) return;
       try {
         await rpc("admin_delete_person", { p_token: WA.token, p_id: p.id });
         await load(false); A.tab = "people"; render();

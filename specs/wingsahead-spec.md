@@ -8,10 +8,12 @@
 ## 1. Mission
 
 Each **student** self-reports their training record. Each **instructor** submits
-utilization recommendations per student (Transport–Firefighting / Helicopters /
-Fighters). The **squadron CO** gets a live aggregate + printable brief for the
-Wing Commander. Shareable over the internet; every submission stored centrally
-and editable by its owner until the brief.
+**ONE utilization assessment per student, about FIGHTERS**, on a five-level scale
+weighted 10 · 8 · 5 · 3 · 1 (**round 10**, §4j — this replaced the per-aircraft
+-type branch ranking, and no aircraft-type ranking survives anywhere). The
+**squadron CO** gets a live aggregate — a **weighted mean** — + printable brief
+for the Wing Commander. Shareable over the internet; every submission stored
+centrally and editable by its owner until the brief.
 
 ## 2. Stack & hosting (all free tiers)
 
@@ -112,14 +114,18 @@ twin), so the form arrives with its own picker; **RPC
 `list_instructor_names(token)`** stays as the standalone question over the same
 function. Free text remains accepted in every box they fill (§4i·1).
 
-**proposals** (instructor × student, upsert-once-per-pair):
-- ranks: {fighters: 1|2|3|null, helicopters: …, transport_ff: …} — **ranking,
-  multiple allowed**: 1 to 3 branches, each with an order position (decision Q1)
-- not_recommended: {fighters: bool, …} — **round 8**: a branch has FOUR states,
-  ranked 1st/2nd/3rd · **explicitly not recommended** · untouched. A rank and a
-  refusal are mutually exclusive (server-checked, plus a table constraint)
+**proposals** (instructor × student, upsert-once-per-pair) — **ROUND 10 shape**:
+- **level**: one of five keys, or NULL — `strongly_recommended` (10) ·
+  `recommended` (8) · `alternate` (5) · `other_assignments` (3) ·
+  `strongly_other_assignments` (1). **ONE assessment, about FIGHTERS.** Closed
+  list, enforced both by `proposals_level_chk` and by the write path, which
+  refuses anything else naming the five. **NULL is a real answer** — "no view
+  formed yet" — and is excluded from the mean rather than scored zero. See §4j.
 - flew_with: bool («έχω πετάξει μαζί του»)
 - comment: optional short free text
+- *(frozen, round 8, retired by round 10)* `rank_fighters / rank_helicopters /
+  rank_transport_ff / nr_*` — kept in the table as the migration's audit trail,
+  **refused on write by name** and returned by nothing.
 
 ## 4a. Branding & terminology (round 2/3, 2026-08-13)
 
@@ -485,7 +491,11 @@ on every surface, replacing *"Authorising instructor"* / *"Evaluator /
 instructor"*: form, admin table, brief, print, and `WA.soloWho*` (which also
 loses the *"(authorising)"* suffix and the `w/` prefix).
 
-**6 · THE INSTRUCTOR SAYS NO OUT LOUD.** A branch had three states and
+**6 · THE INSTRUCTOR SAYS NO OUT LOUD.** *(SUPERSEDED BY ROUND 10, §4j — the
+whole branch ranking including this fourth state was retired; the rule it
+established, that the silences must never share a sentence, survives the
+reshape and is why round 10 still separates "has submitted but has not formed a
+view yet" from "has not submitted … yet".)* A branch had three states and
 "untouched" had to carry two meanings at once — *"I would not send him there"*
 and *"I have not formed a view"* — which the CO cannot tell apart on the brief.
 The vocabulary gains a fourth word: **ranked 1st / 2nd / 3rd · NOT RECOMMENDED
@@ -625,6 +635,8 @@ row, a "roster" badge on the rows the shared file owns, and an editor that
 carries call sign · country (HAF / ITAF / Other…) · test pilot · the immutable
 object id. Proposal drill-down and the instructor list name people as
 **"Maj Alfa (TEST-01)"**; the proposals CSV gains Call sign · Country · Test pilot.
+*(Round 10 renamed that export to the **assessments** CSV and replaced its three
+branch columns with **Assessment (fighters) + Weight** — §4j.)*
 
 ## 4h. Round 9 — THE DROPDOWN RULE
 
@@ -688,13 +700,26 @@ did not foresee is an **additional solo**, the one solo row that can be added.
 
 **`app/app.js` and `app/instructor.js` carry no `<select>` and no `<datalist>`
 at all** — the shared library defines vocabularies but renders no form control,
-and the instructor board is tap-to-place (its "positions" are buttons, and the
-theme gallery's cards are `role="option"` buttons, not a select). That is the
-whole surface: **19 dropdown fields, 3 datalists, 4 ruled exceptions.**
+and the instructor board is a **radio group** (round 10 — its five levels are
+`<input type="radio">`, not a select; the theme gallery's cards are
+`role="option"` buttons, also not a select). That is the whole surface:
+**19 dropdown fields, 3 datalists, 4 ruled exceptions.**
 (Round 9's form polish moved #10 from a `<select>` to a datalist input and
 added `dl-eval`; the field count is unchanged, the ruled exceptions are
 unchanged, and #5 lost the free-text filter box that used to sit above it —
 see §4i.)
+
+**ROUND 10 adds a FIFTH ruled exception that is not a dropdown either.** The
+**assessment level** is a closed list of five, rendered as a radio group so that
+all five options are visible at once — which is the point: an instructor must
+*see* that the bottom of this scale still says "Recommended", and a collapsed
+`<select>` would hide exactly the reassurance the wording exists to give. There
+is no "Other…", and there can never be one: a sixth phrasing invented in a text
+box would be a sentence about a person that no weight can score and no brief can
+compare — and, unlike a mis-typed sortie code, it is the one field of this app
+whose wording a student may one day read. Closed by construction on the client,
+by `wa.level_keys()` on the write path, and by `proposals_level_chk` in the
+table. See §4j.
 
 ## 4i. Round 9 — FORM POLISH FOR THE REAL-STUDENT ERA (2026-08-18)
 
@@ -817,18 +842,205 @@ holds: students of another class already imported are left exactly as they are,
 and widening the scope later is simply another run with more classes named. The
 generated file states its scope in its own header.
 
+## 4j. Round 10 (2026-08-19) — THE FIVE-LEVEL ASSESSMENT, AND IT IS ABOUT FIGHTERS
+
+### THE COMMAND DIRECTIVE (verbatim)
+
+> «Οπως ειναι τωρα ειχαμε βαλει για τους εκπαιδευτες προτασεις αναλογα με τον
+> τυπο. Η διοικηση θελει τους εξης χαρακτηρισμους. Ξεχναμε τον τυπο… Σχετικα με
+> fighter ειναι οι προτασεις.»
+
+and, in the naming session that followed, the fifth level:
+
+> «Υπαρχει μια ακομη, not recommended at all»
+
+with the weights set as **«βαρη 10, 8, 5, 3, 1»**.
+
+**The branch ranking is gone.** An instructor no longer distributes a student
+across three aircraft types; he answers **ONE question about him, once**, and the
+question is about **fighters**. There is no aircraft-type ranking left anywhere
+in this application — not in the form, not in the aggregates, not on paper, not
+in the CSV, not in the database's read surface.
+
+### THE SCALE
+
+| storage key | display label | weight |
+| --- | --- | --- |
+| `strongly_recommended` | **Strongly Recommended** | **10** |
+| `recommended` | **Recommended** | **8** |
+| `alternate` | **Recommended as Alternate** | **5** |
+| `other_assignments` | **Recommended for Other Assignments** | **3** |
+| `strongly_other_assignments` | **Strongly Recommended for Other Assignments** | **1** |
+
+One row per (instructor, student) — the `unique (instructor_id, student_id)` key
+already said so, and now the row says so too.
+
+### WHY THERE IS NOT ONE NEGATIVE WORD ON IT
+
+This is the most important paragraph of the round. **No level on this scale
+contains a negative.** The lower two **redirect** — «η αξία σου είναι αλλού» —
+where an ordinary scale would **reject**. The command's own «not recommended at
+all» is therefore expressed **without the negation**, as the **emphatic
+redirect at weight 1**: the strongest thing the scale can say in that direction,
+said without telling anybody he is not wanted.
+
+The reason is not politeness. These sentences are read by **22-year-olds at the
+end of the hardest year of their lives**, and the one written about them is a
+sentence they will **remember for the rest of it**. So the judgement is carried
+by the **weights**, which the brief averages and the Wing Commander reads, and
+the **words** are carried by the person. A squadron can rank without wounding;
+this scale is the shape of that.
+
+The weights are deliberately **uneven** (10 · 8 · 5 · 3 · 1) rather than a flat
+5/4/3/2/1: 10→8 is a nuance between two recommendations, 8→5 a real step down,
+**5→3 is the crossing from fighters to elsewhere**, and 3→1 the emphasis inside
+that. A mean therefore separates a class the way the squadron actually reads it.
+
+**`level` may be NULL** and that is a real answer: an instructor who has recorded
+a comment, or "I have flown with him", but has not formed a view has said
+nothing — and a null is the only honest way to store it. It is never invented on
+his behalf, it is **excluded from the mean** (not scored zero), and the surfaces
+say *"has submitted but has not formed a view yet"*, which round 8's rule about
+the two silences still requires to be different from *"has not submitted"*.
+
+### THE FORM — ONE RADIO GROUP, AND A THIN RULE BEFORE THE FIFTH
+
+Per student, **one `role="radiogroup"` of five real radios in scale order**
+(arrow keys walk the scale, screen readers announce "3 of 5"), each showing its
+label and its weight, beside the existing comment and flew-with.
+
+**The fifth option is separated from the four above it by a thin 1px rule.** The
+four above place a student on the fighter track or beside it; the fifth places
+him firmly **elsewhere**. It is a different **kind** of statement, not merely the
+next step down, and it is not allowed to read as the continuation of a list.
+
+**Clearing:** clicking the level that is already selected returns the student to
+"no view formed yet" — the same escape the round-8 chips had, which a radio group
+does not offer by itself, and the only way to un-say something an instructor did
+not mean to say.
+
+**JUDGEMENT — no floating Save here (and why).** §4i·3 gave the *student* form a
+floating dirty-state Save because that form is metres long and its Save scrolls
+out of reach. This form is a five-option question whose Save sits inside the same
+small card, a thumb away — and there is **one card per student**, so a floating
+button would have to answer *"save which of them?"*: either save all (a batch
+write nobody asked for, which would also re-stamp rows the CO owns) or guess.
+So the card's **own** Save announces the dirt instead — it gains an accent ring
+the moment anything changes and drops it on save, which is what the floating
+button was ever for.
+
+### RETIRED ON WRITE, FROZEN IN THE TABLE
+
+The standing **"keep it, ask for it"** contract, applied to a whole shape rather
+than one field:
+
+- `proposals.rank_fighters / rank_helicopters / rank_transport_ff / nr_*` are
+  **kept in the table, frozen**, as the migration's audit trail. Nothing writes
+  them again and **nothing returns them to the API**.
+- A payload still carrying `ranks`, `not_recommended`, or any of the six column
+  names is **refused by name**, before anything is stored, with a curated `WA:`
+  message that names the field that replaced it and lists the five accepted
+  keys — because such a payload is not half-right, it is a client that has not
+  been reloaded.
+- An **invented level** is refused with the five spelled out
+  (`unknown assessment level "excellent" — the scale is exactly: …`).
+
+### THE MIGRATION OF THE LOCAL DEMO DATA
+
+**This is demo comfort, not doctrine.** The real **98B deployment starts with an
+empty `proposals` table**, so this block maps nothing there and merely records
+that it ran. It exists so the local demo is not blank on the morning the new form
+appears — an empty dashboard would look like data loss.
+
+Fighters was one of three branches and is now the only question, so the
+**fighters position** is what carries over and everything else in the old row is
+read as a statement *about fighters*:
+
+| old round-8 row | new level | weight |
+| --- | --- | --- |
+| Fighters ranked **1st** | `strongly_recommended` | 10 |
+| Fighters ranked **2nd** | `recommended` | 8 |
+| Fighters ranked **3rd** | `alternate` | 5 |
+| **not recommended for all three** branches | `strongly_other_assignments` | 1 |
+| **not recommended for Fighters** | `other_assignments` | 3 |
+| Fighters unranked, **another branch ranked** | `other_assignments` | 3 |
+| anything else | **level NULL** — comment kept, re-entry asked for | — |
+
+The all-out refusal is tested **before** the fighters-only one, or an instructor
+who ruled out every branch would be recorded as merely redirecting. The last row
+matters most: a proposal that said nothing about fighters **and** recommended
+nowhere else contains **no fighters opinion**, and inventing one — even the
+polite weight-3 one — would put words in an instructor's mouth that a student may
+one day read.
+
+**Idempotent by ledger, not by luck.** `wa.migrations (id, ran_at, note)` records
+the run; the block returns early if its row exists. Without that ledger, an
+instructor who deliberately **cleared** his level would have it resurrected from
+the frozen `rank_*` columns by the next re-apply — a retired judgement coming
+back to life behind his back.
+
+**Local run (2026-08-19), logged in `wa.migrations.note`:**
+`9 rows read · 3 strongly_recommended · 2 recommended · 2 alternate ·
+2 other_assignments (0 explicit fighters-refusal + 2 ranked-elsewhere) ·
+0 strongly_other_assignments · 0 left unassessed.`
+
+### THE AGGREGATE IS A WEIGHTED MEAN, NOT A SUM
+
+The round-8 branch scores were **sums**, and a sum rewards *being talked about*:
+a student four instructors placed second out-scored one that two placed first.
+With one assessment per instructor the honest statistic is the **mean of the
+weights** — «what does this squadron, on average, say about him for fighters» —
+and it is comparable between a student with nine assessments and one with three.
+
+Every surface **prints the arithmetic** rather than asking for trust:
+`(10×2 + 5×1) ÷ 3 = 8.33`, with the distribution beside it in the command's own
+shorthand — **«2× Strongly · 1× Alternate»**. The **class summary ranks on the
+mean**; a student nobody has assessed sorts **last, not at zero**, because "not
+asked about" is not the same as "placed at the bottom".
+
+### COLOUR — AND THE FIFTH LEVEL IS NOT AN ERROR STATE
+
+The chips use **tokens only**, in two families rather than one ramp, because the
+scale has two halves: `--good` for the two recommendations (filled, then soft),
+`--accent` for the alternate, `--hf` for the two redirects (soft, then filled).
+
+**The fifth level never wears `--bad`.** "Strongly Recommended for Other
+Assignments" is the squadron saying **where a pilot belongs**, not that something
+went wrong with him; a red chip would put back on the screen the exact negative
+the wording was written to keep off it. `--hf` is a neutral cool token defined in
+all eight palettes, and it is **filled** like the first level is filled — both
+ends of this scale are emphatic statements, so the **hue** says which direction
+while the **fill** says how strongly.
+
+**On paper the level is the SENTENCE, never a colour.** Every printed surface is
+monochrome, so the brief prints the level in full words with its weight and
+count; five tokens would collapse into five indistinguishable greys and, worse,
+invite a reader to guess which grey means trouble — of which this scale has none.
+
+### DEMO-FIXTURE NOTE (local DB only)
+
+Three seeded comments still spoke the retired model — one of them in the exact
+negative register this round exists to eliminate ("I would not send him to
+fighters"). They were reworded in the **local demo database only**, with
+`updated_at` deliberately not bumped because no instructor performed the edit.
+This is **not** part of the shipped migration, whose "comment preserved" promise
+stays literally true in code.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
    remove), Save any time, shows own last_update. Re-entry always allowed.
 2. **Instructor form**: student list; per student a **compact card of their
-   self-reported data** (counters, evaluations, solos) beside the ranking
-   pickers (1st/2nd/3rd **+ Not recommended**, round 8) + flew-with checkbox.
-   Save/edit any time. **Its own printable sheet** (round 8): one structured
-   block per student — branch table, flown-with, comment, and the student's
-   reported record.
+   self-reported data** (counters, evaluations, solos) beside **ONE radio group
+   of the five assessment levels for fighters** (round 10, §4j — scale order,
+   weights shown, **thin rule before the fifth**, click-the-selected-one to
+   clear) + comment + flew-with checkbox. Save/edit any time; the card's own
+   Save rings accent while dirty. **Its own printable sheet** (round 8, round-10
+   content): one structured block per student — the assessment in words with its
+   weight, flown-with, comment, and the student's reported record.
 3. **Admin dashboard** (CO) — THREE MODES (decision 2026-08-13):
-   a. **Overview**: one row per student (key counters, mini proposal bars,
+   a. **Overview**: one row per student (key counters, the **weighted mean** with
+      its five-segment distribution bar and `n/instructors`,
       completion status) + who has not submitted yet ·
       people/token management (generate/copy/revoke links) · CSV/JSON export.
    b. **Student analysis** (click a row — each student examined SEPARATELY):
@@ -854,21 +1066,19 @@ generated file states its scope in its own header.
       - **Dated-entry tables**: FAIL and ALMOST GOOD in full (flight code,
         items, instructor, grade), airsickness **when and with whom**, plus
         NFS · SMS · solos · FPC · CEF. All of it reaches the printed brief.
-      - Proposals panel (decision 2026-08-13): THREE BRANCH BOXES always visible
-        (Fighters · Helicopters · Transport–Firefighting). A rank selector
-        (1st / 2nd / 3rd choice chips) applies to ALL three boxes and refreshes
-        them SIMULTANEOUSLY; each box lists the SURNAMES of the instructors who
-        gave the student that rank for that branch ("Alfa, Bravo …").
-        Under each box, every NON-proposal appears as a POLITELY WORDED bullet —
-        e.g. "• Maj Alfa has not recommended Fighters for this student" and,
-        for instructors with no submission at all, "• Capt X has not submitted a
-        recommendation for this student yet". **Round 8** adds the third and
-        strongest bullet: "• Maj Alfa **does not recommend** Fighters for
-        this student" — the branch he explicitly refused, which is a judgement
-        and not a silence. Weighted score per branch (default
-        3/2/1, formula shown), count of 1st choices, % of proposers who flew
-        with them; drill-down list (who + **call sign**, duty, leadership, status, flew_with,
-        comment).
+      - **Assessment panel (round 10, §4j)** — ONE box where three branch boxes
+        used to be, because there is one question now. It shows the **weighted
+        mean** in large type, **the arithmetic that produced it**
+        (`(10×2 + 5×1) ÷ 3 = 8.33`) so the number can be checked rather than
+        trusted, the distribution in the command's shorthand
+        (**«2× Strongly · 1× Alternate»**), and then **one row per level in
+        scale order** — chip, weight, and the SURNAMES of the instructors who
+        gave it. Round 8's rule about the two silences survives the reshape as
+        two POLITELY WORDED bullets: "• Maj Alfa has submitted but has not
+        formed a view yet" (he looked and did not answer) and "• Capt X has not
+        submitted an assessment for this student yet" (he has not looked).
+        Drill-down list (who + **call sign**, duty, leadership, status, **the
+        level chip + its weight**, flew_with, comment).
       - **Prev / Next student arrows (and keyboard ←/→)** — the CO walks
         student-by-student during the actual Wing Commander brief.
    c. **Brief mode**: presentation-friendly (large type, one student per

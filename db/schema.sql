@@ -28,8 +28,18 @@
 -- ROUND 8 — PENDING IS GONE from the data model: the key is out of every
 -- section's whitelist, refused by name on write and stripped on read; an
 -- unflown fixed slot needs no flag to say it has not been flown.
--- ROUND 8 — a proposal branch has FOUR states: 1st / 2nd / 3rd, explicitly
--- NOT RECOMMENDED (proposals.nr_*), or untouched.
+-- ROUND 10 — THE FIVE-LEVEL ASSESSMENT, AND THERE IS NO AIRCRAFT TYPE LEFT.
+-- The command replaced the branch ranking with ONE assessment per instructor
+-- per student, about FIGHTERS: proposals.level, a closed list of five keys
+-- weighted 10 / 8 / 5 / 3 / 1 (wa.level_keys / wa.level_weight /
+-- wa.level_label). Not one negative word appears on the scale — the lower two
+-- levels redirect rather than reject, because the sentence written about a
+-- 22-year-old is one he remembers for life. The round-8 branch fields are
+-- RETIRED: frozen in the table as the migration's audit trail, refused on
+-- write by name, and returned by nothing. The aggregate is a WEIGHTED MEAN,
+-- not a sum — one assessment per instructor makes a sum a popularity count.
+-- ROUND 8 (superseded by round 10) — a proposal branch had FOUR states:
+-- 1st / 2nd / 3rd, explicitly NOT RECOMMENDED (proposals.nr_*), or untouched.
 -- ROUND 9 — THE SHARED ROSTER. One private roster file feeds every FDMS app.
 -- people gains external_oid (the roster's IMMUTABLE object id — unique,
 -- nullable, the join key of tools/gen-people-import.py) plus call_sign,
@@ -183,6 +193,9 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 -- ── "NOT RECOMMENDED" — the fourth state of a branch (round 8) ────────────
+-- RETIRED IN ROUND 10 together with the whole branch ranking — see the block
+-- below. The three columns are kept, frozen, as the audit trail the migration
+-- read: nothing writes them again, and nothing returns them to the API.
 -- Until round 8 a branch had three states: 1st / 2nd / 3rd, or untouched —
 -- and "untouched" had to carry two very different meanings at once ("I would
 -- not put him there" and "I have not formed a view"). The instructor can now
@@ -199,6 +212,62 @@ do $$ begin
     and (rank_transport_ff is null or nr_transport_ff = false)
   );
 exception when duplicate_object then null; end $$;
+
+-- ══ ROUND 10 — THE FIVE-LEVEL ASSESSMENT, AND IT IS ABOUT FIGHTERS ═════════
+-- COMMAND DIRECTIVE (2026-08-19). The branch ranking is gone. An instructor no
+-- longer distributes a student across three aircraft types; he answers ONE
+-- question about him, once, and the question is about FIGHTERS. There is no
+-- aircraft-type ranking left anywhere in this database.
+--
+-- THE SCALE — five levels, weights 10 / 8 / 5 / 3 / 1:
+--   strongly_recommended        10  "Strongly Recommended"
+--   recommended                  8  "Recommended"
+--   alternate                    5  "Recommended as Alternate"
+--   other_assignments            3  "Recommended for Other Assignments"
+--   strongly_other_assignments   1  "Strongly Recommended for Other Assignments"
+--
+-- NOT ONE NEGATIVE WORD APPEARS ON IT, and that is the design, not an
+-- accident of phrasing. The lower two levels REDIRECT — «your value is
+-- somewhere else» — where a plain scale would REJECT. These sentences are read
+-- by 22-year-olds at the end of the hardest year of their lives, and they will
+-- remember the wording of the one written about them for the rest of it. The
+-- command's own «not recommended at all» is therefore expressed WITHOUT the
+-- negation, as the emphatic redirect at weight 1: the strongest thing the
+-- scale can say in that direction, said without telling anybody he is not
+-- wanted. The weights carry the judgement; the words carry the person.
+--
+-- ONE ROW = ONE ASSESSMENT: the unique (instructor_id, student_id) key already
+-- said so, and now the row says so too. `level` may be NULL — an instructor who
+-- has recorded a comment or "I have flown with him" but has not formed a view
+-- has said nothing, and a null is the only honest way to store that. It is
+-- never invented on his behalf.
+alter table public.proposals add column if not exists level text;
+
+-- the closed list, enforced in the table as well as in the write path. The
+-- literals are spelled out here on purpose: a CHECK that called a function
+-- could be silently widened by redefining the function.
+-- MIRROR: wa.level_keys() below · app/app.js → WA.LEVELS.
+do $$ begin
+  alter table public.proposals add constraint proposals_level_chk check (
+    level is null or level in ('strongly_recommended', 'recommended', 'alternate',
+                               'other_assignments', 'strongly_other_assignments')
+  );
+exception when duplicate_object then null; end $$;
+
+-- ── ONE-SHOT MIGRATIONS, RECORDED (round 10) ──────────────────────────────
+-- A data migration is not idempotent by being careful; it is idempotent by
+-- being RECORDED. This file is re-applied on every deploy, so the round-10
+-- conversion of the branch ranks into levels must be able to say "already
+-- done" no matter what the data looks like afterwards. Without this ledger,
+-- an instructor who deliberately CLEARED his level would have it resurrected
+-- from the frozen rank_* columns by the next re-apply — a retired judgement
+-- coming back to life behind his back. The row here is what makes that
+-- impossible, and it carries the counts the migration reported.
+create table if not exists wa.migrations (
+  id      text primary key,
+  ran_at  timestamptz not null default now(),
+  note    text
+);
 
 -- ── ROUND 9 — THE GLOBAL ROSTER ───────────────────────────────────────────
 -- ONE roster now feeds every FDMS app (the scheduler and this one). It is a
@@ -756,6 +825,51 @@ language sql immutable as $$
       then (e - 'reason') || jsonb_build_object('reason', null, 'legacy', true)
     else e || jsonb_build_object('legacy', true)
   end
+$$;
+
+-- ══ THE ASSESSMENT SCALE (round 10) — THE CLOSED LIST AND ITS WEIGHTS ═════
+-- The five levels IN SCALE ORDER, strongest first. The order is the order the
+-- form draws them in and the order every table reads them in; the array
+-- position is the scale position, so nothing anywhere has to hard-code a
+-- sequence beside this one.
+-- MIRROR: proposals_level_chk above · app/app.js → WA.LEVELS.
+create or replace function wa.level_keys() returns text[]
+language sql immutable as $$
+  select array['strongly_recommended', 'recommended', 'alternate',
+               'other_assignments', 'strongly_other_assignments']::text[]
+$$;
+
+-- THE WEIGHT OF A LEVEL — 10 / 8 / 5 / 3 / 1, set by the command.
+-- The gaps are not decoration: 10→8 is a nuance between two recommendations,
+-- 8→5 is a real step down, 5→3 crosses from "fighters" to "elsewhere", and
+-- 3→1 is the emphasis inside that. A mean therefore separates a class the way
+-- the squadron reads it, which an even 5/4/3/2/1 would not.
+-- null for anything else — an unassessed row weighs nothing and, crucially,
+-- COUNTS as nothing: it is excluded from the mean rather than scored zero.
+create or replace function wa.level_weight(p_level text) returns int
+language sql immutable as $$
+  select case p_level
+    when 'strongly_recommended'       then 10
+    when 'recommended'                then 8
+    when 'alternate'                  then 5
+    when 'other_assignments'          then 3
+    when 'strongly_other_assignments' then 1
+    else null end
+$$;
+
+-- THE WORDS, character-exact. The server owns them because they are printed
+-- on a document that goes to the Wing Commander and shown to the student's
+-- own instructors: one spelling, one source, no drift between the form, the
+-- brief, the CSV and the print sheet.
+create or replace function wa.level_label(p_level text) returns text
+language sql immutable as $$
+  select case p_level
+    when 'strongly_recommended'       then 'Strongly Recommended'
+    when 'recommended'                then 'Recommended'
+    when 'alternate'                  then 'Recommended as Alternate'
+    when 'other_assignments'          then 'Recommended for Other Assignments'
+    when 'strongly_other_assignments' then 'Strongly Recommended for Other Assignments'
+    else null end
 $$;
 
 -- ── THE FIXED SOLO SLOTS (round 5) ────────────────────────────────────────
@@ -1847,10 +1961,9 @@ returns jsonb
 language plpgsql volatile as $$
 declare
   s public.people;
-  rf smallint; rh smallint; rt smallint;
-  nf boolean; nh boolean; nt boolean;
+  k text;
+  lv text;
   fw boolean; cm text;
-  n int;
   saved public.proposals;
   by_who text := case when p_as_admin then 'admin' else null end;
 begin
@@ -1862,42 +1975,35 @@ begin
   perform wa.chk(p_payload is not null and jsonb_typeof(p_payload) = 'object',
                  'proposal', 'payload must be an object');
 
-  -- ranks: null or integer 1..3, pairwise distinct
-  foreach cm in array array['fighters', 'helicopters', 'transport_ff'] loop
-    if (p_payload->'ranks') ? cm and jsonb_typeof(p_payload->'ranks'->cm) <> 'null' then
-      perform wa.chk(jsonb_typeof(p_payload->'ranks'->cm) = 'number'
-                     and (p_payload->'ranks'->>cm)::numeric in (1, 2, 3),
-                     'ranks.' || cm, 'rank must be 1, 2 or 3');
-    end if;
+  -- ── THE RETIRED BRANCH RANKING (round 10) — REFUSED ON WRITE, BY NAME ────
+  -- The standing "keep it, ask for it" contract, applied to a whole shape
+  -- rather than one field: what is already stored in rank_* / nr_* stays
+  -- READABLE in the table for ever (it is the audit trail of the migration),
+  -- but nothing may write it again. A payload that still carries the old
+  -- shape is not half-right, it is a client that has not been reloaded — so
+  -- it is refused before anything is stored, and the refusal names the field
+  -- that replaced it instead of complaining about an unknown key.
+  foreach k in array array['ranks', 'not_recommended',
+                           'rank_fighters', 'rank_helicopters', 'rank_transport_ff',
+                           'nr_fighters', 'nr_helicopters', 'nr_transport_ff'] loop
+    perform wa.chk(not (p_payload ? k), k,
+      format('the branch ranking was retired in round 10 — there is no aircraft-type ranking any more. Send ONE assessment about Fighters as "level", one of: %s',
+             array_to_string(wa.level_keys(), ' / ')));
   end loop;
-  rf := (p_payload->'ranks'->>'fighters')::smallint;
-  rh := (p_payload->'ranks'->>'helicopters')::smallint;
-  rt := (p_payload->'ranks'->>'transport_ff')::smallint;
 
-  -- "NOT RECOMMENDED" — THE FOURTH STATE OF A BRANCH (round 8).
-  -- A branch is ranked 1st / 2nd / 3rd, or explicitly NOT RECOMMENDED, or
-  -- untouched. The first two are mutually exclusive by definition: an
-  -- instructor who puts a student third for Helicopters has recommended
-  -- Helicopters. Untouched keeps meaning "no view expressed", which is what
-  -- the polite bullets have always said about it.
-  foreach cm in array array['fighters', 'helicopters', 'transport_ff'] loop
-    perform wa.chk_bool(p_payload->'not_recommended'->cm, 'not_recommended.' || cm);
-  end loop;
-  nf := coalesce((p_payload->'not_recommended'->>'fighters')::boolean, false);
-  nh := coalesce((p_payload->'not_recommended'->>'helicopters')::boolean, false);
-  nt := coalesce((p_payload->'not_recommended'->>'transport_ff')::boolean, false);
-  perform wa.chk(not (rf is not null and nf), 'not_recommended.fighters',
-                 'a branch cannot be ranked and not recommended at the same time');
-  perform wa.chk(not (rh is not null and nh), 'not_recommended.helicopters',
-                 'a branch cannot be ranked and not recommended at the same time');
-  perform wa.chk(not (rt is not null and nt), 'not_recommended.transport_ff',
-                 'a branch cannot be ranked and not recommended at the same time');
-
-  select count(distinct x) into n from unnest(array[rf, rh, rt]) x where x is not null;
-  perform wa.chk(n = (case when rf is null then 0 else 1 end
-                    + case when rh is null then 0 else 1 end
-                    + case when rt is null then 0 else 1 end),
-                 'ranks', 'the same position cannot be given to two branches');
+  -- ── THE ASSESSMENT — ONE CLOSED LIST OF FIVE (round 10) ─────────────────
+  -- Absent or null is a legitimate answer and means "no view formed yet": an
+  -- instructor may record that he has flown with a student, or leave a
+  -- comment, before he is ready to place him. Nothing is assumed for him.
+  -- Anything OUTSIDE the five is refused with the five named — an invented
+  -- level must never become a weight nobody can explain.
+  if p_payload ? 'level' and jsonb_typeof(p_payload->'level') <> 'null' then
+    perform wa.chk(jsonb_typeof(p_payload->'level') = 'string', 'level', 'must be text');
+    lv := wa.norm_line(p_payload->>'level');
+    perform wa.chk(lv = any(wa.level_keys()), 'level',
+      format('unknown assessment level "%s" — the scale is exactly: %s',
+             p_payload->>'level', array_to_string(wa.level_keys(), ' / ')));
+  end if;
 
   perform wa.chk_bool(p_payload->'flew_with', 'flew_with');
   fw := coalesce((p_payload->>'flew_with')::boolean, false);
@@ -1906,23 +2012,21 @@ begin
   -- typed is his own and is kept
   cm := nullif(wa.norm_free(coalesce(p_payload->>'comment', '')), '');
 
+  -- the frozen rank_* / nr_* columns are absent from BOTH lists below: a new
+  -- row leaves them at their defaults and an existing row keeps whatever the
+  -- migration read out of it, untouched, for ever.
   insert into public.proposals as pr
-         (instructor_id, student_id, rank_fighters, rank_helicopters,
-          rank_transport_ff, nr_fighters, nr_helicopters, nr_transport_ff,
-          flew_with, comment, entered_by)
-  values (p_instructor, p_student, rf, rh, rt, nf, nh, nt, fw, cm, by_who)
+         (instructor_id, student_id, level, flew_with, comment, entered_by)
+  values (p_instructor, p_student, lv, fw, cm, by_who)
   on conflict (instructor_id, student_id)
-  do update set rank_fighters = excluded.rank_fighters,
-                rank_helicopters = excluded.rank_helicopters,
-                rank_transport_ff = excluded.rank_transport_ff,
-                nr_fighters = excluded.nr_fighters,
-                nr_helicopters = excluded.nr_helicopters,
-                nr_transport_ff = excluded.nr_transport_ff,
+  do update set level = excluded.level,
                 flew_with = excluded.flew_with,
                 comment = excluded.comment,
                 entered_by = excluded.entered_by
   returning * into saved;
-  return jsonb_build_object('ok', true, 'updated_at', saved.updated_at, 'entered_by', by_who);
+  return jsonb_build_object('ok', true, 'updated_at', saved.updated_at,
+                            'entered_by', by_who, 'level', saved.level,
+                            'weight', wa.level_weight(saved.level));
 end $$;
 
 -- ── the ONE instructor dataset ────────────────────────────────────────────
@@ -1941,15 +2045,13 @@ language sql stable as $$
                'entered_by', wa.record_stamp(m.rec, r.entered_by),
                'co_entries', wa.co_entry_count(m.rec),
                'entries_total', wa.entry_count(m.rec),
+               -- ROUND 10: ONE assessment, about Fighters. The retired
+               -- rank_* / nr_* columns are deliberately NOT returned — the
+               -- form has nothing to draw them with, and a client that still
+               -- reads them would send them back and be refused.
                'my_proposal', case when pr.id is null then null else jsonb_build_object(
-                 'ranks', jsonb_build_object(
-                   'fighters', pr.rank_fighters,
-                   'helicopters', pr.rank_helicopters,
-                   'transport_ff', pr.rank_transport_ff),
-                 'not_recommended', jsonb_build_object(
-                   'fighters', pr.nr_fighters,
-                   'helicopters', pr.nr_helicopters,
-                   'transport_ff', pr.nr_transport_ff),
+                 'level', pr.level,
+                 'weight', wa.level_weight(pr.level),
                  'flew_with', pr.flew_with,
                  'comment', pr.comment,
                  'entered_by', pr.entered_by,
@@ -2365,14 +2467,8 @@ begin
                  -- squadron does — the call sign beside the surname
                  'call_sign', ip.call_sign, 'country', ip.country,
                  'test_pilot', ip.test_pilot,
-                 'ranks', jsonb_build_object(
-                   'fighters', pr.rank_fighters,
-                   'helicopters', pr.rank_helicopters,
-                   'transport_ff', pr.rank_transport_ff),
-                 'not_recommended', jsonb_build_object(
-                   'fighters', pr.nr_fighters,
-                   'helicopters', pr.nr_helicopters,
-                   'transport_ff', pr.nr_transport_ff),
+                 'level', pr.level,
+                 'weight', wa.level_weight(pr.level),
                  'flew_with', pr.flew_with, 'comment', pr.comment,
                  'entered_by', pr.entered_by,
                  'updated_at', pr.updated_at)
@@ -2380,64 +2476,57 @@ begin
         from public.proposals pr
         join public.people ip on ip.id = pr.instructor_id and ip.active
         where pr.student_id = s.id), '[]'::jsonb),
-      'aggregates', (
-        select jsonb_object_agg(b.branch, jsonb_build_object(
-          'by_rank', (
-            select jsonb_build_object(
-              '1', coalesce(jsonb_agg(x.last_name order by x.last_name) filter (where x.rk = 1), '[]'::jsonb),
-              '2', coalesce(jsonb_agg(x.last_name order by x.last_name) filter (where x.rk = 2), '[]'::jsonb),
-              '3', coalesce(jsonb_agg(x.last_name order by x.last_name) filter (where x.rk = 3), '[]'::jsonb))
-            from (
-              select ip.last_name,
-                     case b.branch when 'fighters' then pr.rank_fighters
-                                   when 'helicopters' then pr.rank_helicopters
-                                   else pr.rank_transport_ff end as rk
-              from public.proposals pr
-              join public.people ip on ip.id = pr.instructor_id and ip.active
-              where pr.student_id = s.id) x
-            where x.rk is not null),
-          'weighted', (
-            select coalesce(sum(4 - x.rk), 0)
-            from (
-              select case b.branch when 'fighters' then pr.rank_fighters
-                                   when 'helicopters' then pr.rank_helicopters
-                                   else pr.rank_transport_ff end as rk
-              from public.proposals pr
-              join public.people ip on ip.id = pr.instructor_id and ip.active
-              where pr.student_id = s.id) x
-            where x.rk is not null),
-          -- ROUND 8 — THE TWO SILENCES ARE NOT THE SAME SILENCE.
-          -- `not_recommended` = the instructor said so, out loud, on the form.
-          -- `not_this_branch` = he submitted a recommendation and simply did
-          -- not put this branch in it. The polite bullets word them
-          -- differently ("does not recommend" vs "has not recommended"), so
-          -- the two sets must not overlap: an explicit NR is only in the first.
-          'not_recommended', (
-            select coalesce(jsonb_agg(y.nm order by y.nm), '[]'::jsonb)
-            from (
-              select coalesce(ip.rank || ' ', '') || ip.last_name as nm
-              from public.proposals pr
-              join public.people ip on ip.id = pr.instructor_id and ip.active
-              where pr.student_id = s.id
-                and (case b.branch when 'fighters' then pr.nr_fighters
-                                   when 'helicopters' then pr.nr_helicopters
-                                   else pr.nr_transport_ff end)) y),
-          'not_this_branch', (
-            -- submitted a proposal for this student, did NOT rank this branch
-            -- and did NOT say "not recommended" either: no view expressed
-            select coalesce(jsonb_agg(y.nm order by y.nm), '[]'::jsonb)
-            from (
-              select coalesce(ip.rank || ' ', '') || ip.last_name as nm
-              from public.proposals pr
-              join public.people ip on ip.id = pr.instructor_id and ip.active
-              where pr.student_id = s.id
-                and (case b.branch when 'fighters' then pr.rank_fighters
-                                   when 'helicopters' then pr.rank_helicopters
-                                   else pr.rank_transport_ff end) is null
-                and not (case b.branch when 'fighters' then pr.nr_fighters
-                                       when 'helicopters' then pr.nr_helicopters
-                                       else pr.nr_transport_ff end)) y)))
-        from (values ('fighters'), ('helicopters'), ('transport_ff')) b(branch)),
+      -- ══ THE AGGREGATE (round 10) — A WEIGHTED MEAN, NOT A SUM ═══════════
+      -- The branch scores were SUMS, and a sum rewards being talked about: a
+      -- student four instructors placed second out-scored one that two placed
+      -- first. With one assessment per instructor the honest statistic is the
+      -- MEAN of the weights — «what does this squadron, on average, say about
+      -- him for fighters» — and it is comparable between a student with nine
+      -- assessments and one with three.
+      -- `n` counts only the rows that carry a level, so an instructor who has
+      -- submitted without forming a view neither raises nor lowers anybody:
+      -- he is named in `no_level` instead. `sum` travels beside the mean so
+      -- every surface can print the arithmetic instead of asking for trust.
+      'assessment', (
+        select jsonb_build_object(
+          'n', coalesce(x.n, 0),
+          'sum', coalesce(x.sm, 0),
+          'mean', case when coalesce(x.n, 0) = 0 then null
+                       else round(x.sm::numeric / x.n, 2) end,
+          -- how many said each level, in scale order — the distribution the
+          -- brief prints as «2× Strongly · 1× Alternate»
+          'counts', coalesce((
+            select jsonb_object_agg(k.lvl, coalesce(c.n, 0))
+            from unnest(wa.level_keys()) k(lvl)
+            left join lateral (
+              select count(*) as n
+              from public.proposals p2
+              join public.people i2 on i2.id = p2.instructor_id and i2.active
+              where p2.student_id = s.id and p2.level = k.lvl) c on true), '{}'::jsonb),
+          -- and WHO said it: the CO reads a level with the names beside it
+          'by_level', coalesce((
+            select jsonb_object_agg(k.lvl, coalesce(c.names, '[]'::jsonb))
+            from unnest(wa.level_keys()) k(lvl)
+            left join lateral (
+              select jsonb_agg(coalesce(i2.rank || ' ', '') || i2.last_name
+                               order by i2.last_name) as names
+              from public.proposals p2
+              join public.people i2 on i2.id = p2.instructor_id and i2.active
+              where p2.student_id = s.id and p2.level = k.lvl) c on true), '{}'::jsonb),
+          -- ROUND 8's RULE SURVIVES THE RESHAPE: the two silences are still
+          -- not the same silence. `no_level` = he submitted and formed no
+          -- view; `not_submitted` (below) = he has not answered at all.
+          'no_level', coalesce((
+            select jsonb_agg(coalesce(i2.rank || ' ', '') || i2.last_name order by i2.last_name)
+            from public.proposals p2
+            join public.people i2 on i2.id = p2.instructor_id and i2.active
+            where p2.student_id = s.id and p2.level is null), '[]'::jsonb))
+        from (
+          select count(*) filter (where pr.level is not null) as n,
+                 sum(wa.level_weight(pr.level)) as sm
+          from public.proposals pr
+          join public.people ip on ip.id = pr.instructor_id and ip.active
+          where pr.student_id = s.id) x),
       'not_submitted', coalesce((
         -- active instructors with no proposal at all for this student
         select jsonb_agg(coalesce(ip.rank || ' ', '') || ip.last_name order by ip.last_name)
@@ -2487,12 +2576,14 @@ begin
                           'last_update', r.last_update))
                         from public.student_records r
                         cross join lateral (select wa.migrate_record(r.data) as rec) m), '[]'::jsonb),
+    -- ROUND 10: the assessment and its weight. The frozen rank_* / nr_*
+    -- columns are not exported either — the export is what the app knows, and
+    -- the app no longer knows anything about aircraft types.
     'proposals', coalesce((select jsonb_agg(jsonb_build_object(
                     'instructor_id', pr.instructor_id, 'student_id', pr.student_id,
-                    'ranks', jsonb_build_object('fighters', pr.rank_fighters,
-                      'helicopters', pr.rank_helicopters, 'transport_ff', pr.rank_transport_ff),
-                    'not_recommended', jsonb_build_object('fighters', pr.nr_fighters,
-                      'helicopters', pr.nr_helicopters, 'transport_ff', pr.nr_transport_ff),
+                    'level', pr.level,
+                    'level_label', wa.level_label(pr.level),
+                    'weight', wa.level_weight(pr.level),
                     'flew_with', pr.flew_with, 'comment', pr.comment,
                     'entered_by', pr.entered_by,
                     'updated_at', pr.updated_at)) from public.proposals pr), '[]'::jsonb));
@@ -2531,6 +2622,83 @@ begin
     execute format('revoke all on function public.%s from public', fn);
     execute format('grant execute on function public.%s to anon, authenticated, service_role', fn);
   end loop;
+end $$;
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- ROUND 10 MIGRATION — THE BRANCH RANKS BECOME ONE LEVEL, ONCE
+-- ──────────────────────────────────────────────────────────────────────────
+-- THIS IS DEMO COMFORT, NOT DOCTRINE. The real 98B deployment starts with an
+-- EMPTY proposals table, so this block will map nothing there and simply
+-- record that it ran. It exists so the local demo (and any instance that
+-- already collected round-8 rankings) is not left blank on the morning the
+-- new form appears — an empty dashboard would look like data loss.
+--
+-- THE MAPPING. Fighters was one of three branches; it is now the only
+-- question. So the student's FIGHTERS POSITION is what carries over, and
+-- everything else in the old row is read as a statement about fighters:
+--   Fighters 1st                     → strongly_recommended        (10)
+--   Fighters 2nd                     → recommended                  (8)
+--   Fighters 3rd                     → alternate                    (5)
+--   not recommended for ALL THREE    → strongly_other_assignments   (1)
+--   not recommended for Fighters     → other_assignments            (3)
+--   Fighters unranked, another
+--     branch ranked                  → other_assignments            (3)
+--   anything else                    → LEVEL NULL, re-entry needed
+-- The all-out refusal is tested BEFORE the fighters-only one, or an
+-- instructor who ruled out every branch would be recorded as merely
+-- redirecting. The last line is the one that matters most: a row where the
+-- instructor said nothing about fighters and recommended nowhere else has NO
+-- fighters opinion in it, and inventing one — even the polite weight-3 one —
+-- would put words in his mouth that a student may one day read. Its comment
+-- and flew-with survive untouched; the level stays null and the form asks.
+--
+-- Idempotent by ledger (wa.migrations), not by luck: see the table's comment.
+do $$
+declare
+  n_rows int; n1 int; n2 int; n3 int; n5 int; n4a int; n4b int; n_open int;
+  msg text;
+begin
+  if exists (select 1 from wa.migrations where id = 'r10-five-level-scale') then
+    return;
+  end if;
+  select count(*) into n_rows from public.proposals;
+
+  update public.proposals set level = 'strongly_recommended'
+   where level is null and rank_fighters = 1;
+  get diagnostics n1 = row_count;
+
+  update public.proposals set level = 'recommended'
+   where level is null and rank_fighters = 2;
+  get diagnostics n2 = row_count;
+
+  update public.proposals set level = 'alternate'
+   where level is null and rank_fighters = 3;
+  get diagnostics n3 = row_count;
+
+  -- the explicit all-out negative, if any exists: nowhere at all → the
+  -- emphatic redirect, which is the strongest thing the scale says in that
+  -- direction and still says it without a negative word
+  update public.proposals set level = 'strongly_other_assignments'
+   where level is null and nr_fighters and nr_helicopters and nr_transport_ff;
+  get diagnostics n5 = row_count;
+
+  update public.proposals set level = 'other_assignments'
+   where level is null and nr_fighters;
+  get diagnostics n4a = row_count;
+
+  -- "he placed him somewhere, and it was not fighters" — a view about
+  -- fighters, expressed by where the student was put instead
+  update public.proposals set level = 'other_assignments'
+   where level is null and rank_fighters is null
+     and (rank_helicopters is not null or rank_transport_ff is not null);
+  get diagnostics n4b = row_count;
+
+  select count(*) into n_open from public.proposals where level is null;
+
+  msg := format('r10: %s proposal row(s) read · %s strongly_recommended · %s recommended · %s alternate · %s other_assignments (%s explicit fighters-refusal + %s ranked-elsewhere) · %s strongly_other_assignments · %s left unassessed (comment kept, re-entry required)',
+                n_rows, n1, n2, n3, n4a + n4b, n4a, n4b, n5, n_open);
+  insert into wa.migrations (id, note) values ('r10-five-level-scale', msg);
+  raise notice '%', msg;
 end $$;
 
 -- ── bootstrap: the admin person (created once; token survives re-runs) ─────

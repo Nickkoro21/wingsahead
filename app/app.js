@@ -511,6 +511,109 @@ WA.fpcEvaluatorOK = function (v) {
   return v === null || v === undefined || v === "" || WA.FPC_EVALUATORS.indexOf(v) >= 0;
 };
 
+/* ══════════════════════════════════════════════════════════════════════════
+   THE FIVE-LEVEL ASSESSMENT (round 10) — THE FINAL SCALE.
+   ──────────────────────────────────────────────────────────────────────────
+   The command replaced the branch ranking with ONE assessment per instructor
+   per student, and the question it answers is about FIGHTERS. There is no
+   aircraft-type ranking anywhere in this application any more.
+
+   NOT ONE NEGATIVE WORD APPEARS ON THIS SCALE. That is deliberate and it is
+   the most important thing about it. The bottom two levels REDIRECT — «your
+   value is somewhere else» — where an ordinary scale would REJECT. The people
+   these sentences are written about are 22 years old, at the end of the
+   hardest year they have had, and the one written about them is a sentence
+   they will remember for the rest of their lives. The command's own «not
+   recommended at all» is therefore expressed WITHOUT the negation, as the
+   emphatic redirect at weight 1: the strongest thing the scale can say in
+   that direction, said without telling anyone he is not wanted.
+
+   THE WEIGHTS carry the judgement so the words do not have to. The gaps are
+   uneven on purpose — 10→8 is a nuance between two recommendations, 8→5 a
+   real step down, 5→3 the crossing from fighters to elsewhere, 3→1 the
+   emphasis inside that — so a mean separates a class the way the squadron
+   reads it, which a flat 5/4/3/2/1 would not.
+
+     id     the stored key (proposals.level)
+     label  the words, character-exact, shown wherever there is room
+     short  the distribution form — «2× Strongly · 1× Alternate»
+     w      the weight
+
+   MIRROR: db/schema.sql → wa.level_keys() / wa.level_weight() /
+   wa.level_label(). Change one, change the other.
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.LEVELS = [
+  { id: "strongly_recommended", w: 10,
+    label: "Strongly Recommended", short: "Strongly" },
+  { id: "recommended", w: 8,
+    label: "Recommended", short: "Recommended" },
+  { id: "alternate", w: 5,
+    label: "Recommended as Alternate", short: "Alternate" },
+  { id: "other_assignments", w: 3,
+    label: "Recommended for Other Assignments", short: "Other Assignments" },
+  { id: "strongly_other_assignments", w: 1,
+    label: "Strongly Recommended for Other Assignments", short: "Strongly Other Assignments" },
+];
+/* THE FIFTH IS A DIFFERENT KIND OF STATEMENT, not merely the next step down —
+   the four above place a student on the fighter track or beside it, the fifth
+   places him firmly elsewhere. The form separates it with a thin rule for
+   exactly that reason, and this index is what draws the rule. */
+WA.LEVEL_SEP_AT = 4;
+WA.LEVEL_TIP = "One assessment per instructor per student, about fighters. " +
+  "The scale carries its judgement in the weights (10 · 8 · 5 · 3 · 1), never in a negative word: " +
+  "the lower levels say where a student's value lies, not that he has none.";
+WA.level = function (id) {
+  return WA.LEVELS.find((l) => l.id === id) || null;
+};
+WA.levelLabel = function (id) {
+  const l = WA.level(id);
+  return l ? l.label : "—";
+};
+WA.levelShort = function (id) {
+  const l = WA.level(id);
+  return l ? l.short : "—";
+};
+/* null — never 0 — for an unassessed row: it is excluded from the mean, not
+   scored zero, on this side exactly as in wa.level_weight() */
+WA.levelWeight = function (id) {
+  const l = WA.level(id);
+  return l ? l.w : null;
+};
+WA.levelPos = function (id) {
+  return WA.LEVELS.findIndex((l) => l.id === id);
+};
+
+/* THE WEIGHTED MEAN of a set of proposals — the ONE number the brief ranks on.
+   Rows without a level are not counted (an instructor who has formed no view
+   neither raises nor lowers anybody), so `n` can be smaller than the list.
+   Returns the arithmetic as well as the answer: every surface prints the
+   formula instead of asking the reader to trust the number. */
+WA.assess = function (props) {
+  const list = (props || []).filter((p) => WA.level(p.level));
+  const counts = {};
+  for (const l of WA.LEVELS) counts[l.id] = 0;
+  let sum = 0;
+  for (const p of list) { counts[p.level]++; sum += WA.levelWeight(p.level); }
+  const n = list.length;
+  return { n: n, sum: sum, mean: n ? sum / n : null, counts: counts };
+};
+/* "10×3 ÷ 3" · "(10×2 + 5×1) ÷ 3" — built from the counts in scale order, so
+   the printed formula is the calculation that actually happened */
+WA.levelFormula = function (counts, n) {
+  const terms = WA.LEVELS.filter((l) => (counts[l.id] || 0) > 0)
+    .map((l) => l.w + "×" + counts[l.id]);
+  if (!terms.length || !n) return "";
+  return (terms.length > 1 ? "(" + terms.join(" + ") + ")" : terms[0]) + " ÷ " + n;
+};
+/* «2× Strongly · 1× Alternate» — the command's own shorthand */
+WA.levelDist = function (counts) {
+  return WA.LEVELS.filter((l) => (counts[l.id] || 0) > 0)
+    .map((l) => counts[l.id] + "× " + l.short).join(" · ");
+};
+WA.meanText = function (m) {
+  return (m === null || m === undefined) ? "—" : m.toFixed(2);
+};
+
 WA.SECTIONS_META = {
   nfs:          { label: "NFS", tip: "NFS = Φύλλο μη Πτήσης (ΦΜΠ) — one dated entry per event, with the reason printed on form Α0473 (3-01 ΚΕΦ.9): failed questionnaire / failed pre-flight briefing / failed flight / failed F/S / illness / other cause. The count is derived." },
   sms:          { label: "SMS", tip: "SMS = the squadron's Special Monitoring Status — ΚΕΠΕ, «Κατάσταση Ειδικής Παρακολούθησης Εκπαίδευσης Μαθητή» (3-01 ΚΕΦ.2 §32). One entry per entrance, naming the condition it was raised under — the six thresholds printed in §32β (59% on a sortie or F/S · 63% on two consecutive flights · airsickness on two consecutive flights · one failed written/ground exam · 2 consecutive or 4 non-consecutive failed orals · the instructor's recommendation) or the Squadron CO / DO decision of the same paragraph's opening sentence — plus the exit date when it closes." },

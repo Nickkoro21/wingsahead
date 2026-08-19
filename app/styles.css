@@ -508,23 +508,123 @@ input:disabled, select:disabled { background: var(--panel); }
 .chip:hover { border-color: var(--accent); }
 .chip.is-on { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
 .chiprow { display: flex; gap: 6px; flex-wrap: wrap; }
-/* ── NOT RECOMMENDED — the fourth state of a branch (round 8) ──────────────
-   It is not a position, so it must not look like one: the rank chips fill
-   with the accent when chosen, this one fills with --bad. Unselected it is an
-   ordinary chip, because saying nothing is still the default. */
-.chip-nr.is-on {
-  background: var(--bad); color: #fff; border-color: transparent; font-weight: 600;
+/* ══ THE FIVE-LEVEL ASSESSMENT (round 10) ══════════════════════════════════
+   The colour scale descends with the levels, and it is built out of TWO
+   families rather than one ramp, because the scale itself has two halves:
+     · --good   the two recommendations (filled, then soft)
+     · --accent the alternate — still the fighter track, one step out
+     · --hf     the two redirects (soft, then filled)
+   THE FIFTH LEVEL NEVER WEARS --bad. "Strongly Recommended for Other
+   Assignments" is the squadron saying where a pilot belongs, not that
+   something is wrong with him; painting it the error colour would put back on
+   the screen the exact negative the wording was written to keep off it. --hf
+   is a neutral cool token, defined in all eight palettes, and it is FILLED
+   like the first level is filled — both ends of this scale are emphatic
+   statements, so the hue says which direction and the fill says how strongly.
+   Nothing here is a status; everything here is a placement. */
+.lvchip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 600; line-height: 1.7;
+  border-radius: 5px; padding: 0 4px 0 7px; white-space: nowrap; cursor: help;
+  border: 1px solid transparent;
 }
-html[data-mode="dark"] .chip-nr.is-on { color: #10161f; }
-.nrtag {
-  display: inline-block; font-size: 10.5px; font-weight: 600; color: var(--bad);
-  border: 1px solid rgba(var(--bad-rgb), 0.55); background: var(--bad-soft);
-  border-radius: 4px; padding: 0 5px; white-space: nowrap; cursor: help;
+.lvchip b {
+  font-size: 10px; font-weight: 700; border-radius: 3px; padding: 0 4px;
+  background: rgba(0, 0, 0, 0.16);
 }
-.polite li.is-nr { color: var(--bad); list-style: square; }
-.polite li.is-nr b { color: var(--bad); }
-.nrline {
-  font-size: 0.95em; color: var(--bad); margin-top: 6px; line-height: 1.5;
+html[data-mode="dark"] .lvchip b { background: rgba(255, 255, 255, 0.16); }
+.lv-strongly_recommended {
+  background: var(--good); color: var(--panel); border-color: transparent;
+}
+.lv-recommended {
+  background: var(--good-soft); color: var(--good); border-color: rgba(var(--good-rgb), 0.55);
+}
+.lv-alternate {
+  background: var(--accent-soft); color: var(--accent); border-color: rgba(var(--accent-rgb), 0.55);
+}
+.lv-other_assignments {
+  background: rgba(var(--hf-rgb), var(--tint)); color: var(--hf);
+  border-color: rgba(var(--hf-rgb), 0.55);
+}
+.lv-strongly_other_assignments {
+  background: var(--hf); color: var(--panel); border-color: transparent;
+}
+.lv-none {
+  background: transparent; color: var(--muted); border-color: var(--line);
+  font-weight: 400; padding: 0 7px;
+}
+
+/* the overview's distribution bars — one per level, in scale order */
+.minibars i.lb-strongly_recommended { background: var(--good); }
+.minibars i.lb-recommended { background: rgba(var(--good-rgb), 0.55); }
+.minibars i.lb-alternate { background: var(--accent); }
+.minibars i.lb-other_assignments { background: rgba(var(--hf-rgb), 0.55); }
+.minibars i.lb-strongly_other_assignments { background: var(--hf); }
+.mcell { white-space: nowrap; }
+.meanpill {
+  display: inline-block; font-size: 12px; font-weight: 700; color: var(--accent);
+  background: var(--accent-soft); border-radius: 5px; padding: 1px 7px; margin-right: 6px;
+  cursor: help;
+}
+.meanpill.is-none { color: var(--muted); background: transparent; font-weight: 400; }
+
+/* ── the instructor's picker: ONE question, five answers ──────────────────
+   A real radio group, so the arrow keys walk the scale and a screen reader
+   announces "3 of 5". Full-width rows, because this is a thumb-first form. */
+.lvlgroup {
+  display: flex; flex-direction: column; gap: 4px;
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px;
+  background: var(--panel-2); margin-bottom: 8px;
+}
+.lvl-opt {
+  display: flex; align-items: center; gap: 9px; cursor: pointer;
+  border: 1px solid transparent; border-radius: 6px; padding: 6px 8px;
+  font-size: 12.5px; line-height: 1.35;
+}
+.lvl-opt:hover { border-color: var(--line); background: var(--panel); }
+.lvl-opt input { accent-color: var(--accent); flex: none; margin: 0; }
+.lvl-opt .lvl-lbl { flex: 1 1 auto; }
+.lvl-opt .lvl-w {
+  flex: none; font-size: 10.5px; font-weight: 700; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 3px; padding: 0 5px;
+}
+.lvl-opt.is-on { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.lvl-opt.is-on .lvl-w { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.5); }
+.lvl-opt:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* THE THIN RULE before the fifth option. The four above it place a student on
+   the fighter track or beside it; the fifth places him firmly elsewhere. It is
+   a different KIND of statement, so it must not read as the mere continuation
+   of a list — this 1px line is the whole of that argument. */
+.lvl-sep { height: 1px; background: var(--line); margin: 5px 8px; }
+
+/* ── the admin's assessment box (one box where three used to be) ── */
+.assessbox {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 14px;
+}
+.asshead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.assmean { font-size: 26px; font-weight: 800; color: var(--accent); letter-spacing: 0.3px; }
+.assmean.is-none { color: var(--muted); font-weight: 500; }
+.asssub { font-size: 11.5px; color: var(--muted); }
+.assformula {
+  margin-left: auto; font-size: 11.5px; color: var(--muted);
+  font-variant-numeric: tabular-nums; cursor: help;
+  border: 1px dashed var(--line); border-radius: 5px; padding: 1px 7px;
+}
+.assdist { font-size: 12px; color: var(--text); margin-top: 6px; font-weight: 600; }
+.lvrows { margin-top: 10px; display: flex; flex-direction: column; gap: 3px; }
+.lvrow {
+  display: grid; grid-template-columns: minmax(150px, auto) 1fr auto;
+  gap: 10px; align-items: center; font-size: 12.5px;
+}
+.lvrow.is-empty { opacity: 0.5; }
+.lvrow .lvnames { line-height: 1.5; }
+.lvrow .lvn { font-size: 11px; color: var(--muted); font-weight: 700; }
+.assessbox .stats { font-size: 11px; color: var(--muted); margin-top: 8px; }
+.assline { font-size: 0.95em; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+@media (max-width: 620px) {
+  .lvrow { grid-template-columns: 1fr auto; }
+  .lvrow .lvnames { grid-column: 1 / -1; }
 }
 
 /* ── Instructor: student blocks ── */
@@ -542,16 +642,20 @@ html[data-mode="dark"] .chip-nr.is-on { color: #10161f; }
 .selfrep .line { font-size: 11.5px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
 .selfrep .line b { color: var(--text); font-weight: 600; }
 .selfrep .sub { padding-left: 10px; border-left: 2px solid var(--line); margin: 2px 0 2px 2px; }
-.rankrow { display: grid; grid-template-columns: minmax(96px, auto) 1fr; gap: 6px 10px; align-items: center; margin-bottom: 6px; }
-.rankrow .bl { font-size: 12.5px; font-weight: 600; }
-.rk-chips { display: flex; gap: 5px; flex-wrap: wrap; }
-.rk-chips .chip { padding: 5px 11px; font-size: 12px; }
 .prop-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
 .prop-foot input[type="text"] { flex: 1 1 160px; }
 .prop-foot .btn-primary { margin-left: auto; }
 .prop-st { font-size: 11.5px; color: var(--muted); width: 100%; }
 .prop-st.ok { color: var(--good); }
 .prop-st.err { color: var(--bad); }
+/* THE DIRTY SAVE (round 10). The student form floats its Save because that
+   form is metres long; this one is a five-option question with its Save in the
+   same small card, one per student — a floating button there would have to
+   answer "save which of them?". So the card's own button announces the dirt
+   instead, which is what the floating one was ever for. */
+.prop-foot .btn-primary.is-dirty {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 
 /* ── Admin ── */
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -607,12 +711,6 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .legendrow { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-top: 6px; }
 .legendrow i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 
-.branchbox { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
-.branchbox h4 { font-size: 13px; margin-bottom: 6px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.branchbox .score { margin-left: auto; font-size: 11.5px; color: var(--accent); font-weight: 700; white-space: nowrap; }
-.branchbox .names { font-size: 13px; line-height: 1.6; min-height: 21px; }
-.branchbox .names.none { color: var(--muted); font-style: italic; }
-.branchbox .stats { font-size: 11px; color: var(--muted); margin-top: 4px; }
 .polite { margin: 8px 0 0 16px; font-size: 11.5px; color: var(--muted); line-height: 1.55; }
 .polite li { margin-bottom: 2px; }
 
@@ -624,9 +722,14 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .brief .b-name { font-size: clamp(26px, 4vw, 40px); font-weight: 800; letter-spacing: 0.5px; }
 .brief .b-meta { font-size: clamp(14px, 1.8vw, 19px); color: var(--muted); margin-bottom: 14px; }
 .brief .kgrid { font-size: clamp(14px, 1.7vw, 18px); gap: 6px 18px; }
-.brief .branchbox .names { font-size: clamp(15px, 2vw, 20px); }
-.brief .branchbox h4 { font-size: clamp(14px, 1.7vw, 17px); }
-.brief .branchbox .score { font-size: clamp(12px, 1.5vw, 15px); }
+/* brief mode is read from the far side of a briefing room, so the assessment
+   grows with it — the mean most of all, since that is the number the Wing
+   Commander is looking for */
+.brief .assmean { font-size: clamp(30px, 5vw, 52px); }
+.brief .asssub, .brief .assformula { font-size: clamp(12px, 1.5vw, 16px); }
+.brief .assdist { font-size: clamp(14px, 1.8vw, 19px); }
+.brief .lvrow { font-size: clamp(14px, 1.8vw, 19px); }
+.brief .lvchip { font-size: clamp(12px, 1.4vw, 15px); }
 .brief-nav { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .brief-nav .pos { color: var(--muted); font-size: 14px; }
 .brief-nav .spacer { flex: 1; }
@@ -747,9 +850,9 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
   .pr-brand span { font-size: 16px; font-weight: 800; letter-spacing: 1px; }
   .pr-brand .pr-brand-sub { font-size: 10.5px; font-weight: 400; letter-spacing: 0.4px; margin-left: auto; color: #333; }
 
-  /* ── THE INSTRUCTOR'S PRINTED RECOMMENDATION SHEET (round 8) ─────────────
+  /* ── THE INSTRUCTOR'S PRINTED ASSESSMENT SHEET (round 8 / round 10) ──────
      One block per student, and a block is never split across two pages: an
-     instructor reading a torn table cannot check his own recommendation. */
+     instructor reading a torn table cannot check his own assessment. */
   .pr-ins-blk {
     break-inside: avoid; page-break-inside: avoid;
     border-top: 1px solid #000; padding-top: 3mm; margin-bottom: 5mm;
@@ -765,9 +868,15 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
     font-size: 10.5px; font-weight: 700; letter-spacing: 0.4px;
     margin: 2.5mm 0 1mm; text-transform: uppercase;
   }
-  /* an explicit "not recommended": colour is not available on paper, so the
-     cell says the words and wears the weight */
-  .pr-t td.pr-nr { font-weight: 700; }
+  /* ROUND 10 — ON PAPER THE LEVEL IS THE SENTENCE, NEVER A COLOUR. Every
+     printed surface is monochrome, so the assessment is carried by the words
+     and their weight alone. The screen's five-token scale would collapse into
+     five indistinguishable greys and, worse, would invite a reader to guess
+     which grey means trouble — of which the scale has none. */
+  .pr-t td.pr-lvl { font-weight: 700; }
+  .lvchip { border: none !important; background: none !important; color: #000 !important; }
+  .lvchip b { background: none !important; }
+  .lvchip b::before { content: "· weight "; }
   .pr-ins-blk .pr-t { margin-bottom: 2mm; }
 }
 

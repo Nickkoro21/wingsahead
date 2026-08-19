@@ -2,30 +2,20 @@
 /* ══════════════════════════════════════════════════════════════════════════
    Wings Ahead — INSTRUCTOR form (mobile-first).
    Student list; per student a compact card of their self-reported data
-   beside the ranking pickers (1st/2nd/3rd across the three branches,
-   uniqueness enforced) + flew-with + comment. Save/edit any time.
+   beside ONE assessment — the five-level scale about fighters (round 10) —
+   plus flew-with + comment. Save/edit any time.
+
+   ROUND 10: the branch ranking is gone. An instructor no longer distributes a
+   student across three aircraft types; he answers one question about him,
+   once, and the answer is one of five levels defined in app.js → WA.LEVELS.
+   The fifth option is separated from the four above by a thin rule because it
+   is a different KIND of statement, not merely the next step down.
 
    ROUND-4 ENTER-ON-BEHALF: the SAME form, bound to another instructor.
    opts.asCO swaps the two RPCs for their admin_* twins (identical validation
    server-side) and adds the "entering as CO" banner; nothing else forks.
      opts = { asCO: true, targetId: <instructor uuid> }   (admin token only)
    ══════════════════════════════════════════════════════════════════════════ */
-
-WA.BRANCHES = [
-  { id: "fighters", label: "Fighters" },
-  { id: "helicopters", label: "Helicopters" },
-  { id: "transport_ff", label: "Transport–Firefighting" },
-];
-WA.RANK_WORD = { 1: "1st", 2: "2nd", 3: "3rd" };
-/* ── THE FOURTH STATE OF A BRANCH (round 8) ────────────────────────────────
-   Ranked 1st / 2nd / 3rd · NOT RECOMMENDED · untouched. Until round 8 the
-   third had to carry two meanings at once — "I would not send him there" and
-   "I have not formed a view" — and the CO could not tell them apart on the
-   brief. They are now different answers, worded differently everywhere:
-   "does not recommend" is a judgement, "has not recommended" is a silence.
-   MIRROR: db/schema.sql → proposals.nr_* / the aggregates of admin_get_data. */
-WA.NR_WORD = "Not recommended";
-WA.NR_TIP = "The instructor says this branch is not for this student — different from simply not ranking it, which says nothing either way.";
 
 WA.renderInstructor = async function (view, me, opts) {
   const O = opts || {};
@@ -51,16 +41,11 @@ WA.renderInstructor = async function (view, me, opts) {
   for (const s of data.students) {
     const mp = s.my_proposal;
     P[s.person.id] = {
-      ranks: {
-        fighters: mp && mp.ranks ? mp.ranks.fighters : null,
-        helicopters: mp && mp.ranks ? mp.ranks.helicopters : null,
-        transport_ff: mp && mp.ranks ? mp.ranks.transport_ff : null,
-      },
-      nr: {
-        fighters: !!(mp && mp.not_recommended && mp.not_recommended.fighters),
-        helicopters: !!(mp && mp.not_recommended && mp.not_recommended.helicopters),
-        transport_ff: !!(mp && mp.not_recommended && mp.not_recommended.transport_ff),
-      },
+      /* null = no view formed yet, and it stays null until the instructor
+         picks one: nothing is assumed on his behalf. A migrated row whose
+         old ranking said nothing about fighters arrives here as null too, and
+         the card asks for the assessment rather than inventing it. */
+      level: (mp && WA.level(mp.level)) ? mp.level : null,
       flew_with: !!(mp && mp.flew_with),
       comment: (mp && mp.comment) || "",
       savedAt: mp ? mp.updated_at : null,
@@ -135,17 +120,30 @@ WA.renderInstructor = async function (view, me, opts) {
       </div>`;
   }
 
-  function chipRow(sid, branch) {
-    const cur = P[sid].ranks[branch];
-    const nr = P[sid].nr[branch];
-    return [1, 2, 3].map((n) => `
-      <button type="button" class="chip${cur === n ? " is-on" : ""}"
-              data-stu="${esc(sid)}" data-branch="${esc(branch)}" data-rank="${n}"
-              aria-pressed="${cur === n ? "true" : "false"}">${WA.RANK_WORD[n]}</button>`).join("") +
-      `<button type="button" class="chip chip-nr${nr ? " is-on" : ""}"
-               data-stu="${esc(sid)}" data-branch="${esc(branch)}" data-nr="1"
-               title="${esc(WA.NR_TIP)}"
-               aria-pressed="${nr ? "true" : "false"}">${esc(WA.NR_WORD)}</button>`;
+  /* ── THE ASSESSMENT PICKER (round 10) ────────────────────────────────────
+     ONE radio group per student — one question, one answer, in scale order.
+     A real <input type=radio> and not a chip row, because that is what this
+     control now IS: five mutually exclusive answers to a single question, and
+     the browser gives arrow-key navigation, the group role and the
+     screen-reader wording for free.
+     THE THIN RULE before the fifth option is not decoration. The four above it
+     place a student on the fighter track or beside it; the fifth places him
+     firmly elsewhere. It is a different kind of statement, so it is not
+     allowed to look like the mere continuation of a list.
+     CLEARING: clicking the selected level again returns the student to "no
+     view formed yet" — the same escape the round-8 chips had, which a radio
+     group does not offer by itself, and the only way to un-say something the
+     instructor did not mean to say. */
+  function levelGroup(sid) {
+    const cur = P[sid].level;
+    return WA.LEVELS.map((l, i) =>
+      (i === WA.LEVEL_SEP_AT ? `<div class="lvl-sep" role="separator"></div>` : "") + `
+      <label class="lvl-opt lvl-${esc(l.id)}${cur === l.id ? " is-on" : ""}">
+        <input type="radio" name="lvl-${esc(sid)}" value="${esc(l.id)}"
+               data-lvl="${esc(sid)}"${cur === l.id ? " checked" : ""}>
+        <span class="lvl-lbl">${esc(l.label)}</span>
+        <span class="lvl-w" title="weight — the scale carries its judgement here, never in a negative word">${l.w}</span>
+      </label>`).join("");
   }
 
   function stuCard(s) {
@@ -158,12 +156,11 @@ WA.renderInstructor = async function (view, me, opts) {
           <span class="meta">${esc([s.person.mn ? "MN " + s.person.mn : "", s.person.class ? "Class " + s.person.class : ""].filter(Boolean).join(" · "))}</span>
         </div>
         ${selfCard(s)}
-        <div class="hint" style="margin-bottom:6px">Your recommendation — rank up to three branches
-          (each position used once), or say <b>Not recommended</b> for a branch you would not send
-          this student to. A branch you leave untouched says nothing either way:</div>
-        ${WA.BRANCHES.map((b) => `
-          <div class="rankrow"><span class="bl">${esc(b.label)}</span>
-            <span class="rk-chips" data-chips="${esc(sid)}:${esc(b.id)}">${chipRow(sid, b.id)}</span></div>`).join("")}
+        <div class="hint" style="margin-bottom:6px">${asCO ? "This instructor&rsquo;s assessment" : "Your assessment"}
+          of this student <b>for fighters</b> &mdash; one answer, the strongest first.
+          Choosing the selected one again clears it; leaving it unanswered says nothing either way.</div>
+        <div class="lvlgroup" role="radiogroup"
+             aria-label="Assessment for fighters" data-lvlgroup="${esc(sid)}">${levelGroup(sid)}</div>
         <div class="prop-foot">
           <label class="ck"><input type="checkbox" data-flew="${esc(sid)}" ${p.flew_with ? "checked" : ""}>
             I have flown with this student</label>
@@ -171,7 +168,7 @@ WA.renderInstructor = async function (view, me, opts) {
                  value="${esc(p.comment)}" data-comment="${esc(sid)}">
           <button type="button" class="btn btn-primary btn-sm" data-save="${esc(sid)}">Save${asCO ? " as CO" : ""}</button>
           <span class="prop-st" data-st="${esc(sid)}">${p.savedAt
-            ? "Saved ✓ " + esc(fmtDT(p.savedAt)) : "No recommendation submitted yet."}</span>
+            ? "Saved ✓ " + esc(fmtDT(p.savedAt)) : "No assessment submitted yet."}</span>
           ${p.enteredBy === "admin"
             ? `<span class="cotag" data-cotag="${esc(sid)}" title="${esc(WA.CO_TIP)}">CO</span>` : ""}
         </div>
@@ -183,10 +180,10 @@ WA.renderInstructor = async function (view, me, opts) {
       ${asCO ? `
         <div class="cobar" role="note">
           <span class="cotag">CO</span>
-          <div class="cotxt"><b>Entering as CO</b> &mdash; you are filling in the recommendations of
+          <div class="cotxt"><b>Entering as CO</b> &mdash; you are filling in the assessments of
             <b>${esc(WA.personName(who, true))}</b> &mdash; everything you save here is tagged
             <b>&ldquo;entered by CO&rdquo;</b> and shown as such everywhere, until
-            ${esc(who.last_name || "the instructor")} saves the same recommendation themselves.</div>
+            ${esc(who.last_name || "the instructor")} saves the same assessment themselves.</div>
           ${backBtn}
         </div>` : ""}
       <section class="card">
@@ -194,12 +191,11 @@ WA.renderInstructor = async function (view, me, opts) {
           <span class="nm">${esc(WA.personName(who, true))}</span>
           <span class="meta">${esc([who.duty, who.leadership, who.status].filter(Boolean).join(" · "))}</span>
         </div>
-        <p class="hint" style="margin-top:6px">Utilization recommendations for the Wing Commander brief.
-          For each student, rank the branches ${asCO ? "this instructor recommends" : "you recommend"} —
-          <b>1st</b> is ${asCO ? "their" : "your"} strongest choice.
-          ${asCO ? "One" : "You"} may rank one, two or all three branches; the same position cannot go to
-          two branches (picking it again moves it). Tap a selected position to clear it. Each student card
-          also shows the data the student self-reported.
+        <p class="hint" style="margin-top:6px">Utilization assessments for the Wing Commander brief.
+          For each student, ${asCO ? "record the one assessment this instructor makes" : "give the one assessment you make"}
+          <b>about fighters</b>, on the five-level scale. The number beside each level is its weight
+          &mdash; the brief averages them, so the scale says what it means without a single
+          discouraging word. Each student card also shows the data the student self-reported.
           ${asCO ? "The instructor can overwrite any of this from their own link." : "You can return and edit any time."}</p>
       </section>
       ${data.students.length
@@ -211,23 +207,18 @@ WA.renderInstructor = async function (view, me, opts) {
   const root = $("ins-form");
 
   /* ══════════════════════════════════════════════════════════════════════════
-     THE PRINTED RECOMMENDATION SHEET (round 8).
-     Until now this view had no print block at all, so Ctrl+P printed the live
-     form — chips, buttons, filter boxes and all — and the instructor got a
-     screenshot of an app instead of a document. It now prints what the
-     document actually is: a header naming whose recommendations these are, and
-     one BLOCK PER STUDENT carrying (a) the identity line, (b) the branch table
-     — position or "Not recommended" per branch, with the fourth state spelled
-     out in words because paper has no colour — (c) whether the instructor has
-     flown with the student and their comment, and (d) the student's own
-     reported record in one compact table, which is the evidence the
-     recommendation rests on. Monochrome, like every other printed surface.
+     THE PRINTED ASSESSMENT SHEET (round 8, rewritten for round 10).
+     Until round 8 this view had no print block at all, so Ctrl+P printed the
+     live form — chips, buttons and all — and the instructor got a screenshot
+     of an app instead of a document. It prints what the document actually is:
+     a header naming whose assessments these are, and one BLOCK PER STUDENT
+     carrying (a) the identity line, (b) THE ASSESSMENT in words and its
+     weight, (c) whether the instructor has flown with the student and their
+     comment, and (d) the student's own reported record in one compact table,
+     which is the evidence the assessment rests on. Monochrome: on paper the
+     level is the SENTENCE, never a colour, so the fifth level reads as the
+     redirect it is instead of as whatever grey a printer decides to make it.
      ══════════════════════════════════════════════════════════════════════════ */
-  function branchWord(p, bid) {
-    if (p.ranks[bid]) return WA.RANK_WORD[p.ranks[bid]] + " choice";
-    if (p.nr[bid]) return WA.NR_WORD;
-    return "—";
-  }
   function buildInsPrint() {
     const holder = $("print-ins");
     if (!holder) return;
@@ -238,20 +229,20 @@ WA.renderInstructor = async function (view, me, opts) {
       const slots = WA.evalSlotRows(rec);
       const solos = WA.filled("solo_flights", rec.solo_flights);
       const doneSlots = solos.filter((e) => e.slot && WA.soloSlot(e.slot)).length;
-      const anySaid = WA.BRANCHES.some((b) => p.ranks[b.id] || p.nr[b.id]);
+      const lv = WA.level(p.level);
       return `
         <div class="pr-ins-blk">
           <h3>${esc(WA.personName(s.person, true))}
             <span class="pr-ins-meta">${esc([s.person.mn ? "MN " + s.person.mn : "",
               s.person.class ? "Class " + s.person.class : ""].filter(Boolean).join(" · "))}</span></h3>
-          <table class="pr-t"><thead><tr><th>Branch</th><th>Recommendation</th></tr></thead><tbody>
-            ${WA.BRANCHES.map((b) => `<tr><td>${esc(b.label)}</td>
-              <td${p.nr[b.id] ? ' class="pr-nr"' : ""}>${esc(branchWord(p, b.id))}</td></tr>`).join("")}
+          <table class="pr-t"><thead><tr><th>Assessment for fighters</th><th>Weight</th></tr></thead><tbody>
+            <tr><td${lv ? ' class="pr-lvl"' : ""}>${lv ? esc(lv.label) : "not assessed yet"}</td>
+              <td>${lv ? lv.w : "—"}</td></tr>
           </tbody></table>
           <p class="pr-ins-line"><b>Flown with this student:</b> ${p.flew_with ? "yes" : "no"}
-            &nbsp;·&nbsp; <b>Recommendation:</b> ${anySaid
+            &nbsp;·&nbsp; <b>Assessment:</b> ${lv
               ? "submitted" + (p.savedAt ? " " + esc(fmtDT(p.savedAt)) : "")
-              : "nothing recorded for any branch"}</p>
+              : "no view recorded"}</p>
           ${p.comment ? `<p class="pr-ins-line"><b>Comment:</b> ${esc(p.comment)}</p>` : ""}
           <p class="pr-ins-sub">The student's own reported record</p>
           <table class="pr-t"><thead><tr>
@@ -270,7 +261,7 @@ WA.renderInstructor = async function (view, me, opts) {
     holder.innerHTML = `
       <div class="pr-page">
         <div class="pr-brand"><img src="assets/364mea-240.png" alt=""><span>Wings Ahead</span>
-          <span class="pr-brand-sub">364 MEA — utilization recommendations</span></div>
+          <span class="pr-brand-sub">364 MEA — utilization assessments (fighters)</span></div>
         <h2>${esc(WA.personName(who, true))}</h2>
         <div class="pr-meta">${esc([who.duty, who.leadership, who.status].filter(Boolean).join(" · "))}
           · ${data.students.length} student${data.students.length === 1 ? "" : "s"}
@@ -287,45 +278,51 @@ WA.renderInstructor = async function (view, me, opts) {
   }
   WA._insPrint = buildInsPrint;
 
-  function refreshChips(sid) {
-    for (const b of WA.BRANCHES) {
-      const holder = root.querySelector(`[data-chips="${sid}:${b.id}"]`);
-      if (holder) holder.innerHTML = chipRow(sid, b.id);
+  /* the group redrawn from state WITHOUT replacing its DOM — the radios keep
+     their focus, so ↑/↓ still walks the scale after the first answer. An
+     innerHTML refresh here would throw the focus away on every arrow press. */
+  function syncLevels(sid) {
+    const holder = root.querySelector(`[data-lvlgroup="${sid}"]`);
+    if (!holder) return;
+    for (const lab of holder.querySelectorAll(".lvl-opt")) {
+      const input = lab.querySelector("input[data-lvl]");
+      const on = !!input && P[sid].level === input.value;
+      lab.classList.toggle("is-on", on);
+      if (input) input.checked = on;          // a cleared answer unchecks all five
     }
   }
+  /* THE DIRTY SAVE (round 10 judgement). The student form's FLOATING Save
+     exists because that form is metres long and its Save scrolls away; this
+     one is a five-option question with its Save inside the same small card,
+     never more than a thumb away, and there is one card PER STUDENT — a
+     floating button would have to answer "save which of them?", either by
+     saving all (a batch write nobody asked for, and one that would re-stamp
+     rows the CO owns) or by guessing. So the card's OWN Save announces the
+     dirt instead: it goes accent-ringed the moment anything changes, which is
+     what the floating button was ever for. */
   function markDirty(sid) {
     P[sid].dirty = true;
     if (WA._insPrint) WA._insPrint();
     const st = root.querySelector(`[data-st="${sid}"]`);
     st.className = "prop-st";
     st.textContent = "Unsaved changes — press Save.";
+    const btn = root.querySelector(`[data-save="${sid}"]`);
+    if (btn) btn.classList.add("is-dirty");
   }
 
   root.addEventListener("click", async (ev) => {
-    /* NOT RECOMMENDED — mutually exclusive with a rank, and a toggle of its
-       own: tapping it again returns the branch to untouched (round 8) */
-    const nrChip = ev.target.closest(".chip[data-nr]");
-    if (nrChip) {
-      const sid = nrChip.dataset.stu, branch = nrChip.dataset.branch;
-      const on = !P[sid].nr[branch];
-      P[sid].nr[branch] = on;
-      if (on) P[sid].ranks[branch] = null;
-      refreshChips(sid);
-      markDirty(sid);
-      return;
-    }
-    const chip = ev.target.closest(".chip[data-rank]");
-    if (chip) {
-      const sid = chip.dataset.stu, branch = chip.dataset.branch, n = Number(chip.dataset.rank);
-      const ranks = P[sid].ranks;
-      if (ranks[branch] === n) {
-        ranks[branch] = null;                 // tap again → clear
-      } else {
-        for (const b of WA.BRANCHES) if (ranks[b.id] === n) ranks[b.id] = null;  // uniqueness
-        ranks[branch] = n;
-        P[sid].nr[branch] = false;            // a rank IS a recommendation
-      }
-      refreshChips(sid);
+    /* THE ASSESSMENT — and its one non-native gesture: clicking the level that
+       is already chosen CLEARS it, returning the student to "no view formed
+       yet". A radio group cannot be emptied by keyboard or mouse on its own,
+       and without this an instructor who mis-clicked would be stuck having
+       said something about a person he meant to say nothing about.
+       P[sid].level still holds the PREVIOUS value at this point (the browser
+       has flipped the input, not our state), so the comparison is the test. */
+    const radio = ev.target.closest("input[data-lvl]");
+    if (radio) {
+      const sid = radio.dataset.lvl;
+      P[sid].level = (P[sid].level === radio.value) ? null : radio.value;
+      syncLevels(sid);
       markDirty(sid);
       return;
     }
@@ -337,7 +334,7 @@ WA.renderInstructor = async function (view, me, opts) {
       st.className = "prop-st";
       st.textContent = "Saving…";
       try {
-        const payload = { ranks: P[sid].ranks, not_recommended: P[sid].nr,
+        const payload = { level: P[sid].level,
                           flew_with: P[sid].flew_with,
                           comment: P[sid].comment.trim() || null };
         const res = asCO
@@ -346,9 +343,17 @@ WA.renderInstructor = async function (view, me, opts) {
           : await rpc("save_proposal", { p_token: WA.token, p_student_id: sid, p_payload: payload });
         P[sid].savedAt = res.updated_at;
         P[sid].enteredBy = res.entered_by || null;
+        /* the server's verdict, not our guess: wa.write_proposal normalises
+           the level and returns what it stored, so a value the form and the
+           database could ever disagree about is settled here */
+        P[sid].level = WA.level(res.level) ? res.level : null;
         P[sid].dirty = false;
+        syncLevels(sid);
+        save.classList.remove("is-dirty");
         st.className = "prop-st ok";
-        st.textContent = "Saved ✓ " + fmtDT(res.updated_at) + (asCO ? " — tagged as entered by CO" : "");
+        st.textContent = "Saved ✓ " + fmtDT(res.updated_at) +
+          (P[sid].level ? " — " + WA.levelLabel(P[sid].level) : " — no assessment recorded") +
+          (asCO ? " — tagged as entered by CO" : "");
         if (WA._insPrint) WA._insPrint();
         /* mirror the server's stamp: the OWNER saving clears it (db/schema.sql
            → wa.write_proposal), the CO saving sets it */
@@ -357,7 +362,7 @@ WA.renderInstructor = async function (view, me, opts) {
           st.insertAdjacentHTML("afterend",
             `<span class="cotag" data-cotag="${esc(sid)}" title="${esc(WA.CO_TIP)}">CO</span>`);
         } else if (!asCO && tag) tag.remove();
-        toast(asCO ? "Recommendation saved as CO — it is tagged" : "Recommendation saved");
+        toast(asCO ? "Assessment saved as CO — it is tagged" : "Assessment saved");
       } catch (e) {
         st.className = "prop-st err";
         st.textContent = "Save failed: " + e.message;
@@ -373,12 +378,26 @@ WA.renderInstructor = async function (view, me, opts) {
     else if (el.dataset.comment) { P[el.dataset.comment].comment = el.value; markDirty(el.dataset.comment); }
   });
 
+  /* ↑/↓/←/→ inside the group select without ever producing a click, so the
+     keyboard path needs its own listener. It only ever SELECTS — clearing is
+     the click-the-chosen-one gesture — and the guard keeps it from running a
+     second time over what the click handler has already applied. */
+  root.addEventListener("change", (ev) => {
+    const input = ev.target.closest && ev.target.closest("input[data-lvl]");
+    if (!input) return;
+    const sid = input.dataset.lvl;
+    if (P[sid].level === input.value) return;
+    P[sid].level = input.value;
+    syncLevels(sid);
+    markDirty(sid);
+  });
+
   /* Back to the dashboard — the admin token stays in the hash */
   if (asCO) {
     view.addEventListener("click", (ev) => {
       if (!ev.target.closest("[data-coback]")) return;
       if (Object.values(P).some((x) => x.dirty) && !window.confirm(
-        "Some recommendations have unsaved changes. Leave without saving?")) return;
+        "Some assessments have unsaved changes. Leave without saving?")) return;
       for (const k of Object.keys(P)) P[k].dirty = false;
       location.hash = WA.adminHash();
     });
