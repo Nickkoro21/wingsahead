@@ -156,8 +156,11 @@ WA.renderStudent = async function (view, me, opts) {
     evs.sort((a, b) => {
       const ka = a.evaluation in evIx ? evIx[a.evaluation] : 1000;
       const kb = b.evaluation in evIx ? evIx[b.evaluation] : 1000;
-      /* several attempts at the same checkride: oldest first, so the row that
-         stands for the slot is the latest one — the one every view compares */
+      /* several attempts at the same checkride: OLDEST FIRST, so the slot
+         header sits on the most recent one and the story reads downwards in
+         the order it happened. Round 11: that is a LAYOUT and no longer the
+         verdict — which attempt counts is decided by the pass rule
+         (WA.evalOperativeOf) and said on each row's badge, not by position. */
       return (ka - kb) || String(a.date || "9999").localeCompare(String(b.date || "9999")) ||
              (a._k - b._k);
     });
@@ -330,8 +333,19 @@ WA.renderStudent = async function (view, me, opts) {
 
   /* flown / not flown — the one badge that says what a fixed slot is.
      ROUND 8: there is no third state. An empty slot IS the not-yet-flown
-     state; it never needed a flag of its own. */
-  function slotBadge(sec, i, flown) {
+     state; it never needed a flag of its own.
+     ROUND 11 adds the ONE case where an empty slot row does not mean "never
+     flown": a checkride that was failed and whose RE-FLY has just been opened.
+     The slot row is empty because the re-fly has not been recorded yet, while
+     the attempt above it is very much flown, and a badge reading "not flown
+     yet" over a checkride the student has already sat would be a lie of
+     exactly one word. `waiting` carries that case and nothing else. */
+  function slotBadge(sec, i, flown, waiting) {
+    if (!flown && waiting) {
+      return `<span class="badge badge-warn" data-slotbadge="${esc(sec)}:${i}"
+        title="This checkride has been flown and did not pass — this row is the RE-FLY, and it has not been recorded yet"
+        >re-fly not recorded yet</span>`;
+    }
     return `<span class="badge ${flown ? "badge-good" : ""}" data-slotbadge="${esc(sec)}:${i}"
       title="${esc(flown ? "Flown — the details below are recorded"
                         : "This syllabus slot has not been flown yet")}"
@@ -351,6 +365,56 @@ WA.renderStudent = async function (view, me, opts) {
   function evaluatorF(sec, i, e) {
     return textF(sec, i, "evaluator", e.evaluator, "Evaluator",
                  INS.length ? "choose or type" : "surname or appointment", "dl-eval");
+  }
+
+  /* ── THE FPC TRIGGER — WHY THE LIST IS NOT THE EIGHT CHECKRIDES (round 11) ─
+     THE QUESTION ASKED (verbatim): «οι fpc γίνονται triggered μόνο από
+     αξιολογήσεις;» THE ANSWER FROM THE REGULATION: no. An FPC is not defined
+     by the flight that came before it — it is defined by the REFERRAL CASE
+     (λόγος παραπομπής) of ΠΔ 29/2020 Άρθρο 3. Παρ.3 sends cases 1α · 1β · 1γ ·
+     1δ to a Δοκιμή Προόδου in the air with the ΑΕ of the squadron and case 1ε
+     to one IN THE SIMULATOR, and only ONE of those five (1β) is a checkride:
+       1α  dangerous handling on ANY sortie, discipline not the cause
+       1β  0-59 % in a πτήση εξέτασης ή αξιολόγησης     ← the eight checkrides
+       1γ  after the stage's first 4 sorties: 0-49 % twice running, or
+           0-59 % three times running — ORDINARY sorties
+       1δ  0-59 % on >= 40 % of the Pre-SOLO phase or >= 20 % of the stage
+       1ε  the SIMULATOR thresholds — and its FPC is flown in the simulator
+     Three more paths arrive from elsewhere: a failed CEF re-flown badly
+     (3-01 ΚΕΦ.2 §30ζ), a failed first solo (§56), a third consecutive F/S
+     failure (§30στ → «Δοκιμή Προόδου στον εξομοιωτή»), and ΠΔ 29/2020 Άρθρο 3
+     παρ.17β prescribes an «κατ' εξαίρεση πτήση Δοκιμής Προόδου» after a
+     favourable Board — an FPC with NO triggering sortie at all.
+     SO THE PICKER IS UNCHANGED: every sortie of the stage, all four tracks,
+     the simulator sorties among them, free text still open, and the field
+     stays OPTIONAL because παρ.17β describes an FPC that has no trigger. What
+     round 11 adds is the RULE, written under the box, so the person filling it
+     in knows why the list is as wide as it is. */
+  const FPC_TRIGGER_NOTE =
+    "An FPC follows the referral case, not a kind of flight (ΠΔ 29/2020 Άρθρο 3): " +
+    "dangerous handling on any sortie (1α) · 0-59 % on a checkride (1β) · consecutive low grades " +
+    "on ordinary sorties (1γ) · the 40 % / 20 % ratio of the phase or the stage (1δ) · the " +
+    "simulator thresholds, whose FPC is flown in the simulator (1ε). So it may be any sortie — " +
+    "and after a favourable Board it may follow none at all (παρ.17β): leave this empty then.";
+  function fpcTriggerF(i, e) {
+    return pickerF("fpc", i, e, "flight_code", "Due to which stage flight",
+      TRIGGER_GROUPS,
+      { free: true, ph: "— which flight triggered it? —",
+        otherLabel: "Other… (type the code)", freePh: "e.g. C4590",
+        note: `<span title="${esc("ΠΔ 29/2020 Άρθρο 3 παρ.1 και παρ.3 — digitised in FDMS " +
+          "data/requirements/failure_procedures.json as fail-23 (παρ.3), fail-75 (1α), fail-16 " +
+          "(1β), fail-76 (1γ), fail-77 (1δ), fail-40 (1ε), fail-70 (παρ.17β)")}">${
+          esc(FPC_TRIGGER_NOTE)}</span>` });
+  }
+
+  /* the FPC result a record already holds — read-only, never a box (round 11) */
+  function fpcResultLegacy(e) {
+    if (!String((e && e.result) || "").trim()) return "";
+    return `<p class="legnote" title="${esc(WA.FPC_RESULT_TIP)}">Result &mdash;
+      <b>${esc(e.result)}</b>. This box was removed: an FPC's result is its
+      <b>grade</b> against the printed scale (60 % and above is the successful
+      characterisation). What you wrote is kept here exactly as it stands and counts for
+      nothing; it can be dropped, and it cannot be written again.</p>`;
   }
 
   /* FPC — EXACTLY TWO OPTIONS (round 6): the Squadron CO or the DO. No
@@ -393,6 +457,84 @@ WA.renderStudent = async function (view, me, opts) {
      MIRROR: WA.evalOrderState / the evaluations block of wa.validate_record. */
   function evalBlocker(id) {
     return WA.evalOrderState(S.data).blockedBy[id] || null;
+  }
+
+  /* ── WHICH ATTEMPT ACTUALLY COUNTS (round 11) ─────────────────────────────
+     The form lists the attempts at one checkride in date order, so the syllabus
+     slot header sits on the LAST of them. That is a layout, not a verdict:
+     since round 11 the attempt every comparison uses is the one the flight was
+     characterised SUCCESSFUL on, which may well be the row above. So each
+     attempt row says plainly whether it is the one that counts — the badge is
+     computed here, from the live form state, by the same helper the dashboard
+     uses (WA.evalOperativeOf), so the form and the brief cannot disagree.
+       → { C4590: <index of the operative row>, … } */
+  function evalOpIndex() {
+    const rows = WA.evalRows(S.data);
+    const out = {};
+    for (const d of WA.EVALUATIONS) {
+      const r = WA.evalOperativeOf(rows, d.id).row;
+      if (r) out[d.id] = r.i;
+    }
+    return out;
+  }
+  /* ── THE RE-FLY (round 11) ────────────────────────────────────────────────
+     Until this round the form COULD NOT record a re-flown checkride. The eight
+     evaluations are a fixed section with no "+ Add", so a student whose C4590
+     was failed and flown again had exactly one place to put the second grade:
+     on top of the first one — which destroys the failure the whole referral
+     chain of ΠΔ 29/2020 hangs on, and makes the pass-attempt rule the command
+     asked for unreachable on any record made from here on.
+     So the section gains ONE act, and it is a RULED EXCEPTION in the round-6
+     sense: not "+ Add an evaluation" (nobody may invent a ninth checkride),
+     but "record the re-fly of THIS checkride" — offered only where the
+     regulation says a re-fly comes from, i.e. an attempt that did not pass
+     (ΠΔ 29/2020 Άρθρο 3 παρ.1β: 0-59 % in a πτήση εξέτασης ή αξιολόγησης is
+     the referral case). It appends one more attempt at the SAME checkride id;
+     the failed one stays exactly where it is, visible and marked. */
+  function flownAttempts(id) {
+    return (S.data.evaluations || [])
+      .filter((x) => x.evaluation === id && !WA.slotEmpty("evaluations", x)).length;
+  }
+  /* "does this checkride currently stand on a PASS?" — the one bit the live
+     re-fly offer and the attempt badges hang on. null for a row with no
+     checkride identity, so a change on an unidentified import triggers
+     nothing. */
+  function e_passState(id) {
+    if (!WA.evalById(id)) return null;
+    return WA.evalOperativeOf(WA.evalRows(S.data), id).passed;
+  }
+  function reflyButton(e, opIx) {
+    if (!e.evaluation) return "";
+    const rows = WA.evalRows(S.data);
+    const op = WA.evalOperativeOf(rows, e.evaluation);
+    /* only after a graded attempt that did NOT pass, and only while no empty
+       re-fly row is already open for this checkride */
+    if (!op.row || op.row.grade === null || op.passed) return "";
+    const open = (S.data.evaluations || [])
+      .some((x) => x.evaluation === e.evaluation && WA.slotEmpty("evaluations", x));
+    if (open) return "";
+    return `<div class="addrow"><button type="button" class="btn btn-sm btn-add"
+      data-refly="${esc(e.evaluation)}"
+      title="${esc("This checkride was graded " + op.row.grade + " % — " +
+        WA.gradeBandText(op.row.grade) + ". Recording the re-fly adds ANOTHER attempt at " +
+        e.evaluation + " and keeps this one exactly as it is: the grade that counts becomes the " +
+        "attempt the flight was characterised successful on.")}"
+      >+ Record the re-fly of ${esc(e.evaluation)}</button>
+      <span class="hint">It did not pass (${esc(WA.gradeBandText(op.row.grade))}) &mdash; the
+        re-fly is a second attempt, and this one stays on the record.</span></div>`;
+  }
+
+  /* the badge one attempt row wears — nothing at all when the checkride was
+     flown once, because a single attempt needs no explanation */
+  function attemptBadge(e, i, opIx, n) {
+    if (!e.evaluation || n < 2) return "";
+    const counts = opIx[e.evaluation] === i;
+    const g = e.grade;
+    return counts
+      ? `<span class="badge badge-good" title="${esc(WA.PASS_ATTEMPT_TIP)}">${
+          WA.gradePassed(g) ? "counts — the successful attempt" : "counts — no attempt has passed yet"}</span>`
+      : `<span class="badge" title="${esc(WA.PASS_ATTEMPT_TIP)}">not counted${
+          WA.gradeBand(g) ? " · " + esc(WA.gradeBand(g).code) + " " + esc(WA.gradeBand(g).label) : ""}</span>`;
   }
 
   /* ── evaluation identity: the eight checkrides of the stage ── */
@@ -573,15 +715,23 @@ WA.renderStudent = async function (view, me, opts) {
         /* an already-filled row is never frozen — it must stay editable so it
            can be corrected or cleared; only an empty one waits its turn */
         const lock = !!blocker && !flown;
+        /* ROUND 11 — how many attempts this checkride holds, and which of them
+           is the operative one: the badge on every attempt row comes from that
+           and from nothing this section decides for itself */
+        const opIx = evalOpIndex();
+        const nAtt = e.evaluation
+          ? (S.data.evaluations || []).filter((x) => x.evaluation === e.evaluation).length : 0;
         const head = m.slot
           ? `<span class="slot-nm">${esc(WA.evalLabel(e.evaluation))}</span>
-             ${slotBadge("evaluations", i, flown)}
+             ${slotBadge("evaluations", i, flown,
+                         !flown && e.evaluation && flownAttempts(e.evaluation) > 0)}
+             ${attemptBadge(e, i, opIx, nAtt)}
              ${blocker ? `<span class="badge badge-warn" title="${esc(
                "Evaluations are flown and recorded in syllabus order — " + WA.EVAL_ORDER.join(" → ") +
                ". " + blocker + " has not been flown yet.")}">complete ${esc(blocker)} first</span>` : ""}`
           : (e.evaluation
-              ? `<span class="slot-nm">Earlier attempt &mdash; ${esc(WA.evalLabel(e.evaluation))}</span>
-                 <span class="badge" title="A checkride flown more than once: the latest attempt is the one every comparison uses">superseded</span>
+              ? `<span class="slot-nm">Another attempt &mdash; ${esc(WA.evalLabel(e.evaluation))}</span>
+                 ${attemptBadge(e, i, opIx, nAtt)}
                  ${rmB("evaluations", i)}`
               : `<span class="slot-nm warn-t">Imported evaluation &mdash; which checkride was it?</span>
                  ${rmB("evaluations", i)}`);
@@ -599,7 +749,8 @@ WA.renderStudent = async function (view, me, opts) {
           ${insF("evaluations", i, "with", e.with, "With (evaluator)", lock)}
           ${dateF("evaluations", i, "date", e.date, "Date", flown, lock)}
         </div>
-        <div class="rgrid2">${gradeF("evaluations", i, "grade", e.grade, "Grade (%)", false, lock)}<div></div></div>`;
+        <div class="rgrid2">${gradeF("evaluations", i, "grade", e.grade, "Grade (%)", false, lock)}<div></div></div>
+        ${m.slot ? reflyButton(e, opIx) : ""}`;
       } },
 
     /* ── FIXED SLOTS: the solos the syllabus prescribes ── */
@@ -660,20 +811,23 @@ WA.renderStudent = async function (view, me, opts) {
       blank: () => ({ slot: null, sortie: "", date: "", ng: false, grade: null, instructor: "" }) },
 
     { id: "fpc",
-      hint: "One entry per FPC — which stage flight it followed, who conducted it and the result. An FPC is conducted by the Squadron CO or the DO and by nobody else (round 6). Several FPC after the same flight are simply several entries. Leave the grade empty until the result is known.",
+      hint: "One entry per FPC — which stage flight it followed, who conducted it and the grade. An FPC is conducted by the Squadron CO or the DO and by nobody else (round 6). Several FPC after the same flight are simply several entries. Leave the grade empty until the result is known — the grade IS the result (round 11 removed the free-text “Result” box).",
       row: (e, i) => `
         <div class="rgrid2">
-          ${triggerF("fpc", i, e)}
+          ${fpcTriggerF(i, e)}
           ${fpcEvaluatorF(i, e)}
         </div>
         <div class="rgrid2">
           ${dateF("fpc", i, "date", e.date, "Date", true)}
           ${gradeF("fpc", i, "grade", e.grade, "Grade (%)")}
         </div>
-        ${textF("fpc", i, "result", e.result, "Result (optional)", "e.g. pass")}
+        ${/* ROUND 11 — «Αφαίρεσε το result optional.» No box is drawn. A value
+             written before the rule is shown here, read-only, so nothing that
+             was recorded disappears from its owner's own form. */ ""}
+        ${fpcResultLegacy(e)}
         <div class="rfoot"><span class="hint">${WA.checkLineHTML("fpc", e)}</span>
           ${rmB("fpc", i)}</div>`,
-      blank: () => ({ date: "", flight_code: "", evaluator: "", result: "", grade: null }) },
+      blank: () => ({ date: "", flight_code: "", evaluator: "", grade: null }) },
 
     { id: "cef",
       hint: "One entry per CEF — which stage flight it followed, who conducted it and the result. Leave the grade empty until the result is known.",
@@ -743,7 +897,9 @@ WA.renderStudent = async function (view, me, opts) {
   }
 
   /* which entries stand for a fixed slot: every solo that names one, and the
-     LATEST attempt at each of the eight checkrides */
+     LAST-LISTED attempt at each of the eight checkrides. That is the row the
+     slot HEADER sits on (the list is in date order — ensureSlots); which
+     attempt COUNTS is a separate question the badges answer (round 11). */
   function slotFlags(secId, list) {
     const out = list.map(() => false);
     if (secId === "solo_flights") {
@@ -807,7 +963,7 @@ WA.renderStudent = async function (view, me, opts) {
     if (sec && sec.fixed) {
       const slots = id === "solo_flights" ? WA.soloSlots().length : WA.EVALUATIONS.length;
       /* DISTINCT slots: a checkride flown twice is one checkride done, and the
-         superseded attempt is one of the extras */
+         attempt that is not the operative one is counted among the extras */
       const seen = {};
       list.forEach((e) => {
         if (WA.slotEmpty(id, e)) return;
@@ -1182,6 +1338,27 @@ WA.renderStudent = async function (view, me, opts) {
       }
       return;
     }
+    /* ROUND 11 — the ONE act the fixed evaluations section allows: another
+       attempt at a checkride that did not pass. It cannot invent a ninth
+       checkride (the id comes from the row it was pressed on), and it cannot
+       touch the attempt already there. ensureSlots re-sorts, so the new row
+       lands at the end of its own checkride's group. */
+    const refly = ev.target.closest("[data-refly]");
+    if (refly) {
+      const id = refly.dataset.refly;
+      if (!WA.evalById(id)) return;
+      S.data.evaluations.push({ evaluation: id, date: "", with: "", grade: null });
+      ensureSlots();
+      redraw("evaluations");
+      markDirty();
+      /* land the cursor in the date of the row that was just opened */
+      const at = S.data.evaluations.findIndex(
+        (x) => x.evaluation === id && WA.slotEmpty("evaluations", x));
+      const box = at < 0 ? null
+        : form.querySelector(`.rrow[data-row="evaluations:${at}"] [data-field="date"]`);
+      if (box) box.focus();
+      return;
+    }
     const rm = ev.target.closest("[data-rm]");
     if (rm) {
       const id = rm.dataset.rm;
@@ -1391,6 +1568,12 @@ WA.renderStudent = async function (view, me, opts) {
        the moment that state flips — the hints and the frozen boxes of every
        OTHER row depend on this one (round 6). */
     const wasRec = sec === "evaluations" && !WA.slotEmpty("evaluations", entry);
+    /* ROUND 11 — THE RE-FLY OFFER IS LIVE, the round-5b rule applied to a new
+       act: typing 48 into a checkride's grade must put "+ Record the re-fly"
+       on the screen on that keystroke, not on the next save. What decides the
+       offer is whether the operative attempt PASSED, so that is what is
+       remembered here and compared afterwards. */
+    const wasPass = sec === "evaluations" && e_passState(entry.evaluation);
 
     if (el.type === "checkbox") {
       entry[f] = el.checked;
@@ -1459,10 +1642,14 @@ WA.renderStudent = async function (view, me, opts) {
       const wasE = form.querySelector(`.rrow[data-row="sms:${i}"]`);
       if (wasE) wasE.classList.toggle("is-legacy", stillLegacy("sms", entry));
     } else if (sec === "evaluations" &&
-               wasRec !== !WA.slotEmpty("evaluations", entry)) {
+               (wasRec !== !WA.slotEmpty("evaluations", entry) ||
+                wasPass !== e_passState(entry.evaluation))) {
       /* this checkride has just become recorded (or stopped being): the
          syllabus-order state of every LATER slot changed with it, so the whole
-         section is redrawn — the date box the student is in keeps the focus */
+         section is redrawn — the date box the student is in keeps the focus.
+         ROUND 11 adds the second trigger: the operative attempt has just
+         crossed the pass threshold in one direction or the other, so the
+         re-fly offer and the attempt badges have to follow the keystroke. */
       const at = document.activeElement;
       const back = at && at.dataset ? at.dataset.field : null;
       redraw(sec);
@@ -1675,6 +1862,12 @@ WA.renderStudent = async function (view, me, opts) {
           return;
         }
         if (!intOK(k, i, e, "grade", "the grade")) return;
+        /* ROUND 11 — `result` still travels for BOTH sections, but for an FPC
+           it can only ever be a value that was already there: the form draws
+           no box, so nothing can put a new string into e.result, and the
+           server refuses a payload that grows the count (wa.fpc_result_count).
+           Carrying it is what KEEPS it — dropping it here would delete every
+           stored note the moment its owner pressed Save. */
         push(k, { date: e.date || null,
                   flight_code: WA.normCode(e.flight_code) || null,
                   evaluator: WA.normLine(e.evaluator) || null,

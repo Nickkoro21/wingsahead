@@ -17,8 +17,18 @@ WA.renderAdmin = async function (view, me) {
      it was left (tab + student), so Back is a return and not a reset */
   const back = WA._admReturn || {};
   WA._admReturn = null;
+  /* ── THE OVERVIEW CLASS FILTER (round 11) ─────────────────────────────────
+     «Στο overview να μπορώ να φιλτράρω ανά class.» The choice survives a
+     reload — a CO who briefs 98B all morning should not re-pick 98B after
+     every refresh — so it lives in localStorage, exactly like the palette.
+     "" is All, and a stored class that no longer has a student falls back to
+     All rather than showing an empty table nobody asked for. */
+  const CLS_KEY = "wa-adm-class";
+  const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
   const A = { data: null, people: null, tab: back.tab || "overview", sel: back.sel || 0,
-              metric: "fail", evalSel: "C4590", plotCat: "contact",
+              metric: "fail", evalSel: "C4590",
+              cls: lsGet(CLS_KEY) || "",
               loading: false, hi: null };
   WA._adminState = A;
 
@@ -105,6 +115,74 @@ WA.renderAdmin = async function (view, me) {
       (co ? " · " + co + " entered by CO" : "");
   }
 
+  /* ── THE CLASS FILTER, IN THREE FUNCTIONS ─────────────────────────────────
+     THE CLASSES ARE READ-ONLY — THEY FOLLOW THE MEMBERS. There is no list of
+     classes anywhere in this database: a class exists because a student
+     carries its name in people.class, and it stops existing when the last one
+     stops carrying it. So the chips are DERIVED from the active students on
+     every draw, in sorted order, and the unclassified students (people the
+     roster gave no class) collect under one honest chip rather than
+     disappearing — a student with no class must never become a student the
+     Overview cannot show. */
+  const NO_CLASS = "__noclass__";      /* the sentinel of "no class recorded" */
+  function classOf(s) { return String((s.person && s.person.class) || "").trim(); }
+  function classList() {
+    const seen = {}, out = [];
+    for (const s of (A.data ? A.data.students : [])) {
+      const c = classOf(s) || NO_CLASS;
+      if (!seen[c]) { seen[c] = 0; out.push(c); }
+      seen[c]++;
+    }
+    out.sort((a, b) => a === NO_CLASS ? 1 : b === NO_CLASS ? -1 : a.localeCompare(b));
+    return out.map((c) => ({ id: c, n: seen[c],
+      label: c === NO_CLASS ? "No class recorded" : c }));
+  }
+  /* a filter that matches nobody is not a filter, it is a stale choice —
+     so an id that has left the roster silently reverts to All */
+  function activeClass() {
+    if (!A.cls) return "";
+    return classList().some((c) => c.id === A.cls) ? A.cls : "";
+  }
+  /* the students the Overview and its three CSV exports are about */
+  function visible() {
+    const c = activeClass();
+    const all = A.data ? A.data.students : [];
+    return c ? all.filter((s) => (classOf(s) || NO_CLASS) === c) : all;
+  }
+  function classLabel(id) {
+    const hit = classList().find((c) => c.id === id);
+    return hit ? hit.label : id;
+  }
+  /* ── THE RULING ON EXPORT SCOPE (round 11) ────────────────────────────────
+     The three CSVs FOLLOW THE FILTER; the JSON export does NOT, and both are
+     said out loud on the buttons themselves.
+     WHY: the CSVs are one row per student (summary, assessments) or per entry
+     of a student (entries) — they are the table the CO is looking at, in a
+     spreadsheet — and they live in the toolrow directly above the filtered
+     table. A button that sits over 6 visible rows and silently writes 20 is a
+     button that produces the wrong attachment on a Monday morning, and the
+     filename is the only place that mistake can be caught. So the scope
+     travels in the filename: wings-ahead-summary-98B-20260819.csv.
+     WHY NOT THE JSON: that one is not a view, it is the BACKUP — a raw
+     server-side dump (public.admin_export) of people, records and proposals,
+     the thing you restore from. A partial backup that looks like a full one is
+     a trap, and the RPC has no class argument to narrow it with anyway. It
+     stays complete, and its tooltip says so. */
+  const CSV_SCOPE_TIP =
+    "Follows the class filter above — exactly the rows you can see, and the class travels in the file name. Pick “All classes” to export the whole squadron.";
+  const JSON_SCOPE_TIP =
+    "ALWAYS COMPLETE — the class filter does not apply. This is the raw backup of every person, record and assessment, straight from the server; a partial file that looked like a full one would be a trap to restore from.";
+  const CLASS_READONLY_TIP =
+    "The classes are read-only here — they follow the members. A class appears because a student carries its name, and disappears when the last one stops; there is no list to maintain. Change a student's class under People & links.";
+
+  /* the filename suffix of a filtered export: "-98B", "-no-class", "" */
+  function classSuffix() {
+    const c = activeClass();
+    if (!c) return "";
+    if (c === NO_CLASS) return "-no-class";
+    return "-" + String(c).replace(/[^0-9A-Za-z_-]+/g, "-").replace(/^-+|-+$/g, "");
+  }
+
   /* the "enter on behalf" hop: remember where the dashboard was, then hand
      over to the hash route (the admin token travels in the hash). */
   function editAs(kind, id) {
@@ -170,9 +248,15 @@ WA.renderAdmin = async function (view, me) {
   }
 
   function htmlOverview() {
-    const students = A.data.students;
+    const all = A.data.students;
+    const cls = activeClass();
+    const students = visible();
     const insTotal = A.data.instructors.filter((i) => i.active).length;
-    const rows = students.map((s, i) => {
+    /* THE ROW KEEPS ITS ORIGINAL INDEX. A.sel indexes A.data.students, so a
+       filtered table that renumbered its rows would open the wrong student's
+       analysis — quietly, and only while a filter is on. */
+    const rows = students.map((s) => {
+      const i = all.indexOf(s);
       const st = s._stats, c = s.completion;
       /* NOTE (round-4 W3c): no "Evals" column — every student converges to the
          same eight checkrides, so the count ranks nobody. The per-evaluation
@@ -202,25 +286,52 @@ WA.renderAdmin = async function (view, me) {
 
     const noRecord = students.filter((s) => !s.completion.has_record)
       .map((s) => esc(WA.personName(s.person, true)));
+    /* THE INSTRUCTOR CARD IS NOT FILTERABLE, and pretending otherwise would be
+       a lie in a badge. proposals_count arrives from the server counted over
+       EVERY student an instructor has assessed; there is no per-class
+       breakdown in the payload, so "7/12" cannot be re-derived for one class
+       here. It therefore stays the whole squadron's number and says so out
+       loud the moment a filter is on. */
     const insRows = A.data.instructors.map((i) => {
-      const done = i.proposals_count, all = A.data.students.length;
+      const done = i.proposals_count, n = all.length;
       const badge = !i.active ? `<span class="badge badge-bad">revoked</span>`
         : done === 0 ? `<span class="badge badge-bad">nothing yet</span>`
-        : done < all ? `<span class="badge badge-warn">${done}/${all}</span>`
-        : `<span class="badge badge-good">✓ ${done}/${all}</span>`;
+        : done < n ? `<span class="badge badge-warn">${done}/${n}</span>`
+        : `<span class="badge badge-good">✓ ${done}/${n}</span>`;
       return `<span style="margin-right:14px; white-space:nowrap">${esc(WA.personCall(i, true))} ${badge}</span>`;
     }).join(" ");
 
+    const list = classList();
+    const chip = (id, label, n, tip) =>
+      `<button type="button" class="chip${(cls === id) ? " is-on" : ""}" data-cls="${esc(id)}"
+        title="${esc(tip)}">${esc(label)} <span class="k">${n}</span></button>`;
+    const chips = chip("", "All classes", all.length,
+        "Every active student, whatever class they are in") +
+      list.map((c) => chip(c.id, c.label, c.n,
+        c.id === NO_CLASS
+          ? "Students the roster gave no class — they are still students, so they get their own chip instead of vanishing"
+          : "Only class " + c.label)).join("");
+
     return `
       <div class="toolrow">
-        <span class="hint">${students.length} students · ${insTotal} active instructors ·
+        <span class="hint">${students.length}${cls ? " of " + all.length : ""} students ·
+          ${insTotal} active instructors ·
           records: ${esc(sourceLine(students))} ·
-          data as of ${esc(fmtDT(A.data.generated_at))}</span>
+          data as of ${esc(fmtDT(A.data.generated_at))}${cls
+            ? ` · <b>filtered to ${esc(classLabel(cls))}</b>` : ""}</span>
         <span class="spacer"></span>
-        <button type="button" class="btn btn-sm" data-act="csv-summary">Export CSV — summary</button>
-        <button type="button" class="btn btn-sm" data-act="csv-entries">Export CSV — every entry</button>
-        <button type="button" class="btn btn-sm" data-act="csv-assessments">Export CSV — assessments</button>
-        <button type="button" class="btn btn-sm" data-act="json-export">Export JSON — full</button>
+        <button type="button" class="btn btn-sm" data-act="csv-summary"
+          title="${esc(CSV_SCOPE_TIP)}">Export CSV — summary${cls ? " (" + classLabel(cls) + ")" : ""}</button>
+        <button type="button" class="btn btn-sm" data-act="csv-entries"
+          title="${esc(CSV_SCOPE_TIP)}">Export CSV — every entry${cls ? " (" + classLabel(cls) + ")" : ""}</button>
+        <button type="button" class="btn btn-sm" data-act="csv-assessments"
+          title="${esc(CSV_SCOPE_TIP)}">Export CSV — assessments${cls ? " (" + classLabel(cls) + ")" : ""}</button>
+        <button type="button" class="btn btn-sm" data-act="json-export"
+          title="${esc(JSON_SCOPE_TIP)}">Export JSON — full</button>
+      </div>
+      <div class="chiprow filterrow" role="group" aria-label="Filter by class">
+        <span class="k" style="align-self:center">Class</span>${chips}
+        <span class="k" style="align-self:center" title="${esc(CLASS_READONLY_TIP)}">&#9432;</span>
       </div>
       <div class="tblwrap"><table class="tbl">
         <thead><tr>
@@ -228,12 +339,18 @@ WA.renderAdmin = async function (view, me) {
           <th>FAIL</th><th>Almost Good</th><th>Airsick</th>
           <th title="${esc(WA.secTip("fpc"))}">FPC</th><th title="${esc(WA.secTip("cef"))}">CEF</th>
           <th title="${esc(WA.LEVEL_TIP)}">Assessment (fighters)</th><th>Self-report</th><th>Enter for</th>
-        </tr></thead><tbody>${rows}</tbody></table></div>
+        </tr></thead><tbody>${rows || `<tr><td colspan="13" class="hint">No student in
+          ${esc(classLabel(cls))}.</td></tr>`}</tbody></table></div>
       <div class="grid2" style="margin-top:12px">
-        <div class="card"><h3>Students without a self-report</h3>
-          <p class="hint">${noRecord.length ? noRecord.join(", ") : "Everyone has submitted ✓"}</p></div>
+        <div class="card"><h3>Students without a self-report${cls ? " — " + esc(classLabel(cls)) : ""}</h3>
+          <p class="hint">${noRecord.length ? noRecord.join(", ")
+            : (students.length ? "Everyone has submitted ✓" : "—")}</p></div>
         <div class="card"><h3>Instructor submissions</h3>
-          <p class="hint" style="line-height:2">${insRows || "No instructors yet."}</p></div>
+          <p class="hint" style="line-height:2">${insRows || "No instructors yet."}</p>
+          ${cls ? `<p class="hint"><b>Not filtered.</b> Each badge counts the assessments that
+            instructor has submitted across <b>all ${all.length}</b> students — the payload carries
+            no per-class breakdown, so this card cannot honestly be narrowed to
+            ${esc(classLabel(cls))}.</p>` : ""}</div>
       </div>`;
   }
 
@@ -301,20 +418,21 @@ WA.renderAdmin = async function (view, me) {
   }
 
   /* ── per-evaluation comparison: the SAME checkride across the class ──
-     one value per student = their LATEST graded attempt (WA.evalLatest). */
+     ROUND 11 — one value per student = their PASS ATTEMPT (WA.evalGrade): the
+     attempt the flight was characterised successful on, not merely the latest.
+     Every class statistic on this dashboard now reads through that one rule. */
   function evalValues(id) {
-    return A.data.students.map((x) => {
-      const r = WA.evalLatest(x._evals, id);
-      return { name: x.person.last_name, v: r ? r.grade : null };
-    });
+    return A.data.students.map((x) => ({
+      name: x.person.last_name, v: WA.evalGrade(x._evals, id),
+    }));
   }
 
   function evalCompare(s) {
     const id = A.evalSel;
     const all = evalValues(id);
     const vals = all.filter((x) => x.v !== null).map((x) => x.v);
-    const mineRow = WA.evalLatest(s._evals, id);
-    const mine = mineRow ? mineRow.grade : null;
+    const op = WA.evalOperativeOf(s._evals, id);
+    const mine = op.row ? op.row.grade : null;
     /* ROUND 8 — the axis starts just below the lowest grade on the plot, so
        the four bars differ by what the grades differ by (min0), and still ends
        at 100, so nothing is exaggerated. */
@@ -333,33 +451,62 @@ WA.renderAdmin = async function (view, me) {
         ${vals.length ? ` &mdash; best ${esc(Math.max(...vals))}%, worst ${esc(Math.min(...vals))}%,
         average ${esc(round1(vals.reduce((a, b) => a + b, 0) / vals.length))}%` : ""}
         (n = ${vals.length} of ${A.data.students.length} students).
-        ${mine === null ? "<b>This student has no graded attempt on this evaluation.</b>" : ""}</p>`;
+        ${mine === null ? "<b>This student has no graded attempt on this evaluation.</b>" : ""}
+        ${op.attempts > 1 ? `<br><b>${op.attempts} attempts</b> on this checkride &mdash; the value
+          plotted is ${op.passed
+            ? "the one the flight was characterised <b>successful</b> on"
+            : "the latest, and <b>none of them passed yet</b>"}
+          <span class="tipdot" tabindex="0" role="note" title="${esc(WA.PASS_ATTEMPT_TIP)}"
+            aria-label="${esc(WA.PASS_ATTEMPT_TIP)}">&#9432;</span>.` : ""}</p>`;
   }
 
-  /* ── per-category plot: the category's evaluations in SYLLABUS order ──
-     (never date order) with the class average as a faint reference. */
-  function plotDef(cat) {
-    if (cat === "fpc") {
+  /* ── THE PLOT DEFINITIONS (round 11) ──────────────────────────────────────
+     "eval" — ALL EIGHT CHECKRIDES ON ONE LINE, in syllabus order. The four
+     per-category tabs are gone: «Στο Grades per category να πλωτάρονται οι 8
+     αξιολογήσεις όλες μαζί. Ανά κατηγορία απλώς στα χ labels άλλο χρώμα.»
+     A tab per track meant the CO saw four charts of two or three points each
+     and had to hold the shape of the stage in his head; one line of eight
+     shows it. The track survives where it belongs — in the COLOUR of the x
+     label (WA.evalCatColor), which needs no click to read.
+     "fpc" — its own block, below, and NOT a fifth colour on the same line:
+     an FPC has no position in the syllabus, so its points cannot share an x
+     axis that IS the syllabus without inventing an order the flights do not
+     have. See the ruling above the FPC block in htmlAnalysis. */
+  function plotDef(kind, s) {
+    if (kind === "fpc") {
+      /* THE AXIS IS THE CLASS'S DEEPEST FPC COUNT, so #2 means the same
+         position for everybody — but a student with NO FPC gets no plot at
+         all. Before round 11 the FPC lived behind a tab nobody opened unless
+         they wanted it; now it is always on screen, and drawing "FPC #1 not
+         flown · FPC #2 not flown" for a student who has never been referred
+         puts an absence on the page as though it were a gap in his record. */
+      if (s && !s._fpc.length) return { pts: [], none: true };
       const n = A.data.students.reduce((m, x) => Math.max(m, x._fpc.length), 0);
       return {
         note: "An FPC has no position in the syllabus — entries are numbered in date order.",
-        pts: Array.from({ length: n }, (_, k) => ({ key: k, label: "FPC #" + (k + 1), title: "FPC #" + (k + 1) })),
+        pts: Array.from({ length: n }, (_, k) => ({ key: k, cat: "fpc",
+          label: "FPC #" + (k + 1), title: "FPC #" + (k + 1) })),
         val: (x, p) => (x._fpc[p.key] ? x._fpc[p.key].grade : null),
+        op: (x, p) => (x._fpc[p.key] ? { row: x._fpc[p.key], passed: WA.gradePassed(x._fpc[p.key].grade), attempts: 1 } : null),
         row: (x, p) => (x._fpc[p.key] ? "fpc:" + x._fpc[p.key].i : null),
       };
     }
     return {
-      note: "Shown in syllabus order — never in date order.",
-      pts: WA.evalsOfCat(cat).map((d) => ({ key: d.id, label: d.id, title: WA.evalLabel(d.id) })),
-      val: (x, p) => { const r = WA.evalLatest(x._evals, p.key); return r ? r.grade : null; },
-      row: (x, p) => { const r = WA.evalLatest(x._evals, p.key); return r ? "ev:" + r.i : null; },
+      note: "All eight checkrides in syllabus order — never in date order. The x label is coloured by track.",
+      pts: WA.EVALUATIONS.map((d) => ({ key: d.id, cat: d.cat,
+        label: d.id, title: WA.evalLabel(d.id) })),
+      val: (x, p) => WA.evalGrade(x._evals, p.key),
+      op: (x, p) => WA.evalOperativeOf(x._evals, p.key),
+      row: (x, p) => { const r = WA.evalOperative(x._evals, p.key); return r ? "ev:" + r.i : null; },
     };
   }
 
-  function catPlotSVG(s) {
-    const def = plotDef(A.plotCat);
+  function catPlotSVG(s, kind) {
+    const def = plotDef(kind, s);
     if (!def.pts.length)
-      return `<p class="hint" style="padding:6px 2px">Nothing to plot in this category yet.</p>`;
+      return `<p class="hint" style="padding:6px 2px">${def.none
+        ? "No FPC on this student's record &mdash; nothing to plot."
+        : "Nothing to plot here yet."}</p>`;
     const mine = def.pts.map((p) => def.val(s, p));
     const cls = def.pts.map((p) => {
       const vs = A.data.students.map((x) => def.val(x, p)).filter((v) => v !== null);
@@ -367,7 +514,7 @@ WA.renderAdmin = async function (view, me) {
     });
     const seen = mine.concat(cls).filter((v) => v !== null);
     if (!seen.length)
-      return `<p class="hint" style="padding:6px 2px">No grades reported in this category yet
+      return `<p class="hint" style="padding:6px 2px">No grades reported here yet
         &mdash; the ${def.pts.length} position${def.pts.length === 1 ? "" : "s"} of the plot are still empty.</p>`;
     let lo = Math.min(...seen), hi = Math.max(...seen);
     if (hi - lo < 10) { const c = (hi + lo) / 2; lo = c - 5; hi = c + 5; }
@@ -402,41 +549,104 @@ WA.renderAdmin = async function (view, me) {
     const myDots = def.pts.map((p, i) => {
       const v = mine[i];
       const key = def.row(s, p);
-      const xLab = `<text x="${x(i)}" y="${H - B + 15}" text-anchor="middle" style="fill:var(--muted);font-size:10px">${esc(p.label)}</text>`;
+      const op = def.op(s, p) || { passed: false, attempts: 0 };
+      /* ROUND 11 — THE X LABEL CARRIES THE TRACK, in colour and nowhere else.
+         It is the whole reason the four category tabs could go away, so it is
+         also the one label on this chart that is not --muted. */
+      const xLab = `<text x="${x(i)}" y="${H - B + 15}" text-anchor="middle"
+        style="fill:${esc(WA.evalCatColor(p.cat))};font-size:10.5px;font-weight:600"
+        ><title>${esc(p.title + " — " + WA.evalCatLabel(p.cat))}</title>${esc(p.label)}</text>`;
       if (v === null) {
         return xLab + `<text x="${x(i)}" y="${y(lo) - 4}" text-anchor="middle" style="fill:var(--muted);font-size:9px">not flown</text>`;
       }
-      return xLab +
-        `<circle cx="${x(i)}" cy="${y(v)}" r="4.4" style="fill:var(--accent)"/>` +
+      /* A POINT THAT HAS NOT PASSED IS DRAWN HOLLOW. The rule says the number
+         is the successful attempt; when there is no successful attempt the
+         chart still has to show a number, and it must not look like the same
+         kind of number. A ring, not a colour: --bad on a data point would put
+         a verdict in the palette, and the band is already named in the
+         tooltip and spelled out in the table below. */
+      const passed = op.passed;
+      const dot = passed
+        ? `<circle cx="${x(i)}" cy="${y(v)}" r="4.4" style="fill:var(--accent)"/>`
+        : `<circle cx="${x(i)}" cy="${y(v)}" r="4.6"
+             style="fill:var(--chart-bg);stroke:var(--accent);stroke-width:2;stroke-dasharray:2.2 1.8"/>`;
+      const band = WA.gradeBandText(v);
+      const tip = p.title + " — " + v + "% · " + band +
+        (op.attempts > 1 ? " · " + op.attempts + " attempts, " +
+          (passed ? "this is the successful one" : "none successful yet") : "") +
+        ". Click to find it in the table below.";
+      return xLab + dot +
         `<text x="${x(i)}" y="${y(v) - 10}" text-anchor="middle" style="fill:var(--text);font-size:11px;font-weight:600">${esc(v)}</text>` +
         (key ? `<circle class="hit" cx="${x(i)}" cy="${y(v)}" r="13" data-pt="${esc(key)}"
-                  style="fill:transparent;cursor:pointer"><title>${esc(p.title)} — ${esc(v)}%. Click to find it in the table below.</title></circle>` : "");
+                  style="fill:transparent;cursor:pointer"><title>${esc(tip)}</title></circle>` : "");
     }).join("");
 
-    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Grades in ${esc(A.plotCat)}, syllabus order">
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(kind === "fpc"
+        ? "FPC grades in date order" : "Grades on the eight checkrides, syllabus order")}">
       ${grid}${clsLine}${clsDots}${myLine}${myDots}
       <text x="${L}" y="13" style="fill:var(--muted);font-size:10.5px">${esc(def.note)}</text>
       </svg>`;
+  }
+
+  /* the legend of the single evaluation chart: the two lines, then the four
+     tracks in syllabus order — which is also the order their labels appear
+     along the x axis, so the legend reads left to right like the chart does */
+  function evalLegend() {
+    const cats = WA.EVAL_CATS.filter((c) => c.id !== "fpc").map((c) =>
+      `<span title="${esc("the x labels of the " + c.label.toLowerCase() +
+        " checkrides are drawn in this colour")}"><i style="background:${esc(c.color)}"></i>${
+        esc(c.label)}</span>`).join("");
+    return `<div class="legendrow">
+        <span><i style="background:var(--accent)"></i>this student</span>
+        <span title="the average of every active student who has flown that checkride — all classes, not only this student's">
+          <i style="background:var(--muted)"></i>class average on the same checkride</span>
+        <span class="lgsep" aria-hidden="true"></span>
+        <span class="k">x labels by track:</span>${cats}
+      </div>`;
   }
 
   /* ── the summary table every plot point points at ──
      ROUND 5: all EIGHT checkrides are always listed, in syllabus order —
      the ones nobody has flown yet say so, which is half of what the CO is
      looking for during the brief. */
+  /* the band a grade fell in, as the chip the attempt rows wear: "ΥΣΤΕΡΗΣΗ"
+     and "ΑΠΟΤΥΧΙΑ" are the squadron's own words for what did not pass, and an
+     attempt row is the one place on this dashboard where saying them plainly
+     is the point (round 11) */
+  function bandChip(g) {
+    const b = WA.gradeBand(g);
+    if (!b) return "";
+    return `<span class="bandchip band-${esc(b.id)}"
+      title="${esc(WA.GRADE_SOURCE)}">${esc(b.code)} ${esc(b.label)}</span>`;
+  }
+
   function evalSummary(s) {
     const rows = [];
     for (const sl of s._evalSlots.slots) {
       const r = sl.row;
+      /* ROUND 11 — the row that stands for the slot is the PASS ATTEMPT. When
+         there is none, the slot still shows its latest attempt and says out
+         loud that nothing has passed yet, rather than showing a number that
+         quietly reads like a result. */
+      const many = sl.attempts > 1;
       rows.push({
         key: r ? "ev:" + r.i : "", cat: sl.def.cat, flown: !!r,
-        what: `<b>${esc(sl.def.id)}</b> ${esc(sl.def.name)}`,
+        what: `<b>${esc(sl.def.id)}</b> ${esc(sl.def.name)}` +
+          (r && many ? ` <span class="badge" title="${esc(WA.PASS_ATTEMPT_TIP)}">${
+            sl.passed ? "counts: successful attempt" : "no successful attempt yet"} · ${
+            sl.attempts} attempts</span>` : "") +
+          (r && !sl.passed && r.grade !== null ? " " + bandChip(r.grade) : ""),
         who: r ? r.with : "", grade: r ? r.grade : null, date: r ? r.date : "",
         co: !!(r && WA.isCO(r)),
       });
       for (const old of sl.earlier) {
         rows.push({
           key: "ev:" + old.i, cat: sl.def.cat, flown: true, sub: true,
-          what: `<span class="k">earlier attempt — ${esc(sl.def.id)}</span>`,
+          /* NOT COUNTED ANYWHERE — and the row says so, because a grade in a
+             table is assumed to be a grade that counts until it is told not
+             to be */
+          what: `<span class="k">attempt — ${esc(sl.def.id)}</span> ${bandChip(old.grade)}
+            <span class="k" title="${esc(WA.PASS_ATTEMPT_TIP)}">not counted</span>`,
           who: old.with, grade: old.grade, date: old.date, co: WA.isCO(old),
         });
       }
@@ -450,16 +660,22 @@ WA.renderAdmin = async function (view, me) {
     }
     s._fpc.forEach((r, k) => rows.push({
       key: "fpc:" + r.i, cat: "fpc", flown: true,
-      what: `<b>FPC #${k + 1}</b> ${r.trigger ? "(" + WA.sortieCell(null, r.trigger) + ") " : ""}${esc(r.result || "flight progress check")}`,
+      what: `<b>FPC #${k + 1}</b> ${r.trigger ? "(" + WA.sortieCell(null, r.trigger) + ") " : ""}` +
+        `<span class="k">flight progress check</span>${WA.fpcResultNote(r.result)}`,
       who: r.with, grade: r.grade, date: r.date, co: WA.isCO(r),
     }));
+    /* the coloured square that ties a table row to its x label on the chart —
+       the same token, so the two surfaces cannot drift apart (round 11) */
+    const catDot = (cat) => cat
+      ? `<i class="catdot" style="background:${esc(WA.evalCatColor(cat))}"
+           title="${esc(WA.evalCatLabel(cat))}"></i>` : "";
     return `
       <div class="tblwrap"><table class="tbl" id="sumtbl">
         <thead><tr><th>Evaluation</th><th>With whom</th><th>Grade</th><th>Date</th><th>Source</th></tr></thead>
         <tbody>${rows.map((r) => `
-          <tr data-sumrow="${esc(r.key)}" class="${r.cat === A.plotCat ? "in-cat" : ""}${
-            A.hi && A.hi === r.key ? " is-hi" : ""}${r.flown ? "" : " is-unflown"}">
-            <td>${r.what}${r.sub ? "" : ""}</td>
+          <tr data-sumrow="${esc(r.key)}" class="${
+            A.hi && A.hi === r.key ? "is-hi" : ""}${r.flown ? "" : " is-unflown"}">
+            <td>${catDot(r.cat)}${r.what}</td>
             <td>${r.flown ? esc(r.who || "—") : `<span class="k">not flown yet</span>`}</td>
             <td class="num">${WA.pct(r.grade)}</td>
             <td>${r.flown ? esc(fmtD(r.date)) : "—"}</td>
@@ -584,11 +800,19 @@ WA.renderAdmin = async function (view, me) {
         esc(WA.FPC_EVALUATORS.join(" or the "))} — this row was recorded before that rule and cannot be saved again until it is corrected">${
         esc(v)} <span class="k">(legacy)</span></span>`;
     };
+    /* ROUND 11 — the FPC RESULT column is now a legacy carrier: it prints what
+       is stored, marked, and nothing new can ever appear in it. CEF keeps the
+       ordinary field, so the same builder answers differently per section. */
+    const resCell = (k, e) => k === "fpc"
+      ? (String(e.result || "").trim()
+          ? WA.fpcResultNote(e.result)
+          : `<span class="k" title="${esc(WA.FPC_RESULT_TIP)}">— <i>(box removed)</i></span>`)
+      : esc(e.result || "—");
     const chk = (k) => (r[k] || []).map((e) =>
       `<tr><td><b>${esc(WA.secLabel(k))}</b>${e.flight_code ? " (" + WA.sortieCell(null, e.flight_code) + ")" : ""}</td>
         <td>${evalCell(k, e)}</td>
         <td>${esc(fmtD(e.date))}</td>
-        <td>${esc(e.result || "—")}</td>
+        <td>${resCell(k, e)}</td>
         <td class="num">${WA.pct(e.grade)}</td>${srcCell(e)}</tr>`);
     const blk = (k, head, rows, cnt) => `
       <h3 style="margin-top:8px">${esc(WA.secLabel(k))} ${WA.tipDot(k)}
@@ -696,9 +920,6 @@ WA.renderAdmin = async function (view, me) {
 
     const evOpts = WA.EVALUATIONS.map((d) =>
       `<option value="${esc(d.id)}"${A.evalSel === d.id ? " selected" : ""}>${esc(WA.evalLabel(d.id))}</option>`).join("");
-    const catChips = WA.EVAL_CATS.map((c) =>
-      `<button type="button" class="chip${A.plotCat === c.id ? " is-on" : ""}" data-plotcat="${esc(c.id)}"
-        ${c.id === "fpc" ? `title="${esc(WA.secTip("fpc"))}"` : ""}>${esc(c.label)}</button>`).join("");
 
     return `
       <div class="ana-nav">
@@ -733,22 +954,43 @@ WA.renderAdmin = async function (view, me) {
       <div class="card">
         <h2>Evaluations ${WA.tipDot("evaluations")}</h2>
         <p class="hint">Evaluations are separate events, so they are compared <b>one checkride at a time</b> —
-          never as an average, and never as a count. A re-flown checkride counts with its latest graded attempt.</p>
+          never as an average, and never as a count. A re-flown checkride counts with the attempt the
+          flight was characterised <b>successful</b> on
+          <span class="tipdot" tabindex="0" role="note" title="${esc(WA.PASS_ATTEMPT_TIP)}"
+            aria-label="${esc(WA.PASS_ATTEMPT_TIP)}">&#9432;</span>.</p>
         <div class="toolrow" style="margin:10px 0 8px">
           <label class="f" style="max-width:340px"><span>Compare on this evaluation</span>
             <select id="evalsel">${evOpts}</select></label>
         </div>
         <div class="chartbox">${evalCompare(s)}</div>
 
-        <h3 style="margin-top:16px">Grades per category</h3>
-        <p class="hint">The category's evaluations in syllabus order, with the class average as the faint
-          dashed reference. Click a point to find it in the table below.</p>
-        <div class="chiprow" style="margin:10px 0">${catChips}</div>
-        <div class="chartbox" id="catplot">${catPlotSVG(s)}</div>
-        <div class="legendrow">
-          <span><i style="background:var(--accent)"></i>this student</span>
-          <span><i style="background:var(--muted)"></i>class average on the same evaluation</span>
-        </div>
+        ${/* ROUND 11 — ONE CHART, ALL EIGHT. The four per-category tabs are
+             gone with the heading that named them: what the CO asked to see is
+             the whole stage in one line, and the track now rides in the colour
+             of the x label. */ ""}
+        <h3 style="margin-top:16px">Grades — the eight checkrides</h3>
+        <p class="hint">Every checkride of the stage on one line, in syllabus order, with the class
+          average as the faint dashed reference. The <b>x label is coloured by track</b>; a
+          checkride nobody has flown yet is a gap. Click a point to find it in the table below.</p>
+        <div class="chartbox" id="catplot">${catPlotSVG(s, "eval")}</div>
+        ${evalLegend()}
+
+        ${/* ── WHY THE FPC IS ITS OWN BLOCK AND NOT A FIFTH COLOUR ──────────
+             The eight checkrides share an x axis because the SYLLABUS gives
+             them one: C4590 is before C4790 for every student in the squadron,
+             for ever. An FPC has no such position — it happens when a referral
+             case happens — so putting FPC #1 and FPC #2 on the same axis would
+             invent an order the flights do not have and, worse, would put one
+             student's FPC #2 above another student's FPC #2 as though the two
+             were the same event. It keeps the axis it can honestly have (date
+             order, numbered), on its own, directly below — visible in the same
+             glance, which a toggle would not be. */ ""}
+        <h3 style="margin-top:16px">FPC ${WA.tipDot("fpc")}
+          <span class="cnt">${st.fpc} ${st.fpc === 1 ? "entry" : "entries"}</span></h3>
+        <p class="hint">Its own plot, because an FPC has no position in the syllabus: the eight
+          checkrides above share an x axis the stage gives them, and an FPC has none. Numbered in
+          date order.</p>
+        <div class="chartbox" id="fpcplot">${catPlotSVG(s, "fpc")}</div>
 
         <h3 style="margin-top:16px">Summary — every evaluation and FPC of this student</h3>
         ${evalSummary(s)}
@@ -857,7 +1099,10 @@ WA.renderAdmin = async function (view, me) {
             return `<div class="kline"><span class="k">${esc(WA.secLabel(k))}</span>
               ${list.length ? list.map((e) => `<div class="sub">${WA.checkLineHTML(k, e)}` +
                 (e.grade === null || e.grade === undefined ? "" : " <b>" + WA.pct(e.grade) + "</b>") +
-                (e.result ? " <span class='k'>" + esc(e.result) + "</span>" : "") +
+                /* ROUND 11 — the FPC's stored result is a legacy note, and the
+                   brief marks it as one; the CEF's is still its own field */
+                (k === "fpc" ? WA.fpcResultNote(e.result)
+                             : (e.result ? " <span class='k'>" + esc(e.result) + "</span>" : "")) +
                 WA.coTag(e) + `</div>`).join("")
                 : "<span class='k'>none reported</span>"}</div>`;
           }).join("")}
@@ -961,7 +1206,13 @@ WA.renderAdmin = async function (view, me) {
           <td>${esc(e.evaluator || "—")}${k === "fpc" && !WA.fpcEvaluatorOK(e.evaluator || null)
             ? ` <span class="pr-n">(legacy — an FPC is conducted by the ${
                 esc(WA.FPC_EVALUATORS.join(" or the "))})</span>` : ""}</td>
-          <td>${esc(fmtD(e.date))}</td><td>${esc(e.result || "—")}</td>
+          <td>${esc(fmtD(e.date))}</td>
+          <td>${k === "fpc"
+            ? (String(e.result || "").trim()
+                ? esc(e.result) + ` <span class="pr-n">(legacy note — the FPC result box was
+                    removed in round 11; the grade against the printed scale is the result)</span>`
+                : `<span class="pr-n">—</span>`)
+            : esc(e.result || "—")}</td>
           <td>${WA.pct(e.grade)}</td></tr>`);
       const nfsRows = (s.record.nfs || []).map((e) =>
         `<tr><td>${esc(fmtD(e.date))}${WA.coTag(e)}</td><td>${esc(WA.nfsReasonShort(e))}</td>
@@ -1061,23 +1312,34 @@ WA.renderAdmin = async function (view, me) {
           }).join("")}</tbody></table>`;
     }).join("");
 
-    /* one row per student per evaluation — the same-checkride comparison on paper */
+    /* one row per student per evaluation — the same-checkride comparison on
+       paper. ROUND 11: the cell is the PASS ATTEMPT, and a slot that has been
+       flown without passing prints its number followed by an asterisk, which
+       the caption explains. Paper is monochrome, so the hollow ring the screen
+       draws has to become a mark that survives a photocopier. */
     const evalMatrix = `
-      <div class="pr-sec">Evaluations — every student on the same checkride (latest graded attempt)</div>
+      <div class="pr-sec">Evaluations — every student on the same checkride
+        (the attempt the flight was characterised successful on)</div>
       <table class="pr-t"><thead><tr><th>Student</th>
         ${WA.EVALUATIONS.map((d) => `<th>${esc(d.id)}</th>`).join("")}</tr></thead><tbody>
         ${students.map((s) => `<tr><td><b>${esc(WA.personName(s.person, true))}</b></td>
           ${WA.EVALUATIONS.map((d) => {
-            const r = WA.evalLatest(s._evals, d.id);
-            return `<td>${WA.pct(r ? r.grade : null)}${r ? WA.coTag(r) : ""}</td>`;
+            const op = WA.evalOperativeOf(s._evals, d.id);
+            const r = op.row;
+            return `<td>${WA.pct(r ? r.grade : null)}${
+              r && r.grade !== null && !op.passed ? "*" : ""}${r ? WA.coTag(r) : ""}</td>`;
           }).join("")}</tr>`).join("")}
         <tr><td><b>Class average</b></td>
           ${WA.EVALUATIONS.map((d) => {
-            const vs = students.map((s) => { const r = WA.evalLatest(s._evals, d.id); return r ? r.grade : null; })
+            const vs = students.map((s) => WA.evalGrade(s._evals, d.id))
               .filter((v) => v !== null);
             return `<td>${vs.length ? esc(round1(vs.reduce((a, b) => a + b, 0) / vs.length)) + "%" : "—"}</td>`;
           }).join("")}</tr>
-      </tbody></table>`;
+      </tbody></table>
+      <p class="pr-src">A grade marked <b>*</b> did not pass: the checkride has been flown and no
+        attempt reached 60 % (ΠΔ 151/13 — ΣΚ 50-59 % is ΥΣΤΕΡΗΣΗ, Ε 0-49 % is ΑΠΟΤΥΧΙΑ). Where a
+        checkride was re-flown, the grade printed is the successful attempt; the earlier attempts are
+        in the student's own page above and count for nothing here.</p>`;
 
     holder.innerHTML = pages + `<div class="pr-page">
       <div class="pr-brand"><img src="assets/364mea-240.png" alt=""><span>Wings Ahead</span>
@@ -1297,7 +1559,7 @@ WA.renderAdmin = async function (view, me) {
       .concat(["Mean (fighters)", "Weight sum", "Assessments in", "Instructors total"])
       .concat(WA.LEVELS.map((l) => l.label))
       .concat(["Self-report updated"])];
-    for (const s of A.data.students) {
+    for (const s of visible()) {
       const st = s._stats;
       const a = s.assessment || { n: 0, sum: 0, mean: null, counts: {} };
       rows.push([s.person.mn, s.person.rank, s.person.last_name, s.person.first_name, s.person.class,
@@ -1306,16 +1568,16 @@ WA.renderAdmin = async function (view, me) {
         /* "CO" = every entry is the CO's · "self" = the owner's record, and
            the next column says how many entries of it the CO added */
         s.completion.has_record || s._src.any ? s._src.word : "", s._src.n]
-        .concat(WA.EVALUATIONS.map((d) => {
-          const r = WA.evalLatest(s._evals, d.id);
-          return r && r.grade !== null ? r.grade : "";
-        }))
+        /* ROUND 11 — the PASS ATTEMPT, raw, per checkride. A spreadsheet that
+           averaged a column would otherwise be averaging failed re-flights. */
+        .concat(WA.EVALUATIONS.map((d) => WA.pctRaw(WA.evalGrade(s._evals, d.id))))
         .concat([a.n ? WA.meanText(a.mean) : "", a.n ? a.sum : "",
           a.n, s.completion.instructors_total])
         .concat(WA.LEVELS.map((l) => (a.counts || {})[l.id] || 0))
         .concat([s.completion.has_record ? fmtDT(s.last_update) : "not submitted"]));
     }
-    download("wings-ahead-summary-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
+    download("wings-ahead-summary" + classSuffix() + "-" + stamp() + ".csv",
+             "text/csv;charset=utf-8", csv(rows));
   }
 
   /* every dated entry of every student, one row each — the raw record on paper.
@@ -1332,7 +1594,7 @@ WA.renderAdmin = async function (view, me) {
         items || "", WA.itemsN(e) || "", who || "",
         WA.pctRaw(grade),
         e.legacy ? "yes" : "", WA.coWord(e)]);
-    for (const s of A.data.students) {
+    for (const s of visible()) {
       const r = s.record;
       (r.nfs || []).forEach((e) => add(s, "nfs", e,
         WA.nfsReasonLabel(e) + (e.note && e.reason !== "other" ? " — " + e.note : ""),
@@ -1356,12 +1618,18 @@ WA.renderAdmin = async function (view, me) {
         (e.slot ? WA.soloSlotLabel(e.slot) : "additional solo") +
         (e.ng ? " — NG (non-graded)" : " — graded"),
         e.sortie, "", WA.soloWho(e), e.grade));
+      /* ROUND 11 — the FPC's Detail cell carries its stored result NAMED as a
+         legacy note (an unmarked "pass" in a spreadsheet column beside a 48 %
+         is exactly the disagreement the box was removed for); the CEF's Result
+         is still an ordinary field and travels as itself */
       for (const k of ["fpc", "cef"]) {
-        (r[k] || []).forEach((e) => add(s, k, e, e.result || "",
+        (r[k] || []).forEach((e) => add(s, k, e,
+          k === "fpc" ? WA.fpcResultText(e.result) : (e.result || ""),
           e.flight_code, "", e.evaluator, e.grade));
       }
     }
-    download("wings-ahead-entries-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
+    download("wings-ahead-entries" + classSuffix() + "-" + stamp() + ".csv",
+             "text/csv;charset=utf-8", csv(rows));
   }
 
   /* ROUND 10 — one row per assessment, carrying BOTH the words and the weight.
@@ -1372,7 +1640,7 @@ WA.renderAdmin = async function (view, me) {
     const rows = [["Student", "Class", "Instructor", "Call sign", "Country", "Test pilot",
       "Duty", "Leadership", "Status",
       "Assessment (fighters)", "Weight", "Flew with", "Comment", "Updated", "Entered by"]];
-    for (const s of A.data.students) for (const p of s.proposals) {
+    for (const s of visible()) for (const p of s.proposals) {
       const l = WA.level(p.level);
       rows.push([WA.personName(s.person, true), s.person.class,
         (p.rank ? p.rank + " " : "") + p.last_name,
@@ -1381,7 +1649,8 @@ WA.renderAdmin = async function (view, me) {
         l ? l.label : "", l ? l.w : "",
         p.flew_with ? "yes" : "no", p.comment || "", fmtDT(p.updated_at), WA.coWord(p)]);
     }
-    download("wings-ahead-assessments-" + stamp() + ".csv", "text/csv;charset=utf-8", csv(rows));
+    download("wings-ahead-assessments" + classSuffix() + "-" + stamp() + ".csv",
+             "text/csv;charset=utf-8", csv(rows));
   }
 
   async function exportJSON() {
@@ -1417,8 +1686,9 @@ WA.renderAdmin = async function (view, me) {
     if (nav) { navStudent(Number(nav.dataset.nav)); return; }
     const met = t.closest("[data-metric]");
     if (met) { A.metric = met.dataset.metric; render(); return; }
-    const pc = t.closest("[data-plotcat]");
-    if (pc) { A.plotCat = pc.dataset.plotcat; A.hi = null; render(); return; }
+    /* the class filter — persisted, so tomorrow's session opens on 98B too */
+    const cl = t.closest("[data-cls]");
+    if (cl) { A.cls = cl.dataset.cls; lsSet(CLS_KEY, A.cls); render(); return; }
     const pt = t.closest("[data-pt]");
     if (pt) { highlightRow(pt.dataset.pt); return; }
 

@@ -41,6 +41,23 @@
   --hover: rgba(255, 255, 255, 0.06);
   --veil: rgba(4, 9, 16, 0.72);
   --shadow: rgba(0, 0, 0, 0.5);
+
+  /* ── THE FOUR SYLLABUS TRACKS (round 11) ────────────────────────────────
+     The single evaluation chart plots all eight checkrides on one line, so
+     the x LABEL colour is the only thing left that says which track a point
+     belongs to. Deliberately NOT the semantic tokens: --good / --bad / --warn
+     on a track label reads as a verdict on the track, and this application
+     does not grade tracks. Deliberately not --accent (the student's own line)
+     or --muted (the class average) either. Four hues far enough apart to be
+     told apart at 10.5px, defined ONCE per mode so all eight palettes inherit
+     them — a track keeps its colour when the reader switches theme, which is
+     what makes the legend memorable.
+     MIRROR: app.js → WA.EVAL_CATS[].color. */
+  --cat-contact:    #6fb3ff;   /* sky      */
+  --cat-instrument: #d5a3ff;   /* violet   */
+  --cat-formation:  #ffc46b;   /* amber    */
+  --cat-navigation: #6fdcc0;   /* teal     */
+  --cat-fpc:        #f79ec0;   /* rose — the FPC block below the chart       */
 }
 
 html[data-mode="light"] {
@@ -48,6 +65,13 @@ html[data-mode="light"] {
   --hover: rgba(0, 0, 0, 0.05);
   --veil: rgba(26, 39, 51, 0.42);
   --shadow: rgba(20, 35, 55, 0.20);
+
+  /* the same four hues, darkened to hold >= 4.5:1 on a light chart ground */
+  --cat-contact:    #14568f;
+  --cat-instrument: #6b3b9e;
+  --cat-formation:  #8a5108;
+  --cat-navigation: #0a6b59;
+  --cat-fpc:        #9c2a5c;
 }
 
 /* Obsidian — DARK · the original night deck: cool navy graphite, sky-blue
@@ -696,12 +720,35 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .chartbox .chk b { color: var(--text); }
 .warn-t { color: var(--warn); }
 
-/* the summary table the plot points point at */
-#sumtbl tbody tr.in-cat td { background: var(--accent-soft); }
+/* the summary table the plot points point at.
+   ROUND 11 — the `.in-cat` tint is gone with the four category tabs that used
+   to select a category: there is one chart of all eight now, so no category is
+   "the current one". What ties a row to its point on the chart is `.catdot`,
+   the same token the x label is drawn in. */
 #sumtbl tbody tr.is-hi td {
   background: var(--gold); color: var(--on-gold); font-weight: 600;
 }
 #sumtbl tbody tr.is-hi .badge { color: var(--on-gold); border-color: var(--on-gold); }
+.catdot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+  margin-right: 7px; vertical-align: 1px; flex: none;
+}
+#sumtbl tbody tr.is-hi .catdot { outline: 1px solid var(--on-gold); }
+/* the band an attempt fell in — the squadron's own «Α / ΛΚ / Κ / ΣΚ / Ε».
+   The two failing bands are the only place on this dashboard that says so in
+   colour, and they are attempt rows: a row that explicitly does NOT count. */
+.bandchip {
+  display: inline-block; font-size: 10.5px; line-height: 1.5; padding: 0 6px;
+  border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
+  white-space: nowrap;
+}
+.bandchip.band-lagging { color: var(--warn); border-color: rgba(var(--warn-rgb), .55); background: var(--warn-soft); }
+.bandchip.band-failed { color: var(--bad); border-color: rgba(var(--bad-rgb), .55); background: var(--bad-soft); }
+/* the thin rule between the two halves of the evaluation-chart legend */
+.lgsep { width: 1px; align-self: stretch; background: var(--line); margin: 0 2px; }
+/* the class-filter chip row of the Overview */
+.filterrow { margin: 0 0 10px; align-items: center; }
+.filterrow .chip .k { font-variant-numeric: tabular-nums; opacity: .75; }
 .card h3 .cnt {
   font-size: 11px; color: var(--muted); border: 1px solid var(--line);
   border-radius: 999px; padding: 1px 8px; font-weight: 400; margin-left: 6px;

@@ -726,6 +726,103 @@ language sql immutable as $$
 $$;
 -- ▲▲ GENERATED BLOCK ▲▲
 
+-- ══ ROUND 11 — THE GRADE SCALE, AND WHAT «SUCCESSFUL» MEANS ════════════════
+-- Nothing in a student record stores an OUTCOME: an evaluation entry carries
+-- date · evaluation · with · grade and has never carried a pass/fail tick
+-- (wa.entry_keys('evaluations')). So "was this flight characterised
+-- successful?" is answered by THE GRADE against the printed scale, which is
+-- how the squadron reads it on paper.
+--   ΠΔ 151/13, quoted in 3-01/2025 ΔΑΕ (FDMS data/requirements/
+--   failure_procedures.json, requirement #0, `verbatim`):
+--     «Α»  Άριστα        90-100 %      «ΛΚ» Λίαν Καλώς   75-89 %
+--     «Κ»  Καλώς          60-74 %      «ΣΚ» Σχεδόν Καλώς 50-59 %  = ΥΣΤΕΡΗΣΗ
+--     «Ε»  ΑΠΟΤΥΧΩΝ        0-49 %                                 = ΑΠΟΤΥΧΙΑ
+--   and, in the same record: «Το κατώφλι 59%/60% διαχωρίζει την αποδεκτή από
+--   τη μη αποδεκτή απόδοση και είναι το κατώφλι που χρησιμοποιούν όλα τα
+--   κριτήρια παραπομπής.»
+-- For a CHECKRIDE the referral law says the same number in its own words —
+-- ΠΔ 29/2020 Άρθρο 3 παρ.1β (FDMS fail-16): «βαθμολογείται με βαθμολογία από
+-- μηδέν (0) έως πενήντα εννέα τοις εκατό (59%)» in a πτήση εξέτασης ή
+-- αξιολόγησης IS the referral case. One threshold, two sources, no ambiguity.
+-- MIRROR: app/app.js → WA.GRADE_PASS_MIN / WA.GRADE_BANDS / WA.gradeBand /
+-- WA.gradePassed. Change one, change the other.
+create or replace function wa.grade_pass_min() returns numeric
+language sql immutable as $$ select 60::numeric $$;
+
+create or replace function wa.grade_band(g numeric) returns text
+language sql immutable as $$
+  select case
+    when g is null then null
+    when g >= 90 then 'excellent'
+    when g >= 75 then 'very_good'
+    when g >= 60 then 'good'
+    when g >= 50 then 'lagging'
+    else 'failed' end
+$$;
+
+-- a row with NO grade is not a pass: an evaluation whose result has not been
+-- written yet has not been characterised anything
+create or replace function wa.grade_passed(g numeric) returns boolean
+language sql immutable as $$
+  select g is not null and g >= wa.grade_pass_min()
+$$;
+
+-- ══ ROUND 11 — THE PASS-ATTEMPT RULE ══════════════════════════════════════
+-- COMMAND WORDING (2026-08-19): «Αν ο μαθητής στην κανονική ροή βαθμολογήθηκε
+-- με αποτυχία ή υστέρηση, τότε θα υπολογίζουμε για βαθμολογία αυτή όπου η
+-- πτήση χαρακτηρίστηκε ως επιτυχής.»
+-- One checkride can hold several attempts; the value every GRADE SURFACE uses
+-- is the attempt the flight was characterised SUCCESSFUL on. The failed and
+-- lagged attempts stay in the record and stay visible — they never enter a
+-- number.
+-- ROUND 9'S TWIN RULE IS NOT REPLACED, IT IS DEMOTED TO THE TIEBREAK: PASS is
+-- the filter and runs first; "the latest" decides only between attempts that
+-- are equally operative. Latest = a dated attempt beats an undated one, then
+-- the later date, then the higher position in the stored array — which is what
+-- `order by (d is not null) desc, d desc, i desc` says.
+-- A slot with no pass at all falls back to its latest graded attempt (passed
+-- false), and one with no grade at all to its latest row, so a checkride that
+-- has been flown never disappears from a table.
+-- MIRROR: app/app.js → WA.evalOperativeOf / WA.attemptLater.
+create or replace function wa.eval_operative(p_rec jsonb, p_id text) returns jsonb
+language sql immutable as $$
+  with att as (
+    select t.e,
+           (t.ord - 1)::int as i,
+           nullif(trim(coalesce(t.e->>'date', '')), '') as d,
+           case when jsonb_typeof(t.e->'grade') = 'number'
+                then (t.e->>'grade')::numeric else null end as g
+    from jsonb_array_elements(
+           case when jsonb_typeof(p_rec->'evaluations') = 'array'
+                then p_rec->'evaluations' else '[]'::jsonb end) with ordinality t(e, ord)
+    where jsonb_typeof(t.e) = 'object' and t.e->>'evaluation' = p_id
+  ),
+  n as (select count(*)::int as k from att)
+  select coalesce(
+    (select jsonb_build_object('i', i, 'grade', g, 'date', d, 'passed', true,
+                               'attempts', (select k from n))
+       from att where wa.grade_passed(g)
+       order by (d is not null) desc, d desc, i desc limit 1),
+    (select jsonb_build_object('i', i, 'grade', g, 'date', d, 'passed', false,
+                               'attempts', (select k from n))
+       from att where g is not null
+       order by (d is not null) desc, d desc, i desc limit 1),
+    (select jsonb_build_object('i', i, 'grade', null, 'date', d, 'passed', false,
+                               'attempts', (select k from n))
+       from att
+       order by (d is not null) desc, d desc, i desc limit 1))
+$$;
+
+-- the eight operative attempts of one record, keyed by checkride id — what
+-- admin_get_data ships beside the record so the server's arithmetic and the
+-- dashboard's are demonstrably the same arithmetic. `null` = never flown.
+create or replace function wa.eval_grades(p_rec jsonb) returns jsonb
+language sql stable as $$
+  select coalesce(jsonb_object_agg(k.id, coalesce(wa.eval_operative(p_rec, k.id), 'null'::jsonb)),
+                  '{}'::jsonb)
+  from unnest(wa.eval_ids()) k(id)
+$$;
+
 -- FAIL / ALMOST GOOD categories — the four syllabus tracks. 'other' is not
 -- offered by the form; it only carries v1 free-text rows through migration.
 create or replace function wa.item_cats() returns text[]
@@ -1335,6 +1432,29 @@ language sql immutable as $$
       and nullif(trim(coalesce(e->>'phase', '')), '') is not null), 0)
 $$;
 
+-- ── THE RETIRED FPC RESULT (round 11), SAME CONTRACT AS THE PHASE NOTE ─────
+-- «Αφαίρεσε το result optional.» The FPC's free-text Result box is gone from
+-- the form: an FPC's result IS its grade against the printed scale
+-- (wa.grade_passed — 60 % and above is the successful characterisation), and a
+-- free-text line beside that number is only ever a place to write a second,
+-- softer answer to the same question ("pass" under a 48 %).
+-- `result` stays in wa.entry_keys('fpc') as a READ-ONLY CARRIER so nothing
+-- already written is destroyed on read, and this counter is what retires the
+-- key on WRITE: an existing note may be kept or dropped, never ADDED, and a
+-- payload that grows the count is refused by name.
+-- CEF IS UNTOUCHED and keeps its Result field — its evaluator is a Squadron
+-- Evaluator whose written finding is a different object from a Δοκιμή Προόδου.
+-- MIRROR: app/app.js → WA.fpcResultNote / WA.FPC_RESULT_TIP.
+create or replace function wa.fpc_result_count(p jsonb) returns int
+language sql immutable as $$
+  select coalesce((
+    select count(*)::int
+    from jsonb_array_elements(
+      case when jsonb_typeof(p) = 'array' then p else '[]'::jsonb end) e
+    where jsonb_typeof(e) = 'object'
+      and nullif(trim(coalesce(e->>'result', '')), '') is not null), 0)
+$$;
+
 -- how many entries of ONE section still carry the legacy escape hatch
 create or replace function wa.legacy_count(p jsonb) returns int
 language sql immutable as $$
@@ -1920,6 +2040,13 @@ begin
                  'airsickness',
                  'the phase-of-flight note was replaced by the flight code — an existing note is kept as legacy information, but a new one cannot be added');
 
+  -- THE RETIRED FPC RESULT, same contract (round 11): the free-text Result box
+  -- is gone from the form, so a payload that grows the count is a hand-made
+  -- one. An FPC's result is its GRADE against the printed scale.
+  perform wa.chk(wa.fpc_result_count(pl->'fpc') <= wa.fpc_result_count(old->'fpc'),
+                 'fpc',
+                 'the free-text result was removed — an FPC''s result is its grade against the printed scale (60 % and above is the successful characterisation, PD 151/13). A result already written is kept as a legacy note, but a new one cannot be added');
+
   -- THE STAMP — decided per entry, against what is STORED, on BOTH paths.
   -- CO path (round 4b, unchanged): only what he actually wrote carries his
   -- name, and editing an owner's entry makes that entry his.
@@ -2444,6 +2571,15 @@ begin
     select jsonb_build_object(
       'person', wa.person_json(s),
       'record', m.rec,
+      -- ROUND 11 — THE PASS ATTEMPT OF EACH OF THE EIGHT, computed server-side
+      -- by the one definition (wa.eval_operative). The dashboard derives the
+      -- same eight from `record` with the mirrored WA.evalOperativeOf, exactly
+      -- as it repeats wa.migrate_record client-side, so a cloud instance
+      -- running an older schema still draws the right chart. This object is
+      -- what makes the two DEMONSTRABLY the same rule instead of two rules
+      -- that happen to agree: it can be diffed against the client's own map
+      -- from a raw RPC call, which is how round 11 verified it.
+      'eval_grades', wa.eval_grades(m.rec),
       'last_update', r.last_update,
       'entered_by', wa.record_stamp(m.rec, r.entered_by),
       'completion', jsonb_build_object(

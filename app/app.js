@@ -464,14 +464,34 @@ WA.smsReasonLabel = function (e) {
   return r.id === "judgement" ? (note || r.label) : r.label;
 };
 
-/* the chips of the per-category plot — the four tracks + the FPC section */
+/* ── THE FOUR TRACKS, AND THE COLOUR EACH ONE WEARS (round 11) ─────────────
+   The evaluation plot is ONE chart of all eight checkrides now, so the only
+   thing left to say which track a point belongs to is the colour of its x
+   label. Four tokens, defined once in styles.css (--cat-contact …) for both
+   modes so all eight palettes inherit them, and NONE of them is a status
+   colour: --good / --bad / --warn on a TRACK label would read as a verdict on
+   the track ("contact is green, formation is red"), which is not a thing this
+   application is allowed to say. --accent stays the student's own line and
+   --muted the class average, so neither is available either.
+   `cat` is the value stored in WA.EVALUATIONS[].cat. */
 WA.EVAL_CATS = [
-  { id: "contact", label: "Contact" },
-  { id: "instrument", label: "Instrument" },
-  { id: "formation", label: "Formation" },
-  { id: "vfr_navigation", label: "Navigation" },
-  { id: "fpc", label: "FPC" },
+  { id: "contact",        label: "Contact",    color: "var(--cat-contact)" },
+  { id: "instrument",     label: "Instrument", color: "var(--cat-instrument)" },
+  { id: "formation",      label: "Formation",  color: "var(--cat-formation)" },
+  { id: "vfr_navigation", label: "Navigation", color: "var(--cat-navigation)" },
+  { id: "fpc",            label: "FPC",        color: "var(--cat-fpc)" },
 ];
+WA.evalCat = function (id) {
+  return WA.EVAL_CATS.find((c) => c.id === id) || null;
+};
+WA.evalCatColor = function (id) {
+  const c = WA.evalCat(id);
+  return c ? c.color : "var(--muted)";
+};
+WA.evalCatLabel = function (id) {
+  const c = WA.evalCat(id);
+  return c ? c.label : "—";
+};
 
 WA.evalById = function (id) {
   return WA.EVALUATIONS.find((e) => e.id === id) || null;
@@ -509,6 +529,37 @@ WA.EVALUATOR_ROLES = ["DO", "Squadron CO"];
 WA.FPC_EVALUATORS = ["Squadron CO", "DO"];
 WA.fpcEvaluatorOK = function (v) {
   return v === null || v === undefined || v === "" || WA.FPC_EVALUATORS.indexOf(v) >= 0;
+};
+
+/* ── THE FPC «RESULT (OPTIONAL)» BOX IS GONE (round 11) ────────────────────
+   «Αφαίρεσε το result optional.» It was a free-text line beside a 0-100 grade
+   and an evaluator, and free text beside a number is where a second, softer
+   answer to the same question gets written: "pass" under a 48 %, "ok" under a
+   grade nobody filled in yet. The FPC already says its result twice — the
+   GRADE against the printed scale (WA.gradeBand: 60 % and above is the
+   successful characterisation) and the FPC section's own existence in the
+   record — so the box added nothing but a place to disagree with them.
+   THE ROUND-6 LEGACY PATTERN, EXACTLY: what is stored is never destroyed.
+   `result` stays in WA.ENTRY_KEYS.fpc as a READ-ONLY CARRIER, the form draws
+   no box for it, every surface prints what is there marked as a legacy note,
+   and the write path refuses to let the number of FPC rows carrying one GROW
+   (wa.fpc_result_count) — so an old note can be kept or dropped, never added.
+   CEF IS UNTOUCHED and keeps its Result box: the two sections are separate
+   code in student.js (two literal rows, not a shared builder), the command's
+   sentence names the FPC, and a CEF is conducted by a Squadron Evaluator
+   whose written finding is a different object from a Δοκιμή Προόδου's grade.
+   MIRROR: db/schema.sql → wa.fpc_result_count(). */
+WA.FPC_RESULT_TIP =
+  "The FPC “Result (optional)” box was removed in round 11 — the grade against the printed scale is the result (60 % and above is the successful characterisation). This text was written before that and is kept exactly as it stands; it can be dropped, never re-added, and nothing counts it.";
+WA.fpcResultNote = function (v) {
+  const t = String(v === null || v === undefined ? "" : v).trim();
+  if (!t) return "";
+  return ` <span class="itlegacy" title="${esc(WA.FPC_RESULT_TIP)}">${esc(t)} <span class="k">(legacy note)</span></span>`;
+};
+/* the same fact for paper, where colour and hover do not exist */
+WA.fpcResultText = function (v) {
+  const t = String(v === null || v === undefined ? "" : v).trim();
+  return t ? t + " (legacy note — the FPC result box was removed in round 11)" : "";
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1305,25 +1356,148 @@ WA.evalOrderState = function (rec) {
   return { recorded, blockedBy };
 };
 
+/* ══════════════════════════════════════════════════════════════════════════
+   THE GRADE SCALE — WHAT «CHARACTERISED SUCCESSFUL» MEANS (round 11).
+   ──────────────────────────────────────────────────────────────────────────
+   Nothing in this record stores an OUTCOME. There is no pass/fail tick on an
+   evaluation entry and there never was: `evaluations` carries date · identity ·
+   with whom · grade, and that is the whole shape (WA.ENTRY_KEYS.evaluations ⇄
+   wa.entry_keys('evaluations')). So the honest answer to "was this flight
+   characterised successful?" is not a field somebody forgot to fill in — it is
+   THE GRADE, read against the printed scale, which is exactly how the squadron
+   reads it on paper.
+
+   THE PRINTED SCALE — ΠΔ 151/13, quoted in 3-01/2025 ΔΑΕ and digitised in
+   FDMS data/requirements/failure_procedures.json (requirement #0, `verbatim`):
+     «Α»  Άριστα           90-100 %
+     «ΛΚ» Λίαν Καλώς       75-89 %
+     «Κ»  Καλώς            60-74 %
+     «ΣΚ» Σχεδόν Καλώς     50-59 %   = ΥΣΤΕΡΗΣΗ  (lagging)
+     «Ε»  ΑΠΟΤΥΧΩΝ          0-49 %   = ΑΠΟΤΥΧΙΑ  (failed)
+   The same record states the consequence in one line: «Το κατώφλι 59%/60%
+   διαχωρίζει την αποδεκτή από τη μη αποδεκτή απόδοση και είναι το κατώφλι που
+   χρησιμοποιούν όλα τα κριτήρια παραπομπής.»
+   For a CHECKRIDE specifically the same threshold is written into the referral
+   law itself — ΠΔ 29/2020 Άρθρο 3 παρ.1β (FDMS fail-16): a grade «από μηδέν (0)
+   έως πενήντα εννέα τοις εκατό (59%)» in a πτήση εξέτασης ή αξιολόγησης is the
+   referral case. The two agree, so there is one number: 60.
+
+   The squadron's own words for the two failing bands are the user's words for
+   this rule — «αποτυχία ή υστέρηση» — and they are the two bands below 60.
+   MIRROR: db/schema.sql → wa.grade_pass_min() / wa.grade_band() /
+   wa.grade_passed(). Change one, change the other.
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.GRADE_PASS_MIN = 60;
+WA.GRADE_BANDS = [
+  { id: "excellent", lo: 90, code: "Α",  label: "Excellent",   el: "Άριστα",        pass: true },
+  { id: "very_good", lo: 75, code: "ΛΚ", label: "Very Good",   el: "Λίαν Καλώς",    pass: true },
+  { id: "good",      lo: 60, code: "Κ",  label: "Good",        el: "Καλώς",         pass: true },
+  { id: "lagging",   lo: 50, code: "ΣΚ", label: "Lagging",     el: "Σχεδόν Καλώς — ΥΣΤΕΡΗΣΗ", pass: false },
+  { id: "failed",    lo: 0,  code: "Ε",  label: "Failed",      el: "ΑΠΟΤΥΧΩΝ — ΑΠΟΤΥΧΙΑ",     pass: false },
+];
+WA.GRADE_SOURCE = "ΠΔ 151/13 (3-01/2025 ΔΑΕ) — Α 90-100 · ΛΚ 75-89 · Κ 60-74 · ΣΚ 50-59 (ΥΣΤΕΡΗΣΗ) · Ε 0-49 (ΑΠΟΤΥΧΙΑ); the 59/60 threshold is the one every referral criterion uses";
+/* the band a grade falls in · null for no grade at all */
+WA.gradeBand = function (g) {
+  if (g === null || g === undefined || g === "") return null;
+  const n = Number(g);
+  if (!isFinite(n)) return null;
+  return WA.GRADE_BANDS.find((b) => n >= b.lo) || WA.GRADE_BANDS[WA.GRADE_BANDS.length - 1];
+};
+/* WAS THE FLIGHT CHARACTERISED SUCCESSFUL? — the one question, one answer.
+   A row with no grade is NOT a pass: an evaluation whose result has not been
+   written yet has not been characterised anything. */
+WA.gradePassed = function (g) {
+  const b = WA.gradeBand(g);
+  return !!(b && b.pass);
+};
+WA.gradeBandText = function (g) {
+  const b = WA.gradeBand(g);
+  return b ? b.label + " («" + b.code + "» " + b.el + ")" : "no grade recorded";
+};
+
+/* ── WHICH OF TWO ATTEMPTS CAME LATER (round 9's twin rule, extracted) ──────
+   Date first; a dated attempt beats an undated one; equal dates fall back to
+   the position in the stored list. ONE definition — the slot picker and the
+   pass-attempt rule below both call it, so they can never disagree about what
+   "the latest" means. */
+WA.attemptLater = function (a, b) {
+  const da = String(a.date || ""), db = String(b.date || "");
+  if (da && db && da !== db) return da > db;
+  if (da && !db) return true;
+  if (!da && db) return false;
+  return a.i >= b.i;
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE PASS-ATTEMPT RULE (round 11) — THE OPERATIVE ATTEMPT OF A SLOT.
+   ──────────────────────────────────────────────────────────────────────────
+   COMMAND WORDING (2026-08-19): «Αν ο μαθητής στην κανονική ροή βαθμολογήθηκε
+   με αποτυχία ή υστέρηση, τότε θα υπολογίζουμε για βαθμολογία αυτή όπου η
+   πτήση χαρακτηρίστηκε ως επιτυχής.»
+
+   One checkride can hold several attempts — a failed C4590 is re-flown, and
+   both flights are real and both stay in the record. What every GRADE SURFACE
+   must use is the attempt the flight was characterised SUCCESSFUL on: the
+   chart point, the class average, the comparison, the summary table, the CSV
+   and the printed brief. The failed and the lagged attempts are not deleted
+   and not hidden — they are shown, named as attempts and marked with their
+   band — they simply never enter a number.
+
+   HOW IT RECONCILES WITH ROUND 9'S TWIN RULE ("the latest attempt stands for
+   the slot"): the twin rule is not replaced, it is DEMOTED TO THE TIEBREAK.
+   PASS is the filter and it runs first; LATEST decides only between attempts
+   that are equally operative. Two passes on one checkride (which the syllabus
+   does not foresee, but a re-flown-and-re-graded slot can produce) therefore
+   still resolve the round-9 way. And a slot with no pass at all falls back to
+   the latest attempt, so a student who has only failed a checkride still shows
+   a number instead of an em dash — marked `passed:false`, which is what every
+   surface renders as "no successful attempt yet".
+     → { row, passed, attempts, others }
+   MIRROR: db/schema.sql → wa.eval_operative(). Change one, change the other.
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.evalOperativeOf = function (rows, id) {
+  const mine = (rows || []).filter((r) => r.id === id);
+  let pass = null, any = null;
+  for (const r of mine) {
+    if (r.grade === null) continue;
+    if (!any || WA.attemptLater(r, any)) any = r;
+    if (!WA.gradePassed(r.grade)) continue;
+    if (!pass || WA.attemptLater(r, pass)) pass = r;
+  }
+  /* no graded attempt at all: the slot is still occupied by whatever row is
+     there (a date with no grade yet), so the tables keep showing it */
+  let row = pass || any;
+  if (!row) for (const r of mine) if (!row || WA.attemptLater(r, row)) row = r;
+  return {
+    row, passed: !!pass, attempts: mine.length,
+    others: mine.filter((r) => r !== row),
+  };
+};
+/* the grade every comparison uses — null when nothing is graded yet */
+WA.evalGrade = function (rows, id) {
+  const op = WA.evalOperativeOf(rows, id);
+  return op.row ? op.row.grade : null;
+};
+/* the operative ROW itself, for the surfaces that also print date / with whom */
+WA.evalOperative = function (rows, id) {
+  return WA.evalOperativeOf(rows, id).row;
+};
+WA.PASS_ATTEMPT_TIP =
+  "A re-flown checkride counts with the attempt the flight was characterised SUCCESSFUL on — 60 % and above on the printed scale (ΠΔ 151/13: ΣΚ 50-59 % is ΥΣΤΕΡΗΣΗ, Ε 0-49 % is ΑΠΟΤΥΧΙΑ). The failed and lagged attempts stay in the record and stay visible; they never enter a number. Two successful attempts resolve to the later one.";
+
 /* THE EIGHT CHECKRIDES AS FIXED ROWS (round 5) — always all eight, in
    syllabus order, whatever the record holds. `row` is the attempt that
-   occupies the slot (the latest one, which is what every comparison uses),
-   `earlier` the superseded attempts of the same checkride, `extras` the
-   imported evaluations nobody has identified yet. */
+   occupies the slot — since round 11 the OPERATIVE one, i.e. the successful
+   attempt (WA.evalOperativeOf) and not merely the latest — `passed` says
+   whether it was in fact a pass, `earlier` holds the other attempts of the
+   same checkride, and `extras` the imported evaluations nobody has identified
+   yet. */
 WA.evalSlotRows = function (rec) {
   const rows = WA.evalRows(rec).filter((r) => r.flown || !r.id);
-  const later = (a, b) => {
-    const da = String(a.date || ""), db = String(b.date || "");
-    if (da && db && da !== db) return da > db;
-    if (da && !db) return true;
-    if (!da && db) return false;
-    return a.i >= b.i;
-  };
   const slots = WA.EVALUATIONS.map((d) => {
-    const mine = rows.filter((r) => r.id === d.id);
-    let row = null;
-    for (const r of mine) if (!row || later(r, row)) row = r;
-    return { def: d, row, earlier: mine.filter((r) => r !== row) };
+    const op = WA.evalOperativeOf(rows, d.id);
+    return { def: d, row: op.row, passed: op.passed,
+             attempts: op.attempts, earlier: op.others };
   });
   return { slots, extras: rows.filter((r) => !r.id) };
 };
@@ -1370,20 +1544,12 @@ WA.checkLineHTML = function (sec, e) {
   return head + " &mdash; " + esc(x.evaluator || "—") + " &mdash; " + esc(fmtD(x.date));
 };
 
-/* this student's value on ONE evaluation identity: the LATEST graded attempt
-   (a re-fly after a failed checkride supersedes the earlier one). Every
-   class statistic in the admin views uses this same rule. */
-WA.evalLatest = function (rows, id) {
-  let best = null;
-  for (const r of rows) {
-    if (r.id !== id || r.grade === null) continue;
-    if (!best) { best = r; continue; }
-    const a = String(r.date || ""), b = String(best.date || "");
-    if (a && !b) best = r;
-    else if (a && b ? a >= b : r.i >= best.i) best = r;
-  }
-  return best;
-};
+/* SUPERSEDED IN ROUND 11 — WA.evalLatest is gone, not renamed. It answered
+   "the latest graded attempt", which the command replaced with "the attempt
+   the flight was characterised successful on" (WA.evalOperativeOf above). The
+   name is deliberately not kept as an alias: two functions with two rules is
+   exactly how a class average and a printed brief drift apart, and every
+   caller was moved. */
 
 /* NOTE (round 8): there is no WA.pendingItems and no `pending` count in
    recStats. The flag is gone from the data model — an unfilled fixed slot

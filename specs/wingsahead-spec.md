@@ -671,7 +671,7 @@ re-verifies the table after any edit.
 | 3 | FAIL / ALMOST GOOD · Category | `catF` · `WA_ITEMS.categories` | Contact · Instrument · Formation · Navigation (+ the legacy `other` placeholder, shown only while a row still carries it) | NO | **syllabus vocabulary** — there is no fifth track; the placeholder must be resolved, not extended |
 | 4 | FAIL / ALMOST GOOD · Flight code | `pickerF` → `codeF` · `WA.sorties(cat)` | the sorties of **that track only** (disabled until the track is chosen) | **YES** — "Other… (type the code)" | — |
 | 5 | **FAIL / ALMOST GOOD · Items** | `select.ms-add[data-msadd]` · `itemOptions()` over `WA.itemCat(cat).items` ⇄ `wa.item_names(cat)` | the printed gradesheet items of that track, in printed order (round 9 removed the free-text *filter* box that used to sit above this select — §4i·2) | **NO — ✱ RULED EXCEPTION** | **round 6**: an item nobody else can have is an item nobody can compare, count across the class, or look up in the remarks bank. Client and server share one list; a legacy typed string is greyed *legacy* and blocks the save until replaced (§4e·2) |
-| 6 | FPC · Due to which stage flight | `pickerF` → `triggerF` · `TRIGGER_GROUPS` | every sortie of the stage, grouped by the four tracks, checkrides included | **YES** — "Other… (type the code)" | — |
+| 6 | FPC · Due to which stage flight | `pickerF` → `fpcTriggerF` · `TRIGGER_GROUPS` (round 11 split it off `triggerF` for the helper line only) | every sortie of the stage, grouped by the four tracks, checkrides **and simulator sorties** included; the field stays **optional** | **YES** — "Other… (type the code)" | — · **round 11 considered closing this to the eight checkrides and ruled AGAINST**: an FPC follows the referral case, not a kind of flight (ΠΔ 29/2020 Άρθρο 3 — only 1β of the five is a checkride, 1ε's FPC is flown in the simulator, and παρ.17β has no trigger at all). The rule is now printed under the box. See §4k·5 |
 | 7 | CEF · Due to which stage flight | `pickerF` → `triggerF` · `TRIGGER_GROUPS` | as above | **YES** | — |
 | 8 | AIRSICKNESS · Flight | `pickerF` → `airFlightF` · `TRIGGER_GROUPS` | as above (required since round 6b) | **YES** | — |
 | 9 | Solo · Sortie flown solo | `pickerF` → `soloSortieF` · `slot.codes` | the candidate sorties the syllabus names for **that** solo slot | **YES** — reality is not bound by the candidate list | — |
@@ -1026,6 +1026,440 @@ fighters"). They were reworded in the **local demo database only**, with
 This is **not** part of the shipped migration, whose "comment preserved" promise
 stays literally true in code.
 
+## 4k. Round 11 (2026-08-19) — ADMIN POLISH FROM LIVE TESTING
+
+Five instructions from an evening of real use, plus one question that turned
+into a research task and came back with a **NO**. What they have in common is
+that every one of them is about a number the Wing Commander reads: which
+students it covers, how it is drawn, which attempt produced it, and how many
+places the record can disagree with itself.
+
+### THE FIVE INSTRUCTIONS (verbatim)
+
+1. «Στο overview να μπορω να φιλτραρω ανα class.»
+2. «Στο Grades per category να πλωταρονται οι 8 αξιολογησεις ολες μαζι. Ανα
+   κατηγορια απλως στα χ labels αλλο χρωμα.»
+3. «Αν ο μαθητης στην κανονικη ροη βαθμολογηθηκε με αποτυχια ή υστερηση, τοτε
+   θα υπολογιζουμε για βαθμολογια αυτη οπου η πτηση χαρακτηριστικε ως
+   επιτυχης.»
+4. «Αφαιρεσε το result optional.»
+5. «οι fpc γινονται triggered μονο απο αξιολογησεις;»
+
+---
+
+### 1. THE OVERVIEW CLASS FILTER
+
+Chips above the table: **All classes** plus every class that actually has an
+active student, each with its count. **The classes are read-only and they
+follow the members** — there is no class table in this database, so the chip
+row is derived on every draw from `people.class`; a class exists because a
+student carries its name and stops existing when the last one stops carrying
+it. Students the roster gave no class collect under **"No class recorded"**
+rather than disappearing: a student with no class must never become a student
+the Overview cannot show.
+
+What follows the filter:
+
+* the **rows**, and the **counts line** — `9 of 25 students · … · records: no
+  records submitted yet · filtered to 98B HAF`. The record source line
+  (`sourceLine`) is recomputed for the visible set, so it can say "no records
+  submitted yet" for a class where that is true while the squadron as a whole
+  has three.
+* **"Students without a self-report"**, whose heading names the class.
+* the choice itself, in `localStorage` under `wa-adm-class` — a CO who briefs
+  98B all morning should not re-pick 98B after every refresh. A stored class
+  that no longer has a student silently reverts to All rather than showing an
+  empty table nobody asked for.
+
+**What deliberately does NOT follow it:**
+
+* **The row's original index.** `A.sel` indexes `A.data.students`, so the
+  filtered table keeps each row's ORIGINAL `data-goto`. A filtered table that
+  renumbered its rows would open the wrong student's analysis — quietly, and
+  only while a filter was on.
+* **The "Instructor submissions" card**, and it says so out loud the moment a
+  filter is active: `proposals_count` arrives counted over every student an
+  instructor has assessed, and the payload carries no per-class breakdown, so
+  "3/25" cannot honestly be re-derived for one class here. Narrowing the
+  denominator without the numerator would have been a lie in a badge.
+* **The Student-analysis tab and the printed brief.** The instruction named
+  the Overview. The printed class summary already groups by class into its own
+  tables, and the analysis tab's comparisons are a separate question — see the
+  open item below.
+
+#### RULING — EXPORT SCOPE (asked for explicitly, and here is the choice)
+
+**The three CSVs follow the filter; the JSON export does not.** Both are said
+on the buttons themselves rather than left to be discovered.
+
+* The CSVs are one row per student (summary, assessments) or per entry of a
+  student (entries) — they are the table the CO is looking at, in a
+  spreadsheet — and their buttons sit in the toolrow directly above the
+  filtered table. A button over 9 visible rows that silently writes 25 is a
+  button that produces the wrong attachment on a Monday morning, and a file
+  name is the only place that mistake can still be caught. So the scope travels
+  in the file name: `wings-ahead-summary-98B-HAF-20260819.csv`,
+  `wings-ahead-entries-2026B-20260819.csv`, `…-no-class-…` for the unclassified
+  chip, and the plain name under All classes. The button labels carry the class
+  too. Tooltip: *"Follows the class filter above — exactly the rows you can
+  see."*
+* The JSON is **not a view, it is the BACKUP** — a raw server-side dump
+  (`public.admin_export`) of people, records and proposals, the thing you
+  restore from. A partial backup that looks like a full one is a trap, and the
+  RPC has no class argument to narrow it with anyway. It stays complete and its
+  tooltip says so in capitals.
+
+---
+
+### 2. ONE CHART, ALL EIGHT — AND THE TRACK IS A COLOUR
+
+The four per-category tabs are gone, together with the heading that named them
+("Grades per category" → **"Grades — the eight checkrides"**). One line now
+plots **C4590 · C4790 · C5090 · C5490 · I4490 · I4890 · F4690 · N4690** in
+syllabus order, with the class average as the same faint dashed reference and
+missing checkrides as the same gaps. A tab per track meant the CO saw four
+charts of two or three points each and had to hold the shape of the stage in
+his head; one line of eight shows it.
+
+**The track survives in the COLOUR of the x label**, which needs no click to
+read. Four tokens defined once per mode in `styles.css`
+(`--cat-contact` sky · `--cat-instrument` violet · `--cat-formation` amber ·
+`--cat-navigation` teal, plus `--cat-fpc` rose for the block below), so all
+eight palettes inherit them and a track keeps its colour when the reader
+switches theme — which is what makes a legend memorable. Mirrored in
+`WA.EVAL_CATS[].color`, and the same token draws the little `.catdot` in front
+of each row of the summary table, so chart and table cannot drift apart.
+
+**None of the four is a status colour, deliberately.** `--good` / `--bad` /
+`--warn` on a TRACK label reads as a verdict on the track ("contact is green,
+formation is red"), and this application does not grade tracks. `--accent`
+stays the student's own line and `--muted` the class average, so neither was
+available either.
+
+The legend names the two lines and then the four tracks, in syllabus order —
+which is also the order their labels run along the x axis, so it reads left to
+right like the chart does.
+
+#### RULING — WHERE THE FPC PLOT LIVES: **its own block, directly below.**
+
+Not a fifth colour on the same line, and not a toggle.
+
+* **Not a fifth series**: the eight checkrides share an x axis because the
+  SYLLABUS gives them one — C4590 is before C4790 for every student in the
+  squadron, for ever. An FPC has no such position; it happens when a referral
+  case happens. Putting FPC #1 and FPC #2 on that axis would invent an order
+  the flights do not have and, worse, would place one student's FPC #2 above
+  another student's FPC #2 as though the two were the same event.
+* **Not a toggle**: an FPC is precisely what the Wing Commander wants in the
+  same glance as the checkrides. A toggle would hide it behind a click, which
+  is what the four category tabs were already being blamed for.
+* **And nothing at all when there is no FPC.** Behind a tab, "FPC #1 not flown ·
+  FPC #2 not flown" cost nothing because nobody opened the tab; always on
+  screen it puts an absence on the page as though it were a gap in the
+  student's record. A student with no FPC now reads *"No FPC on this student's
+  record — nothing to plot."*
+
+---
+
+### 3. THE PASS-ATTEMPT RULE
+
+> «Αν ο μαθητης στην κανονικη ροη βαθμολογηθηκε με αποτυχια ή υστερηση, τοτε θα
+> υπολογιζουμε για βαθμολογια αυτη οπου η πτηση χαρακτηριστικε ως επιτυχης.»
+
+#### WHAT DECIDES "SUCCESSFUL" — read honestly out of the data model
+
+**Nothing in this record stores an outcome, and nothing ever did.** An
+evaluation entry carries `date · evaluation · with · grade` and that is the
+whole shape (`WA.ENTRY_KEYS.evaluations` ⇄ `wa.entry_keys('evaluations')`).
+There is no pass/fail tick that somebody forgot to fill in. So the honest
+answer to "was this flight characterised successful?" is **the grade, read
+against the printed scale** — which is how the squadron reads it on paper.
+
+**ΠΔ 151/13**, quoted in 3-01/2025 ΔΑΕ and digitised in FDMS
+`data/requirements/failure_procedures.json` (requirement #0, `verbatim`):
+
+| code | band | % | characterisation |
+|---|---|---|---|
+| «Α» | Άριστα | 90-100 | pass |
+| «ΛΚ» | Λίαν Καλώς | 75-89 | pass |
+| «Κ» | Καλώς | 60-74 | pass |
+| «ΣΚ» | Σχεδόν Καλώς | 50-59 | **ΥΣΤΕΡΗΣΗ** |
+| «Ε» | ΑΠΟΤΥΧΩΝ | 0-49 | **ΑΠΟΤΥΧΙΑ** |
+
+and, in the same record, the sentence that settles it: «Το κατώφλι 59%/60%
+διαχωρίζει την αποδεκτή από τη μη αποδεκτή απόδοση και είναι το κατώφλι που
+χρησιμοποιούν όλα τα κριτήρια παραπομπής.»
+
+For a **checkride** the referral law says the same number in its own words —
+**ΠΔ 29/2020 Άρθρο 3 παρ.1β** (FDMS `fail-16`): «βαθμολογείται με βαθμολογία
+από μηδέν (0) έως πενήντα εννέα τοις εκατό (59%)» in a πτήση εξέτασης ή
+αξιολόγησης IS the referral case. Two sources, one number: **60**.
+
+The command's own two words — «αποτυχία ή υστέρηση» — are exactly the two bands
+below it. The rule needed no invented field; it needed the scale naming itself.
+
+#### RECONCILING WITH ROUND 9'S TWIN RULE
+
+Round 9 said *the latest attempt stands for the slot*. That is **not replaced,
+it is demoted to the tiebreak**:
+
+> **PASS is the filter and runs first. LATEST decides only between attempts
+> that are equally operative.**
+
+* several attempts, one of them ≥ 60 → **that one**, whatever its date;
+* two attempts ≥ 60 → the **later** one (round 9's rule, untouched);
+* no attempt ≥ 60 → the **latest graded** one, flagged `passed:false`, so the
+  chart still shows a number instead of an em dash and every surface says out
+  loud that nothing has passed;
+* no graded attempt at all → the latest row, so a flown checkride never
+  disappears from a table.
+
+**ONE DEFINITION, WRITTEN TWICE AND CHECKED:**
+`wa.grade_pass_min()` / `wa.grade_band()` / `wa.grade_passed()` /
+`wa.eval_operative()` in `db/schema.sql`, mirrored by `WA.GRADE_PASS_MIN` /
+`WA.GRADE_BANDS` / `WA.gradeBand` / `WA.gradePassed` / `WA.attemptLater` /
+`WA.evalOperativeOf` in `app/app.js`. `WA.evalLatest` is **gone, not renamed** —
+two functions with two rules is exactly how a class average and a printed brief
+drift apart — and every caller was moved.
+`admin_get_data` now ships **`eval_grades`** per student (the eight operative
+attempts, computed server-side), so the two are demonstrably the same rule and
+not two rules that happen to agree. See the verification log below.
+
+#### WHERE THE RULE IS NOW READ
+
+Chart point · per-checkride comparison and its class best/worst/average ·
+the class-average dashed line · the summary table's slot row · the brief line ·
+the printed per-student evaluation table · the printed class matrix and its
+class-average row · the summary CSV's eight grade columns · the instructor's
+own student card. Every one of them, from `WA.evalGrade` / `WA.evalOperativeOf`.
+
+#### AND THE FAILED ATTEMPTS ARE VISIBLE, EVERYWHERE, MARKED
+
+* Summary table — the slot row wears **"counts: successful attempt · N
+  attempts"**, or **"no successful attempt yet · N attempts"** with its band
+  chip; each other attempt is its own row reading **"attempt — C4590 · «Ε»
+  Failed · not counted"**. A grade in a table is assumed to be a grade that
+  counts until it is told not to be.
+* Chart — a point that has **not** passed is drawn as a **hollow dashed ring**
+  instead of a filled dot, and its tooltip names the band and the attempt
+  count. A ring and not a colour: `--bad` on a data point would put a verdict
+  in the palette, and the band is already named in words twice.
+* Print — the class matrix marks such a grade with **`*`** and the caption
+  explains it, because paper is monochrome and a ring does not survive a
+  photocopier.
+* The student form — every attempt row carries **"counts — the successful
+  attempt"** / **"counts — no attempt has passed yet"** / **"not counted · «ΣΚ»
+  Lagging"**, computed from the same helper, so the form and the brief cannot
+  disagree.
+
+#### THE GAP THE RULE EXPOSED — AND THE ONE ACT ADDED TO CLOSE IT
+
+**Until this round the form could not record a re-flown checkride at all.** The
+eight evaluations are a fixed section with no "+ Add", so a student whose C4590
+was failed and flown again had exactly one place to put the second grade: on
+top of the first one. That destroys the failure the whole referral chain of ΠΔ
+29/2020 hangs on, and it makes the rule the command just asked for unreachable
+on any record made from here on.
+
+So the section gains **one act**, and it is a ruled exception in the round-6
+sense: not "+ Add an evaluation" — nobody may invent a ninth checkride — but
+**"+ Record the re-fly of C4590"**, offered only where the regulation says a
+re-fly comes from: **an attempt that did not pass** (παρ.1β again). It appends
+one more attempt at the SAME checkride id and touches the failed one not at
+all. The offer is **live** on the keystroke that makes a grade non-passing, the
+round-5b rule applied to a new act; and the slot badge of a checkride whose
+re-fly is still unrecorded reads **"re-fly not recorded yet"** instead of "not
+flown yet", which would have been a lie of exactly one word.
+
+---
+
+### 4. THE FPC «RESULT (OPTIONAL)» BOX IS GONE
+
+It was a free-text line beside a 0-100 grade and an evaluator, and free text
+beside a number is where a second, softer answer to the same question gets
+written — "pass" under a 48 %, "ok" under a grade nobody has filled in yet. An
+FPC already states its result twice: **the grade against the printed scale**
+(§3 above — 60 % and above is the successful characterisation) and the
+existence of the FPC entry itself. The box added nothing but a place to
+disagree with them.
+
+**The round-6 legacy pattern, exactly — "keep it, ask for it", minus the
+asking, because there is nothing to ask for:**
+
+* `result` **stays** in `wa.entry_keys('fpc')` / `WA.ENTRY_KEYS.fpc` as a
+  READ-ONLY CARRIER — otherwise `wa.strip_entry` would destroy stored text on
+  the next read.
+* The form **draws no box**. A stored value renders on the row as a read-only
+  `legnote`: *"Result — … . This box was removed: an FPC's result is its grade
+  … . What you wrote is kept here exactly as it stands and counts for nothing;
+  it can be dropped, and it cannot be written again."*
+* Every other surface prints it **marked**: `(legacy note)` on the dashboard
+  tables, the summary table and the brief; a spelled-out parenthesis on paper;
+  and in the entries CSV the Detail cell carries `… (legacy note — the FPC
+  result box was removed in round 11)`, because an unmarked "pass" in a
+  spreadsheet column beside a 48 % is precisely the disagreement the box was
+  removed for.
+* **Retired on write** by `wa.fpc_result_count()`, the twin of round 6's
+  `wa.phase_count`: the write path refuses any payload that GROWS the number of
+  FPC rows carrying a result, by name, with the rule spelled out. Keep or drop,
+  never add. Curated refusal, verified by raw RPC below.
+
+#### RULING — CEF IS UNTOUCHED AND KEEPS ITS RESULT BOX
+
+The instruction was to remove it "only if the field is shared code". **It is
+not**: `student.js` renders the FPC row and the CEF row as two separate literal
+blocks, each with its own `textF(…, "result", …)` line, so removing one leaves
+the other intact by construction. The command's sentence names the FPC. And the
+substance agrees with the shape: a CEF is conducted by a **Squadron Evaluator**
+whose written finding is a different object from a Δοκιμή Προόδου's grade —
+round 6 already left the CEF's evaluator list open for the same reason.
+
+---
+
+### 5. «οι fpc γινονται triggered μονο απο αξιολογησεις;» — **VERDICT: NO.**
+
+Item 5 was conditional on this, so the condition is recorded before the answer:
+**IF confirmed**, the FPC trigger dropdown was to be narrowed to the eight
+checkrides as a ruled exception. **It is not confirmed. The dropdown is
+therefore unchanged**, and what round 11 ships instead is the regulation's
+actual rule, rendered as the field's helper line.
+
+**An FPC is not defined by the flight that came before it. It is defined by the
+REFERRAL CASE (λόγος παραπομπής) of ΠΔ 29/2020 Άρθρο 3.** The controlling text
+is παρ.3 (FDMS `failure_procedures.json` → `fail-23`, `verbatim`, source
+`fek_a_57_2020.pdf` PDF p.5):
+
+> «Κατά τις περιπτώσεις των υποπαραγράφων **1α, 1β, 1γ, 1δ και 1ε** ο
+> παραπεμπόμενος εξετάζεται για την πτητική του καταλληλότητα λόγω μειωμένης
+> πτητικής ικανότητας **με πτήση Δοκιμής Προόδου από τον ΑΕ της Μοίρας στον
+> αέρα** για τις περιπτώσεις των υποπαραγράφων 1α, 1β, 1γ και 1δ, ενώ για τις
+> περιπτώσεις της υποπαραγράφου **1ε στον εξομοιωτή πτήσεων**.»
+
+Five separate triggers; **exactly one of them is a checkride**:
+
+| case | FDMS record | what it is | evaluation? |
+|---|---|---|---|
+| **1α** | `fail-75` | handling an A/C or a procedure, for reasons that are not indiscipline, in a way that endangers the safe and successful execution of the mission | **NO** — any sortie |
+| **1β** | `fail-16` | 0-59 % in a πτήση εξέτασης ή αξιολόγησης | **YES** — the eight checkrides |
+| **1γ** | `fail-76` | after the stage's first four sorties: 0-49 % on two consecutive flights, or 0-59 % on three | **NO** — ordinary sorties |
+| **1δ** | `fail-77` | 0-59 % on ≥ 40 % of the Pre-SOLO phase or ≥ 20 % of the whole stage | **NO** — a running ratio, no single trigger flight |
+| **1ε** | `fail-40` | the SIMULATOR thresholds — and **its FPC is flown in the simulator** | **NO** — F/S |
+
+Three further paths arrive from outside Άρθρο 3 παρ.1 entirely: a failed CEF
+re-flown badly (3-01 ΚΕΦ.2 §30ζ → `fail-12`, `board_path` "Δοκιμή Προόδου από
+ΑΕ"), a failed first solo (§56 → `fail-19`), a third consecutive F/S failure
+(§30στ → `fail-11`, «Δοκιμή Προόδου **στον εξομοιωτή**»). And **ΠΔ 29/2020
+Άρθρο 3 παρ.17β** (`fail-70`) prescribes an «κατ' εξαίρεση πτήση Δοκιμής
+Προόδου» after a favourable Board — **an FPC with no triggering sortie at
+all**. The negative boundary is recorded too: παρ.5 (`fail-62`) sends cases
+1στ/1η/1θ/1ι to the Board **without** an FPC, and παρ.4 (`fail-39`) makes case
+1ζ a written ground exam, not a flight.
+
+**Consequences, all of them already true of the shipped picker and now stated:**
+the list stays every sortie of the stage across the four tracks, the simulator
+sorties among them (case 1ε is representable), free text stays open, and the
+field stays **optional** — because παρ.17β describes an FPC that has no trigger
+to name. The helper line under the box now says so, with the citations in its
+tooltip:
+
+> "An FPC follows the referral case, not a kind of flight (ΠΔ 29/2020 Άρθρο 3):
+> dangerous handling on any sortie (1α) · 0-59 % on a checkride (1β) ·
+> consecutive low grades on ordinary sorties (1γ) · the 40 % / 20 % ratio of the
+> phase or the stage (1δ) · the simulator thresholds, whose FPC is flown in the
+> simulator (1ε). So it may be any sortie — and after a favourable Board it may
+> follow none at all (παρ.17β): leave this empty then."
+
+**No stored FPC trigger was legacy-marked**, because none is wrong: the wide
+list was correct all along, and the round-5 rule that a progress-check flight
+is an FPC (never a ninth evaluation) is untouched.
+
+---
+
+### AUDIT-TABLE DELTA (§4h)
+
+* **#6 FPC · Due to which stage flight** — values, escape and openness
+  **unchanged**; the round-11 helper line under the box now carries the ΠΔ
+  29/2020 Άρθρο 3 rule and its FDMS citations. Recorded here because the round
+  considered closing it and ruled against.
+* **#14 Admin · Compare on this evaluation** — unchanged. The per-CATEGORY
+  chips it used to sit beside are gone (§2); they were never in the table,
+  being chips rather than a select.
+* **The class filter is not a dropdown either** — chips, like the metric chips
+  beside them, derived from the data rather than from a list, with no free
+  value possible: a class the app does not know about is a class no student is
+  in. Counted with the solo slots and the assessment radio group among the
+  closed lists that are expressed by the shape of the control.
+
+### CACHE-BUSTER
+
+`?v=20260819a` → **`?v=20260819b`** on all seven assets (`styles.css`,
+`config.js`, `items-catalog.js`, `app.js`, `student.js`, `instructor.js`,
+`admin.js`). A cached round-10 `admin.js` against a round-11 `app.js` would
+call `WA.evalLatest`, which no longer exists.
+
+### SELF-VERIFY — WHAT WAS ACTUALLY RUN (local stack, 2026-08-19)
+
+1. **Class filter** — All / 2026B / 98B HAF / 99A HAF: rows narrow, the counts
+   line recomputes (`9 of 25 students · records: no records submitted yet ·
+   filtered to 98B HAF`), the choice survives a reload, and every visible row's
+   `data-goto` still resolves to the right student in `A.data.students`
+   (checked row by row, not sampled).
+2. **CSV scope** — captured from the download anchors:
+   `wings-ahead-summary-98B-HAF-20260819.csv`,
+   `…entries-98B-HAF-…`, `…assessments-98B-HAF-…`, and the plain name under All
+   classes. Blob bodies: **3 data rows** filtered to 2026B, **25** unfiltered.
+3. **The chart** — all eight x labels present in syllabus order, each drawn in
+   its track's token (4 distinct colours, verified as computed `fill`), legend
+   naming the four; a student with data and a student with gaps both drawn.
+4. **Pass rule, client ⇄ server** — `admin_get_data` fetched raw and compared
+   against `WA.evalOperativeOf` for **25 students × 8 checkrides = 200
+   comparisons** of `{grade, index, passed}`: **0 mismatches**.
+5. **The re-flown fixture, built through the real CO form and then RESTORED** —
+   a demo student's C4590 was graded 48 (ΑΠΟΤΥΧΙΑ), "+ Record the re-fly"
+   appeared on that keystroke, a second attempt was added and graded 86, and
+   its date was then corrected to fall BEFORE the failed one. That is the
+   discriminating case: the **latest** attempt is the 48 and the **pass** is the
+   86, so round 9's rule alone would have printed 48. Every surface printed
+   **86** — chart point, per-checkride comparison, brief line, printed
+   evaluation table, printed class matrix, and the summary CSV's C4590 column —
+   while the 48 stayed visible as *"attempt — C4590 · «Ε» Failed · not
+   counted"*. The pass was then dropped to 55 to exercise the no-pass fallback:
+   operative = the latest (48), hollow dashed ring on the chart, `48%*` in the
+   printed matrix, class average moving 77.3 → 64.7, and the slot row reading
+   *"no successful attempt yet · 2 attempts"*. **Restore verified
+   byte-identical against the pre-fixture snapshot** (`diff` clean).
+6. **Twin-rule tiebreak** — the pre-existing twin C5090 attempts (64 and 74,
+   both passing) still resolve to the later one, with the earlier shown *"«Κ»
+   Good · not counted"*.
+7. **FPC form** — 0 `result` boxes under FPC, **1 under CEF** (untouched); the
+   stored results render as read-only `legnote`s; the trigger helper line
+   renders with its citations.
+8. **Curated refusals, raw RPC** — adding a `result` to an FPC row:
+   *"WA: invalid payload — the free-text result was removed — an FPC's result is
+   its grade against the printed scale … A result already written is kept as a
+   legacy note, but a new one cannot be added (fpc)"*. The retired `pending`
+   key still refused by name. `wa.fpc_result_count` exercised directly:
+   keep-2 ✓, drop-to-1 ✓, grow-to-3 ✗.
+9. **Schema re-applied twice**, `ON_ERROR_STOP=1`, exit 0 both times.
+   `node --check` clean on all four JS files. **Zero console errors** across
+   Overview / Student analysis / Brief / People, in a light and a dark palette,
+   and on the instructor view.
+
+### OPEN ITEM RAISED BY THIS ROUND (for the user's ruling)
+
+**"Class average" in the Student-analysis tab is a COHORT average, not a class
+one.** The four-bar comparison, the per-checkride comparison and the dashed
+reference line are all computed over **every active student of every class** —
+which is what they have always done, and this round did not change it. With
+25 students spread over three classes on one instance, "class best / class
+worst / class average" is arithmetic over a population the label does not
+describe. Round 11 made the tooltips honest ("the average of every active
+student who has flown that checkride — all classes, not only this student's")
+and changed no number, because narrowing them is a decision about what the
+brief compares, not a bug fix. **Ruling wanted:** should the analysis tab's
+comparisons follow the Overview's class filter, or should they be scoped to the
+student's own class always, or stay squadron-wide?
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -1043,6 +1477,13 @@ stays literally true in code.
       its five-segment distribution bar and `n/instructors`,
       completion status) + who has not submitted yet ·
       people/token management (generate/copy/revoke links) · CSV/JSON export.
+      **Round 11 (§4k·1): a CLASS FILTER** — chips derived from the active
+      students (the classes are read-only and follow the members), persisted in
+      `localStorage`, recomputing the counts line and the "without a
+      self-report" card, keeping every row's original index, leaving the
+      not-filterable instructor card labelled as such, and scoping **the three
+      CSV exports** (class in the file name) while the **JSON backup stays
+      complete**.
    b. **Student analysis** (click a row — each student examined SEPARATELY):
       - Identity header (MN, rank, name, class) + entries still to correct.
       - **Comparison chart** (vanilla SVG, mifchart discipline): the selected
@@ -1055,14 +1496,20 @@ stays literally true in code.
         they exist only after a failure.
       - **Evaluations card**: (a) PER-EVALUATION comparison — pick one of the
         eight checkrides, get the same four bars ON THAT checkride (each
-        student contributes their latest graded attempt) with the contributing
-        values printed underneath so the CO can hand-check them — **round 8:
-        the y-axis starts just below the lowest grade plotted, not at 0**; (b) a
-        PER-CATEGORY plot (chips Contact · Instrument · Formation · Navigation ·
-        FPC) drawing that category's evaluations **in syllabus order, never in
-        date order**, as connected points with grade labels and a faint dashed
-        class-average reference — clicking a point highlights its row in
-        (c) the SUMMARY TABLE (evaluation · with whom · grade · date · source).
+        student contributes **the attempt the flight was characterised
+        successful on** — round 11, §4k·3; it was "their latest graded attempt"
+        until then) with the contributing values printed underneath so the CO
+        can hand-check them — **round 8: the y-axis starts just below the lowest
+        grade plotted, not at 0**; (b) **round 11: ONE plot of ALL EIGHT
+        checkrides** in syllabus order, never in date order, as connected points
+        with grade labels, a faint dashed class-average reference and **x labels
+        coloured by track** with a legend naming the four (the per-category
+        chips are gone; a point with no successful attempt is drawn as a hollow
+        ring) — clicking a point highlights its row in (c) the SUMMARY TABLE
+        (evaluation · with whom · grade · date · source), where every extra
+        attempt is its own row marked with its band and **"not counted"**; and
+        (d) **the FPC plot in its own block below**, because an FPC has no
+        position in the syllabus to share the x axis with.
       - **Dated-entry tables**: FAIL and ALMOST GOOD in full (flight code,
         items, instructor, grade), airsickness **when and with whom**, plus
         NFS · SMS · solos · FPC · CEF. All of it reaches the printed brief.
@@ -1114,3 +1561,16 @@ stays literally true in code.
   πλήρες ίχνος). Στο πραγματικό 98B ο πίνακας ξεκινά άδειος, οπότε δεν αφορά
   κανένα αληθινό δεδομένο· μελλοντικές μεταπτώσεις να τυλίγονται σε
   trigger-disable ώστε να μην αγγίζουν χρονοσφραγίδες.
+- **ΝΕΟ (Γύρος 11, §4k) — «class average» στο Student analysis.** Οι τέσσερις
+  μπάρες, η σύγκριση ανά checkride και η διακεκομμένη γραμμή αναφοράς
+  υπολογίζονται πάνω σε **όλους τους ενεργούς μαθητές όλων των τμημάτων** —
+  όπως πάντα, ο Γύρος 11 δεν άλλαξε κανέναν αριθμό, μόνο έκανε τα tooltips
+  ειλικρινή. Με 25 μαθητές σε τρία τμήματα στο ίδιο instance, το «class
+  best/worst/average» είναι αριθμητική πάνω σε πληθυσμό που η ετικέτα δεν
+  περιγράφει. **Ζητείται απόφαση**: να ακολουθεί το φίλτρο του Overview, να
+  περιορίζεται πάντα στο τμήμα του μαθητή, ή να μένει σε επίπεδο μοίρας;
+- **ΝΕΟ (Γύρος 11) — παρατήρηση από τη ζωντανή δοκιμή, ΟΧΙ σφάλμα του γύρου:**
+  η εγγραφή ενός demo μαθητή δεν αποθηκεύεται ξανά επειδή μια παλιά γραμμή SMS
+  δεν ονομάζει τη συνθήκη ΚΕΠΕ (κανόνας Γύρου 8, §4f). Λειτουργεί ακριβώς όπως
+  σχεδιάστηκε — καταγράφεται εδώ ώστε να μην εκληφθεί ως παρενέργεια του
+  Γύρου 11 όταν ο CO το συναντήσει.
