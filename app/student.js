@@ -634,62 +634,105 @@ WA.renderStudent = async function (view, me, opts) {
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
-     ROUND 12 — THE LOG TABLES.
-     «Για αρχη προσθεσε για καθε μαθητη ανα κατηγορια ενα πινακα στο τελος οπου
-      θα εχει ολες τις πτησεις. contact, ημερομηνια, instructor, duration,
-      grade or non graded (δεκτο το null, γιατι καποιες φορες αργει το
-      debriefing). 4+4 πινακες για f/s και flights. ομοιως τα μαθηματα και τα
-      exams.»
+     ROUND 12b — THE TABLE FORM (the user's review of round 12).
+     «Μπορουμε αντι να το εχουμε σε αυτη την μορφη να ειναι σε πινακα με στηλες
+      και σειρες ολες τις πτησεις. Απλα για cef, fcf, repeat θα προσθετει εξτρα
+      γραμμες. Sorting με βαση τις ημερομηνιες. Δε θελω πεδιο note, Or a verdict
+      with no number. Θελω μονο mission complete, mission incomplete. Ομοιως για
+      μαθηματα και εξετασεις. Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις
+      για να ειναι απλο.»
+
+     Round 12 drew each flight as a CARD with a summary line above it. The
+     squadron reads a log as a TABLE, so every one of the ten blocks is now a
+     real <table>: one ROW per flight, edited in the cells themselves, one line
+     tall. The extra rows the review names — cef, fcf, repeat, and a same-day
+     re-fly — are exactly what a row per flight gives you: an FCF is not a
+     variant of a syllabus sortie, it is another line in the log.
+
+     THE COLUMN IS THE LABEL. A cell is a bare control; the header says once,
+     for every row beneath it, what it is. That is what keeps a row one line
+     tall, and it is why the labelled-field builders above are not reused here.
+
      Four sections, ten blocks: the band IS the section (flights / fs), the
      track is on the row, and the pair is one table. NOTHING IS PRE-SEEDED —
      the syllabus list is what a flight is CHOSEN FROM, never a skeleton of 133
      rows, so an unflown sortie stays what it is: not an entry.
      ══════════════════════════════════════════════════════════════════════════ */
 
-  /* the flight identity — the directive's first column. The list is the
-     table's own (band, track) in FLOW-CHART order, minus the eight checkrides
-     (they live in Evaluations). Free text is always accepted: the syllabus
-     data may lag reality and a record must never become unstorable. */
-  function logSortieF(sec, i, e) {
-    const track = e.track || "";
-    const list = track ? WA.logPickList(sec, track) : [];
-    const off = WA.kindOffCatalogue(e.kind);
-    return pickerF(sec, i, e, "sortie", "Flight",
-      [{ items: list.map((s) => ({
-           v: s.c,
-           t: s.c + " — " + s.n + (s.nt ? " (night)" : ""),
-           tip: "Training Section " + s.g + (s.h ? " · syllabus " + s.h + " h" : "") })) }],
-      { free: true, req: true,
-        ph: off ? "— type what was flown —" : "— which sortie? —",
-        otherLabel: "Other… (type the code)",
-        freePh: off ? "e.g. FCF profile 2" : "e.g. C4302",
-        note: logSortieNoteHTML(sec, e) });
+  /* ── THE CELL BUILDERS ────────────────────────────────────────────────────
+     The field markers are the SAME as the labelled form's — "@x" is the select
+     of x, "~x" the free-text box it reveals — so the one input handler at the
+     bottom of this file serves both shapes and can never treat them
+     differently. What changes is only the wrapper: no <label>, no note line,
+     no second column. */
+  const cellDate = (sec, i, field, val, aria) => `
+    <input type="date" class="cellin c-dt" value="${esc(val || "")}"
+           aria-label="${esc(aria)}" ${F(sec, i, field)}>`;
+
+  const cellText = (sec, i, field, val, aria, ph, list) => `
+    <input type="text" class="cellin" value="${esc(val || "")}" placeholder="${esc(ph || "")}"
+           ${list ? `list="${esc(list)}" autocomplete="off"` : ""}
+           aria-label="${esc(aria)}" ${F(sec, i, field)}>`;
+
+  /* the picker, as a cell. `noEmpty` is for a field that always holds a value
+     (the kind): offering "—" there would let a student clear a key the record
+     requires, and the save would then refuse a choice the form invited. */
+  function cellPick(sec, i, e, field, items, o) {
+    const O = o || {};
+    const raw = e[field];
+    const val = raw === null || raw === undefined ? "" : String(raw);
+    const inList = items.some((x) => x.v === val);
+    const free = !!O.free && (!!e["_o_" + field] || (!!val && !inList));
+    const opt = (it) => `<option value="${esc(it.v)}"${!free && val === it.v ? " selected" : ""}${
+      it.tip ? ` title="${esc(it.tip)}"` : ""}>${esc(it.t)}</option>`;
+    return `
+      <select class="cellin${O.cls ? " " + esc(O.cls) : ""}" ${F(sec, i, "@" + field)}${
+        O.disabled ? " disabled" : ""} aria-label="${esc(O.aria || field)}">
+        ${O.noEmpty ? "" : `<option value=""${!val && !free ? " selected" : ""}>${
+          esc(O.ph || "—")}</option>`}
+        ${items.map(opt).join("")}
+        ${O.free ? `<option value="${PICK_OTHER}"${free ? " selected" : ""}>${
+          esc(O.otherLabel || "Other…")}</option>` : ""}
+      </select>
+      ${free ? `<input type="text" class="cellin freein" value="${esc(val)}"
+                  placeholder="${esc(O.freePh || "type it")}" ${F(sec, i, "~" + field)}
+                  aria-label="${esc((O.aria || field) + " — typed")}">` : ""}`;
   }
 
-  /* the live verdict under a TYPED flight code — the same three answers the
-     server gives, said before the save instead of after it. An fcf / cef /
+  /* A WARNING THAT FITS IN A CELL. Round 12 printed the whole sentence under
+     the box; a table row has no room for a sentence, so the cell carries the
+     SHORT NAME of the problem and the sentence rides in its tooltip — and the
+     save says the whole thing in words either way. Nothing is hidden: the chip
+     is coloured, permanent and beside the value it is about. */
+  const cflag = (label, tip) =>
+    ` <span class="cflag" title="${esc(tip)}">${esc(label)}</span>`;
+
+  /* the live verdict on a TYPED flight code — the same four answers the server
+     gives, said on the keystroke instead of after the save. An fcf / cef /
      other row is off-catalogue BY NATURE, so it is never marked as a surprise. */
-  function logSortieNoteHTML(sec, e) {
+  function logSortieFlag(sec, e) {
     const code = WA.normCode(e.sortie);
     if (!code) return "";
     const t = WA.codeTrack(code);
     if (t && e.track && t !== e.track) {
-      return `<span class="warn-t" title="The letter of a Phase II sortie code names its track — this pair contradicts itself and is refused on save">${
-        esc(code)} belongs to the ${esc(WA.itemCatLabel(t))} table</span>`;
+      return cflag(WA.itemCatLabel(t) + " table",
+        code + " belongs to the " + WA.itemCatLabel(t) + " table — the letter of a Phase II sortie code names its track, so this pair contradicts itself and is refused on save");
     }
     const b = WA.sortieBand(code);
     if (b && b !== sec) {
-      return `<span class="warn-t" title="Nothing derives the aircraft/simulator split from a code — the generated flow-chart catalogue is the only authority, and where it knows the code it is a fact">${
-        esc(code)} is ${b === "fs" ? "a SIMULATOR sortie — record it under F/S"
-                                   : "an AIRCRAFT sortie — record it under Flights"}</span>`;
+      return cflag(b === "fs" ? "simulator" : "aircraft",
+        code + " is " + (b === "fs" ? "a SIMULATOR sortie — record it under F/S"
+                                    : "an AIRCRAFT sortie — record it under Flights") +
+        ". Nothing derives the aircraft/simulator split from a code — the generated flow-chart catalogue is the only authority, and where it knows the code it is a fact.");
     }
     if (WA.EVAL_ORDER.indexOf(code) >= 0) {
-      return `<span class="warn-t" title="Two rows for one flight would be two grades that can disagree">${
-        esc(code)} is a checkride — record it in the Evaluations section, where the syllabus order applies to it</span>`;
+      return cflag("checkride",
+        code + " is a checkride — record it in the Evaluations section, where the syllabus order and the pass rule apply to it. Two rows for one flight would be two grades that can disagree.");
     }
     if (WA.kindOffCatalogue(e.kind)) return "";
     if (!WA.logSortieKnown(sec, e.track, code)) {
-      return `<span class="warn-t" title="Not in the generated syllabus catalogue — it is saved as typed and shown marked. If it was an FCF, a CEF or something else outside the flow chart, say so in “Kind” and this note goes away.">not in the syllabus catalogue</span>`;
+      return cflag("off-catalogue",
+        "Not in the generated syllabus catalogue — it is saved as typed and shown marked. If it was an FCF, a CEF or something else outside the flow chart, say so in the Kind column and this mark goes away.");
     }
     return "";
   }
@@ -707,240 +750,249 @@ WA.renderStudent = async function (view, me, opts) {
     if (!isFinite(n)) return { bad: true };
     return { dec: n, exact: n === Math.round(n * 10) / 10 };
   }
-  function durnoteHTML(sec, i, val) {
+  /* THE DURATION CELL. The box stays TEXT so 1:20 can be typed at all, and the
+     offer to convert it is a one-glyph button beside the value — the sentence
+     that used to sit under the box now rides in its tooltip, and the save says
+     the whole of it in words if the row is left as it stands. */
+  function durFix(sec, i, val) {
     const p = durParse(val);
     if (p.empty) return "";
     if (p.hm) {
-      return `<b>${esc(WA.normLine(val))}</b> is ${esc(p.dec)} decimal hours &mdash;
-        the log is kept in hours, not hours and minutes.
-        <button type="button" class="btn btn-sm" data-dur="${esc(sec)}:${i}:${esc(p.dec)}"
-          >Use ${esc(p.dec)}</button>`;
+      return ` <button type="button" class="cfix" data-dur="${esc(sec)}:${i}:${esc(p.dec)}"
+        title="${esc(WA.normLine(val) + " is " + p.dec + " decimal hours — the log is kept in hours, not hours and minutes. Press to store " + p.dec + ".")}"
+        >&rarr;${esc(p.dec)}</button>`;
     }
     if (p.bad) {
-      return `<span class="warn-t">that is not a duration &mdash; type decimal hours (1.3) or h:mm (1:20)</span>`;
+      return cflag("?", "That is not a duration — type decimal hours (1.3) or h:mm (1:20)");
     }
     if (!p.exact) {
       const r = Math.round(p.dec * 10) / 10;
-      return `Duration is recorded to one decimal (6-minute steps) &mdash;
-        <b>${esc(p.dec)}</b> is not.
-        <button type="button" class="btn btn-sm" data-dur="${esc(sec)}:${i}:${esc(r)}"
-          >Round to ${esc(r)}</button>`;
+      return ` <button type="button" class="cfix" data-dur="${esc(sec)}:${i}:${esc(r)}"
+        title="${esc("Duration is recorded to one decimal (6-minute steps) — " + p.dec + " is not. Press to store " + r + ".")}"
+        >&rarr;${esc(r)}</button>`;
     }
     return "";
   }
-  function durF(sec, i, e) {
-    const note = durnoteHTML(sec, i, e.duration);
+  function durCell(sec, i, e) {
     const hint = e.sortie ? WA.sortieHours(sec, e.track, e.sortie) : null;
     return `
-      <label class="f"><span>Duration (h)</span>
-        <input type="text" inputmode="decimal" value="${esc(e.duration === null || e.duration === undefined ? "" : e.duration)}"
-               placeholder="${esc(hint ? "syllabus " + hint : "e.g. 1.3")}"
-               ${F(sec, i, "duration")}>
-        ${note ? `<span class="fixnote">${note}</span>` : ""}</label>`;
+      <input type="text" class="cellin c-num" inputmode="decimal"
+             value="${esc(e.duration === null || e.duration === undefined ? "" : e.duration)}"
+             placeholder="${esc(hint ? String(hint) : "1.3")}"
+             title="${esc("Decimal hours, one decimal — 0.1 h is 6 minutes. 1:20 may be typed and the row offers the conversion." +
+               (hint ? " The syllabus value for this sortie is " + hint + " h." : ""))}"
+             aria-label="Duration in hours" ${F(sec, i, "duration")}>${durFix(sec, i, e.duration)}`;
   }
 
-  /* THE KIND — «να αφησουμε placeholder για τυχον fcf, cef, repeat». */
-  function kindF(sec, i, e) {
-    const k = WA.flightKind(e.kind) || WA.flightKind("syllabus");
-    return pickerF(sec, i, e, "kind", "Kind",
-      [{ items: WA.FLIGHT_KINDS.map((x) => ({ v: x.id, t: x.label, tip: x.tip })) }],
-      { ph: "— syllabus —", note: k ? esc(k.tip) : "" });
+  /* THE GRADE CELL — a number, or NG, or empty. Empty is not a gap: «δεκτο το
+     null, γιατι καποιες φορες αργει το debriefing». The NG toggle lives in the
+     same cell because NG is an answer about the GRADE and nothing else: it
+     removes the number and leaves who flew it, when and for how long exactly
+     where they are. */
+  function gradeCell(sec, i, e) {
+    if (e.ng) {
+      return `<span class="badge" title="Non-graded by nature — nobody was in a position to score this flight">NG</span>
+        <button type="button" class="ngb is-on" data-ng="${esc(sec)}:${i}:0" aria-pressed="true"
+          title="This flight is recorded NG (non-graded). Press to make it a graded flight again.">%</button>`;
+    }
+    const fx = fixnoteHTML(sec, i, "grade", e.grade);
+    return `
+      <input type="number" class="cellin c-num" min="0" max="100" step="1" inputmode="numeric"
+             value="${e.grade === null || e.grade === undefined || e.grade === "" ? "" : esc(e.grade)}"
+             placeholder="—" aria-label="Grade in percent"
+             title="${esc("0-100, whole numbers. Leave it empty until the debrief lands — the row is complete without it.")}"
+             ${F(sec, i, "grade")}>
+      <button type="button" class="ngb" data-ng="${esc(sec)}:${i}:1" aria-pressed="false"
+        title="Mark this flight NG (non-graded) — nobody was in a position to score it. It keeps its instructor, its date and its duration.">NG</button>${
+      fx ? ` <button type="button" class="cfix" data-round="${esc(sec)}:${i}:grade"
+               title="${esc("Grades are whole numbers — " + e.grade + " % is not one. Press to store " + Math.round(Number(e.grade)) + " %.")}"
+               >&rarr;${esc(Math.round(Number(e.grade)))}</button>` : ""}`;
   }
 
-  /* THE VERDICT — drawn ONLY where there is no grade, because that is the only
-     place it may live. It is how a pass/lag/fail the squadron's scheduler
-     recorded WITHOUT a percentage reaches this record: without it, a FAIL the
-     squadron knows about would be indistinguishable from a flight still
-     waiting for its debrief — a failure invisible in the record that exists to
-     show it. Supply the number later and the verdict is read from it instead. */
-  function verdictF(sec, i, e) {
-    return pickerF(sec, i, e, "verdict", "Or a verdict with no number",
-      [{ items: WA.VERDICTS.map((v) => ({ v: v.id, t: v.label + " — " + v.el, tip: v.tip })) }],
-      { ph: "— none —",
-        note: "Only for a flight the squadron characterised without a percentage. Type a grade above and the verdict is read from it." });
+  /* THE MISSION CELL (round 12b) — «Θελω μονο mission complete, mission
+     incomplete». Three states and each one is a different kind of fact:
+       · a grade exists → the mission is READ from it and shown, not editable.
+         A stored one beside a stored grade is a second source of truth that can
+         contradict the first — the defect round 11 removed from the FPC.
+       · no grade, not NG → it is the squadron's own characterisation of a
+         flight nobody wrote a percentage for. Empty means the debrief has not
+         landed, and after a week the cell says how long it has been waiting.
+       · NG → neither. A flight nobody could score is not a mission verdict. */
+  function missionCell(sec, i, e) {
+    if (e.ng) {
+      return `<span class="k" title="A non-graded (NG) flight is not scorable at all — it carries neither a grade nor a mission">&mdash;</span>`;
+    }
+    if (WA.missionDerived(e)) {
+      const m = WA.gradeMission(e.grade);
+      const def = WA.mission(m) || {};
+      return `<span class="mchip is-${esc(m)}" title="${esc(
+        "Read from the grade: " + e.grade + " % is “" + (def.label || m) +
+        "” (the 60 % threshold of ΠΔ 151/13). It is not typed here — a stored mission beside a stored grade is a second source of truth that can contradict the first. Clear the grade and this becomes a choice again.")
+        }">${esc(def.label || m)}</span>`;
+    }
+    const late = WA.awaitingDebrief(e) ? WA.daysAgo(e.date) : null;
+    return cellPick(sec, i, e, "mission",
+      WA.MISSIONS.map((m) => ({ v: m.id, t: m.label, tip: m.tip })),
+      { aria: "Mission",
+        cls: "c-ms",
+        ph: e.date ? "— awaiting debrief —" : "— none yet —" }) +
+      (late !== null && late >= WA.DEBRIEF_AMBER_DAYS
+        ? ` <span class="lagchip is-late" title="${esc("Flown " + late +
+            " days ago and still without a grade — the debrief has not landed yet")}">${esc(late)} d</span>`
+        : "");
   }
 
-  /* the one-line summary that makes the row read as a TABLE ROW: the flight,
-     the date, the instructor, the duration and the grade — the directive's own
-     columns — with the kind and seq tags beside them when they say something. */
-  function logHeadHTML(sec, i, e) {
-    const kind = WA.flightKind(e.kind);
+  /* the flags that sit at the end of a row: who entered it, whether it is still
+     a leftover, and which flight of the day it was. Round 12 gave each of these
+     a paragraph above the card; a table row carries them as chips, with the
+     same sentences in their tooltips. */
+  function rowFlags(sec, i, e) {
+    const lock = coLocked(e);
+    const leg = stillLegacy(sec, e);
+    return (WA.isCO(e)
+        ? (lock
+            ? `<span class="colock" title="${esc("This entry was set by the squadron CO. You can see it, and it stays on your record exactly as it is — only the CO can change or remove it.")}">&#128274; CO</span>`
+            : `<span class="cotag" title="Entered by the squadron CO">CO</span>`)
+        : "") +
+      (leg ? cflag("incomplete",
+        "Recorded on an earlier version of this form — please complete " +
+        (missingOf(sec, e).join(", ") || "the missing details") + ". " +
+        (blocksSave(sec, e)
+          ? "It stays readable everywhere in the meantime, but the record cannot be saved again until this is done."
+          : "Nothing is lost in the meantime — the rest of the form saves as it is.")) : "");
+  }
+  const seqBadge = (e) => {
     const seq = Number(e.seq || 1);
-    const v = WA.rowVerdict(e);
-    const gradeCell = e.ng
-      ? `<span class="badge">NG</span>`
-      : (e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade))
-          ? `<b>${WA.pct(e.grade)}</b>`
-          : (v ? `<span class="badge badge-warn" title="${esc((WA.verdict(v) || {}).tip || "")}">${esc(WA.verdictLabel(v))}</span>`
-               : WA.debriefChip(e)));
-    return `
-      <div class="logline">
-        <span class="lg-c" title="${esc(WA.logSortieLabel(sec, e.track, e.sortie, e.kind))}">${
-          esc(WA.normCode(e.sortie) || "—")}</span>
-        ${kind && kind.id !== "syllabus"
-          ? `<span class="badge badge-acc" title="${esc(kind.tip)}">${esc(kind.label)}</span>` : ""}
-        ${seq > 1
-          ? `<span class="badge" title="The ${esc(seq)}${esc(seq === 2 ? "nd" : seq === 3 ? "rd" : "th")} flight of this sortie on this date — a deliberate same-day re-fly, not a duplicate">#${esc(seq)}</span>` : ""}
-        <span class="lg-d">${esc(e.date ? fmtD(e.date) : "no date")}</span>
-        <span class="lg-i">${esc(WA.normLine(e.instructor) || "—")}</span>
-        <span class="lg-h">${e.duration === null || e.duration === undefined || e.duration === ""
-          ? "" : esc(e.duration) + " h"}</span>
-        <span class="lg-g">${gradeCell}</span>
-      </div>`;
-  }
+    return seq > 1
+      ? ` <span class="badge" title="${esc("The " + seq + (seq === 2 ? "nd" : seq === 3 ? "rd" : "th") +
+          " flight of this sortie on this date — a deliberate same-day re-fly, not a duplicate")}">#${esc(seq)}</span>`
+      : "";
+  };
+  const rmCell = (sec, i) =>
+    `<button type="button" class="rm cbtn" data-rm="${esc(sec)}" data-idx="${i}"
+       title="Remove this row" aria-label="Remove this row">&#10005;</button>`;
 
+  /* ── ONE FLIGHT, ONE ROW ──────────────────────────────────────────────────
+     The columns are the directive's own, in its own order, plus the two the
+     review added: MISSION, and the kind that turns a line of the log into an
+     FCF / CEF / repeat instead of a syllabus sortie. */
+  const LOG_COLS = [
+    { t: "Flight", c: "c-fl", tip: "The sortie, from this table's own flow-chart list — or typed, for anything the catalogue does not know" },
+    { t: "Date", c: "c-dt" },
+    { t: "Instructor", c: "c-in", tip: "Who flew it with the student, or who authorised it — required on every row" },
+    { t: "Dur (h)", c: "c-du", tip: "Decimal hours, one decimal — 0.1 h is 6 minutes" },
+    { t: "Grade", c: "c-gr", tip: "0-100, or NG. Empty means the debrief has not landed yet — that is not a gap, it is the state of the flight" },
+    { t: "Mission", c: "c-ms", tip: "Complete or incomplete. Read from the grade where there is one; set by hand only for a flight the squadron characterised without a percentage" },
+    { t: "Kind", c: "c-kd", tip: "Syllabus · Repeat · FCF · CEF · Other — an FCF or a CEF is its own row in the log, not a variant of a syllabus sortie" },
+    { t: "", c: "c-ac" },
+  ];
   function logRow(sec, i, e) {
-    const ng = !!e.ng;
-    const hasGrade = e.grade !== null && e.grade !== undefined && e.grade !== "" &&
-                     isFinite(Number(e.grade));
+    const track = e.track || "";
+    const list = track ? WA.logPickList(sec, track) : [];
+    const off = WA.kindOffCatalogue(e.kind);
     return `
-      ${logHeadHTML(sec, i, e)}
-      <div class="rgrid2">
-        ${logSortieF(sec, i, e)}
-        ${dateF(sec, i, "date", e.date, "Date", true)}
-      </div>
-      <div class="rgrid2">
-        ${insF(sec, i, "instructor", e.instructor, "Instructor *")}
-        ${durF(sec, i, e)}
-      </div>
-      <div class="f"><span>Grading</span>
-        <span class="chiprow segrow">
-          <button type="button" class="chip${ng ? "" : " is-on"}" data-ng="${esc(sec)}:${i}:0"
-                  aria-pressed="${ng ? "false" : "true"}">Graded&nbsp;%</button>
-          <button type="button" class="chip${ng ? " is-on" : ""}" data-ng="${esc(sec)}:${i}:1"
-                  aria-pressed="${ng ? "true" : "false"}">NG (non-graded)</button>
-        </span></div>
-      <div class="rgrid2">
-        ${ng
-          ? `<div class="f"><span>&nbsp;</span><span class="hint">Non-graded by nature &mdash; nobody
-               was in a position to score it. Who flew it or authorised it still goes on the row.</span></div>`
-          : gradeF(sec, i, "grade", e.grade, "Grade (%)")}
-        ${ng || hasGrade ? kindF(sec, i, e) : verdictF(sec, i, e)}
-      </div>
-      ${ng || hasGrade ? "" : `<div class="rgrid2">${kindF(sec, i, e)}<div></div></div>`}
-      ${!ng && !hasGrade && !WA.verdict(e.verdict)
-        ? `<p class="hint">${WA.debriefChip(e) ||
-             "Leave the grade empty until the debrief lands — the row is complete without it."}
-           ${e.date ? "The flight is recorded; only its grade is missing." : ""}</p>` : ""}
-      ${textF(sec, i, "note", e.note, "Note (optional)", "anything worth remembering")}
-      <div class="rfoot">
-        <button type="button" class="btn btn-sm" data-refly2="${esc(sec)}:${i}"
-          title="A second turn on the same sortie on the SAME DAY. It is a real thing and it is not a duplicate, so it is a deliberate act: the new row opens with the same flight and date and the next sequence number.">+ same-day re-fly</button>
-        ${rmB(sec, i)}</div>`;
+      <td class="c-fl">${cellPick(sec, i, e, "sortie",
+          list.map((s) => ({ v: s.c, t: s.c + " — " + s.n + (s.nt ? " (night)" : ""),
+            tip: "Training Section " + s.g + (s.h ? " · syllabus " + s.h + " h" : "") })),
+          { free: true, aria: "Flight",
+            ph: off ? "— type it —" : "— which sortie? —",
+            otherLabel: "Other… (type the code)",
+            freePh: off ? "e.g. FCF profile 2" : "e.g. C4302" })}${logSortieFlag(sec, e)}</td>
+      <td class="c-dt">${cellDate(sec, i, "date", e.date, "Date")}</td>
+      <td class="c-in">${cellText(sec, i, "instructor", e.instructor, "Instructor",
+          INS.length ? "choose or type" : "surname", "dl-ins")}</td>
+      <td class="c-du">${durCell(sec, i, e)}</td>
+      <td class="c-gr">${gradeCell(sec, i, e)}</td>
+      <td class="c-ms">${missionCell(sec, i, e)}</td>
+      <td class="c-kd">${cellPick(sec, i, e, "kind",
+          WA.FLIGHT_KINDS.map((x) => ({ v: x.id, t: x.label, tip: x.tip })),
+          { aria: "Kind", noEmpty: true })}</td>
+      <td class="c-ac">${rowFlags(sec, i, e)}${seqBadge(e)}
+        <button type="button" class="cbtn" data-refly2="${esc(sec)}:${i}"
+          title="A second turn on the same sortie on the SAME DAY. It is a real thing and it is not a duplicate, so it is a deliberate act: the new row opens with the same flight and date and the next sequence number."
+          aria-label="Add a same-day re-fly of this sortie">&#8635;</button>
+        ${rmCell(sec, i)}</td>`;
   }
 
-  /* ── GROUND LESSONS ────────────────────────────────────────────────────── */
-  function lessonGroupF(i, e) {
-    return pickerF("lessons", i, e, "group", "Group",
-      [{ items: WA.groundGroups().map((g) => ({
-           v: g.g, t: g.g + " — " + g.name,
-           tip: g.name + " · " + (g.p === null ? "?" : g.p) + " periods · " +
-                g.courses.length + " course" + (g.courses.length === 1 ? "" : "s") })) }],
-      { req: true, ph: "— which theory group? —" });
-  }
-  function lessonCourseF(i, e) {
-    const list = e.group ? WA.lessonCourses(e.group) : [];
-    return pickerF("lessons", i, e, "course", "Course",
-      [{ items: list.map((c) => ({
-           v: c.c, t: c.c + " — " + c.n + (c.cond ? " (foreign SPs)" : ""),
-           tip: c.n + " · " + c.p + " period" + (c.p === 1 ? "" : "s") +
-                (c.cond ? " · supplementary: only for SPs who did not cover it at their Academy" : "") })) }],
-      { free: true, disabled: !e.group,
-        ph: e.group ? "— which course? —" : "— choose the group first —",
-        otherLabel: "Other… (type the code)", freePh: "e.g. IN 201-210",
-        note: courseNoteHTML(e) });
-  }
-  function courseNoteHTML(e) {
+  /* ── GROUND LESSONS — GROUP · COURSE · START · END ────────────────────────
+     «Ομοιως για μαθηματα και εξετασεις. Μη βαλεις εκπαιδευτη για μαθηματα και
+      εξετασεις για να ειναι απλο.» Four cells and the ✕: no instructor, no
+     note, and none of the periods / attendance boxes round 12 drew — the table
+     the user described has four columns, and a key with no cell is a key
+     nobody could ever edit. */
+  const LESSON_COLS = [
+    { t: "Group", c: "c-gp", tip: "One of the twelve theory groups of the printed programme" },
+    { t: "Course", c: "c-cs", tip: "A course OF THAT GROUP — the join key is the pair, never the code alone (OJT is a course of four different groups)" },
+    { t: "Start", c: "c-dt" },
+    { t: "End", c: "c-dt", tip: "Only when the course ran over several days — a lesson is a block, not a point" },
+    { t: "", c: "c-ac" },
+  ];
+  function courseFlag(e) {
     const c = WA.normLine(e.course);
     if (!c || !e.group) return "";
     if (WA.lessonCourse(e.group, c)) return "";
     const home = WA.courseHome(c);
     if (home) {
-      return `<span class="warn-t" title="A course is identified by the PAIR (group, course), never by its code alone — OJT is a course of four different groups">${
-        esc(c)} is a course of ${esc(home)}</span>`;
+      return cflag(home,
+        "“" + c + "” is a course of " + home + " — a course is identified by the PAIR (group, course), never by its code alone (OJT is a course of four different groups). This pair is refused on save.");
     }
-    return `<span class="warn-t" title="Not in the generated syllabus catalogue — it is saved as typed and shown marked">not in the syllabus catalogue</span>`;
+    return cflag("off-catalogue",
+      "Not in the generated syllabus catalogue for this group — it is saved as typed and shown marked");
   }
   function lessonRow(i, e) {
-    const g = WA.groundGroup(e.group);
-    const c = g ? WA.lessonCourse(e.group, WA.normLine(e.course)) : null;
+    const list = e.group ? WA.lessonCourses(e.group) : [];
     return `
-      <div class="logline">
-        <span class="lg-c" title="${esc(WA.groundGroupLabel(e.group))}">${esc(WA.normLine(e.course) || e.group || "—")}</span>
-        ${e.absent ? `<span class="badge badge-warn" title="The class covered this and the student did not — the makeup is owed">absent</span>` : ""}
-        <span class="lg-d">${esc(e.date ? fmtD(e.date) : "no date")}${
-          e.end_date && e.end_date !== e.date ? " &ndash; " + esc(fmtD(e.end_date)) : ""}</span>
-        <span class="lg-i">${esc(WA.normLine(e.instructor) || "—")}</span>
-        <span class="lg-h">${e.periods === null || e.periods === undefined || e.periods === ""
-          ? `<span class="k" title="Empty means the FULL course — the same meaning the squadron's scheduler gives it">full</span>`
-          : esc(e.periods) + " p"}</span>
-        <span class="lg-g">${c ? `<span class="k">of ${esc(c.p)}</span>` : ""}</span>
-      </div>
-      <div class="rgrid2">
-        ${lessonGroupF(i, e)}
-        ${lessonCourseF(i, e)}
-      </div>
-      <div class="rgrid2">
-        ${dateF("lessons", i, "date", e.date, "Date", true)}
-        ${dateF("lessons", i, "end_date", e.end_date, "End date (if it ran several days)")}
-      </div>
-      <div class="rgrid2">
-        <label class="f"><span>Periods covered</span>
-          <input type="number" min="0" max="400" step="1" inputmode="numeric"
-                 placeholder="the whole course"
-                 value="${e.periods === null || e.periods === undefined ? "" : esc(e.periods)}"
-                 ${F("lessons", i, "periods")}>
-          <span class="fnote">Leave it empty for the FULL course${
-            c ? " (" + esc(c.p) + " period" + (c.p === 1 ? "" : "s") + ")" : ""}.</span></label>
-        ${insF("lessons", i, "instructor", e.instructor, "Instructor")}
-      </div>
-      <div class="f"><span>Attendance</span>
-        <span class="chiprow segrow">
-          <button type="button" class="chip${e.absent ? "" : " is-on"}" data-absent="${i}:0"
-                  aria-pressed="${e.absent ? "false" : "true"}">Attended</button>
-          <button type="button" class="chip${e.absent ? " is-on" : ""}" data-absent="${i}:1"
-                  aria-pressed="${e.absent ? "true" : "false"}">Absent</button>
-        </span>
-        <span class="fnote">“Absent” says the class covered it and this student did not &mdash; which is
-          what makes the makeup visible instead of silent.</span></div>
-      ${textF("lessons", i, "note", e.note, "Note (optional)", "anything worth remembering")}
-      <div class="rfoot">${rmB("lessons", i)}</div>`;
+      <td class="c-gp">${cellPick("lessons", i, e, "group",
+          WA.groundGroups().map((g) => ({ v: g.g, t: g.g + " — " + g.name,
+            tip: g.name + " · " + (g.p === null ? "?" : g.p) + " periods · " +
+                 g.courses.length + " course" + (g.courses.length === 1 ? "" : "s") })),
+          { aria: "Theory group", ph: "— which group? —" })}</td>
+      <td class="c-cs">${cellPick("lessons", i, e, "course",
+          list.map((c) => ({ v: c.c, t: c.c + " — " + c.n + (c.cond ? " (foreign SPs)" : ""),
+            tip: c.n + " · " + c.p + " period" + (c.p === 1 ? "" : "s") +
+                 (c.cond ? " · supplementary: only for SPs who did not cover it at their Academy" : "") })),
+          { free: true, disabled: !e.group, aria: "Course",
+            ph: e.group ? "— which course? —" : "— group first —",
+            otherLabel: "Other… (type the code)", freePh: "e.g. IN 201-210" })}${courseFlag(e)}</td>
+      <td class="c-dt">${cellDate("lessons", i, "date", e.date, "Start date")}</td>
+      <td class="c-dt">${cellDate("lessons", i, "end_date", e.end_date, "End date")}</td>
+      <td class="c-ac">${rowFlags("lessons", i, e)}${rmCell("lessons", i)}</td>`;
   }
 
-  /* ── GROUND EXAMS ──────────────────────────────────────────────────────── */
-  function examF(i, e) {
-    return pickerF("exams", i, e, "exam", "Exam",
-      [{ items: WA.examList().map((x) => ({
-           v: x.id, t: x.id + " — " + x.name,
-           tip: x.name + " · " + (x.p === null ? "?" : x.p) + " period" + (x.p === 1 ? "" : "s") +
-                (x.cond ? " · foreign SPs only — a HAF student does not owe it" : "") })) }],
-      { req: true, ph: "— which ground exam? —" });
-  }
+  /* ── GROUND EXAMS — EXAM · DATE · GRADE ──────────────────────────────────
+     The grade is nullable for the same reason a flight's is: the result can
+     take longer to arrive than the exam did to sit. */
+  const EXAM_COLS = [
+    { t: "Exam", c: "c-ex", tip: "One of the eight ground-exam groups of the syllabus" },
+    { t: "Date", c: "c-dt" },
+    { t: "Grade", c: "c-gr", tip: "0-100, whole. Empty means the result is not in yet" },
+    { t: "", c: "c-ac" },
+  ];
   function examRow(i, e) {
     const x = WA.exam(e.exam);
-    const hasGrade = e.grade !== null && e.grade !== undefined && e.grade !== "" &&
-                     isFinite(Number(e.grade));
+    const fx = fixnoteHTML("exams", i, "grade", e.grade);
+    const late = WA.awaitingDebrief(e) ? WA.daysAgo(e.date) : null;
     return `
-      <div class="logline">
-        <span class="lg-c" title="${esc(WA.examLabel(e.exam))}">${esc(e.exam || "—")}</span>
-        ${x && x.cond ? `<span class="badge badge-acc" title="Foreign SPs only — a HAF student does not owe this exam">foreign SPs only</span>` : ""}
-        <span class="lg-d">${esc(e.date ? fmtD(e.date) : "no date")}</span>
-        <span class="lg-i">${esc(WA.normLine(e.instructor) || "—")}</span>
-        <span class="lg-h"></span>
-        <span class="lg-g">${hasGrade ? `<b>${WA.pct(e.grade)}</b>` : WA.debriefChip(e)}</span>
-      </div>
-      <div class="rgrid2">
-        ${examF(i, e)}
-        ${dateF("exams", i, "date", e.date, "Date", true)}
-      </div>
-      <div class="rgrid2">
-        ${gradeF("exams", i, "grade", e.grade, "Grade (%)")}
-        ${insF("exams", i, "instructor", e.instructor, "Examiner")}
-      </div>
-      ${hasGrade ? "" : `<p class="hint">${WA.debriefChip(e) ||
-        "Leave the grade empty until the result is in — the row is complete without it."}</p>`}
-      ${textF("exams", i, "note", e.note, "Note (optional)", "anything worth remembering")}
-      <div class="rfoot">${rmB("exams", i)}</div>`;
+      <td class="c-ex">${cellPick("exams", i, e, "exam",
+          WA.examList().map((v) => ({ v: v.id, t: v.id + " — " + v.name,
+            tip: v.name + " · " + (v.p === null ? "?" : v.p) + " period" + (v.p === 1 ? "" : "s") +
+                 (v.cond ? " · foreign SPs only — a HAF student does not owe it" : "") })),
+          { aria: "Ground exam", ph: "— which exam? —" })}${
+        x && x.cond ? ` <span class="badge badge-acc" title="Foreign SPs only — a HAF student does not owe this exam">foreign SPs</span>` : ""}</td>
+      <td class="c-dt">${cellDate("exams", i, "date", e.date, "Date")}</td>
+      <td class="c-gr">
+        <input type="number" class="cellin c-num" min="0" max="100" step="1" inputmode="numeric"
+               value="${e.grade === null || e.grade === undefined || e.grade === "" ? "" : esc(e.grade)}"
+               placeholder="—" aria-label="Grade in percent"
+               title="Leave it empty until the result is in — the row is complete without it"
+               ${F("exams", i, "grade")}>${
+        fx ? ` <button type="button" class="cfix" data-round="exams:${i}:grade"
+                 title="${esc("Grades are whole numbers — " + e.grade + " % is not one. Press to store " + Math.round(Number(e.grade)) + " %.")}"
+                 >&rarr;${esc(Math.round(Number(e.grade)))}</button>` : ""}${
+        late !== null && late >= WA.DEBRIEF_AMBER_DAYS
+          ? ` <span class="lagchip is-late" title="${esc("Sat " + late +
+              " days ago and still without a result")}">${esc(late)} d</span>` : ""}</td>
+      <td class="c-ac">${rowFlags("exams", i, e)}${rmCell("exams", i)}</td>`;
   }
 
   function failRow(sec, i, e) {
@@ -1171,30 +1223,30 @@ WA.renderStudent = async function (view, me, opts) {
       blank: () => ({ date: "", flight_code: "", evaluator: "", result: "", grade: null }) },
 
     /* ── ROUND 12 — THE LOG TABLES, AT THE END («στο τελος») ────────────────
-       Two sections drawn as 4+4 collapsible tables (the track is on the row),
-       then the two ground blocks. Nothing here is a fixed slot: an unflown
-       sortie is not an entry, so the syllabus list is what a row is CHOSEN
-       from and never a skeleton of 133 placeholders. */
-    { id: "flights", log: true,
-      hint: "Every sortie flown in the AIRCRAFT, one row each — the flight, the date, the instructor, how long it lasted and the grade. THE GRADE MAY BE LEFT EMPTY: a debrief sometimes takes a while, and the row simply says it is waiting instead of pretending the flight did not happen. Four tables, one per track, in the order of the printed Training Flow Chart. The eight checkrides are not here: they are recorded in the Evaluations section, where the syllabus order and the pass rule apply to them.",
+       Two sections drawn as 4+4 blocks (the track is on the row), then the two
+       ground blocks. Nothing here is a fixed slot: an unflown sortie is not an
+       entry, so the syllabus list is what a row is CHOSEN from and never a
+       skeleton of 133 placeholders.
+       ROUND 12b — every one of the ten blocks is a REAL TABLE, date-sorted. */
+    { id: "flights", log: true, cols: LOG_COLS,
+      hint: "Every sortie flown in the AIRCRAFT, one row per flight — the flight, the date, the instructor, how long it lasted, the grade and whether the mission was completed. THE GRADE MAY BE LEFT EMPTY: a debrief sometimes takes a while, and the row simply says it is waiting instead of pretending the flight did not happen. Rows are shown in DATE ORDER. Four tables, one per track, and the dropdown of each is that track's flow-chart list. The eight checkrides are not here: they are recorded in the Evaluations section, where the syllabus order and the pass rule apply to them.",
       row: (e, i) => logRow("flights", i, e),
       blank: (track) => logBlank(track) },
 
-    { id: "fs", log: true,
+    { id: "fs", log: true, cols: LOG_COLS,
       hint: "The same log for the SIMULATOR. Sim hours and flight hours are counted separately by the squadron everywhere, which is why these are two logs and not one.",
       row: (e, i) => logRow("fs", i, e),
       blank: (track) => logBlank(track) },
 
-    { id: "lessons",
-      hint: "The ground academics — the twelve theory groups of the programme and the courses inside them. A lesson is a BLOCK, so a course taught over several days is one row with an end date; leaving the periods box empty means the FULL course. A lesson is attended, not scored, so there is no grade here — “Absent” is how a class the student missed is recorded from their own side, which is what makes the makeup visible.",
+    { id: "lessons", table: true, cols: LESSON_COLS,
+      hint: "The ground academics — the twelve theory groups of the programme and the courses inside them. One row per lesson, in date order. A lesson is a BLOCK, so a course taught over several days is one row with an end date. There is no grade here (a lesson is attended, not scored) and no instructor: «Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο».",
       row: (e, i) => lessonRow(i, e),
-      blank: () => ({ date: "", end_date: "", group: "", course: "", periods: null,
-                      absent: false, instructor: "", note: "" }) },
+      blank: () => ({ date: "", end_date: "", group: "", course: "" }) },
 
-    { id: "exams",
-      hint: "The eight ground-exam groups of the syllabus. Leave the grade empty until the result is in. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and go under Ground lessons: that is where the squadron's scheduler counts them.)",
+    { id: "exams", table: true, cols: EXAM_COLS,
+      hint: "The eight ground-exam groups of the syllabus, one row each, in date order. Leave the grade empty until the result is in. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and go under Ground lessons: that is where the squadron's scheduler counts them.)",
       row: (e, i) => examRow(i, e),
-      blank: () => ({ date: "", exam: "", grade: null, instructor: "", note: "" }) },
+      blank: () => ({ date: "", exam: "", grade: null }) },
   ];
   /* one blank flight row of a given table. `seq` and `kind` are AUTHORED from
      the first keystroke, not defaulted server-side after the fact, so the row
@@ -1204,8 +1256,10 @@ WA.renderStudent = async function (view, me, opts) {
              sortie: (from && from.sortie) || "", seq: (from && from.seq) || 1,
              kind: (from && from.kind) || "syllabus",
              instructor: "", duration: null, grade: null, ng: false,
-             verdict: null, note: "" };
+             mission: null };
   }
+  /* which sections are drawn as a date-sorted table (round 12b) */
+  const SORTED = { flights: true, fs: true, lessons: true, exams: true };
   const secById = (id) => SECTIONS.find((s) => s.id === id);
 
   /* ── rendering ─────────────────────────────────────────────────────────── */
@@ -1233,25 +1287,72 @@ WA.renderStudent = async function (view, me, opts) {
     const list = S.data[sec.id] || [];
     if (sec.fixed) return fixedRowsHTML(sec, list);
     if (sec.log) return logTablesHTML(sec, list);
+    if (sec.table) return groundTableHTML(sec, list);
     if (!list.length) return `<div class="empty">No entries &mdash; use &ldquo;+ Add&rdquo;.</div>`;
     return list.map((e, i) => rowHTML(sec, e, i)).join("");
   }
 
-  /* ── THE 4+4 TABLES (round 12) ────────────────────────────────────────────
+  /* ══ ROUND 12b — SORTING BY DATE, AND WHY IT IS A RENDER AND NOT A SORT ════
+     «Sorting με βαση τις ημερομηνιες.» The rows are DISPLAYED oldest first;
+     what is STORED stays authoring order, because an array index is this
+     form's address for a row — every handler in this file reaches
+     S.data[sec][i], and re-ordering the array under a half-typed row would
+     make the ✕ of one row delete another.
+     So the map from a DISPLAYED row to its STORED row is EXPLICIT and it is
+     carried in the DOM: every <tr> wears data-row="section:storedIndex", and
+     nothing anywhere reads a row's position. (The R15b popover lesson from the
+     sister application, applied before it could bite here.)
+     A row with no date yet sinks to the END — it is being typed, and the top
+     of a log is where the oldest flight is. Same date: the seq of a same-day
+     re-fly, then the order they were entered in. */
+  function sortedRows(list, track) {
+    const rows = [];
+    (Array.isArray(list) ? list : []).forEach((e, i) => {
+      if (track === undefined || track === null || (e.track || "") === track) rows.push({ e, i });
+    });
+    rows.sort((a, b) => {
+      const da = String(a.e.date || "").trim(), db = String(b.e.date || "").trim();
+      if (!da !== !db) return da ? -1 : 1;          /* dateless last */
+      if (da !== db) return da < db ? -1 : 1;
+      const sa = Number(a.e.seq || 1), sb = Number(b.e.seq || 1);
+      if (sa !== sb) return sa - sb;
+      return a.i - b.i;                              /* stable: stored order */
+    });
+    return rows;
+  }
+  /* one <tr>. The classes are the row states the card form wore as a border:
+     a leftover, a CO entry, a CO entry the owner may not touch. */
+  function trHTML(sec, e, i) {
+    return `<tr class="frow${stillLegacy(sec.id, e) ? " is-legacy" : ""}${
+      WA.isCO(e) ? " is-co" : ""}${coLocked(e) ? " is-colock" : ""}"
+      data-row="${esc(sec.id)}:${i}">${sec.row(e, i)}</tr>`;
+  }
+  /* the table itself. It scrolls INSIDE its own wrapper on a narrow screen, so
+     the page never scrolls sideways — the row stays one line tall and the
+     phone gets a table it can push left and right, which is what a log is. */
+  function tblHTML(sec, key, rows, empty) {
+    if (!rows.length) return `<div class="empty">${empty}</div>`;
+    return `
+      <div class="tblwrap">
+        <table class="ftbl">
+          <thead><tr>${sec.cols.map((c) => `<th class="${esc(c.c)}"${
+            c.tip ? ` title="${esc(c.tip)}"` : ""}>${esc(c.t)}</th>`).join("")}</tr></thead>
+          <tbody data-tbody="${esc(key)}">${rows.join("")}</tbody>
+        </table>
+      </div>`;
+  }
+
+  /* ── THE 4+4 TABLES ───────────────────────────────────────────────────────
      ONE section, FOUR collapsible blocks — the track is on the row, so the
      grouping is a render and not four more storage keys. Each table opens by
      itself when it holds something, so a student mid-Contact does not have to
-     unfold three empty tables to reach theirs. Rows keep their INDEX IN THE
-     SECTION (data-idx), never their index in the table: every handler in this
-     file addresses S.data[sec][i], and a per-table index would silently edit
-     the wrong row the moment two tables held entries. */
+     unfold three empty tables to reach theirs. */
   function logTablesHTML(sec, list) {
     return WA.TRACKS.map((t) => {
-      const rows = [];
-      list.forEach((e, i) => { if ((e.track || "") === t) rows.push(rowHTML(sec, e, i)); });
-      const lag = list.filter((e, i) => (e.track || "") === t && WA.awaitingDebrief(e)).length;
-      const hrs = list.reduce((a, e) => a + ((e.track || "") === t && isFinite(Number(e.duration))
-        ? Number(e.duration) : 0), 0);
+      const ord = sortedRows(list, t);
+      const rows = ord.map(({ e, i }) => trHTML(sec, e, i));
+      const lag = ord.filter(({ e }) => WA.awaitingDebrief(e)).length;
+      const hrs = ord.reduce((a, { e }) => a + (isFinite(Number(e.duration)) ? Number(e.duration) : 0), 0);
       const nCat = WA.logPickList(sec.id, t).length;
       return `
         <details class="logtbl" ${rows.length ? "open" : ""} data-logtbl="${esc(sec.id)}:${esc(t)}">
@@ -1262,12 +1363,18 @@ WA.renderStudent = async function (view, me, opts) {
             <span class="k" title="${esc("This table CHOOSES from " + nCat + " " +
               (sec.id === "fs" ? "simulator" : "aircraft") + " sorties of the printed flow chart — and none of them is a row until it is flown. (The track's checkrides are not among them: they are recorded in the Evaluations section.)")}">${esc(nCat)} in the list</span>
           </summary>
-          ${rows.length ? rows.join("")
-            : `<div class="empty">Nothing recorded in this track yet &mdash; use &ldquo;+ Add a flight&rdquo;.</div>`}
+          ${tblHTML(sec, sec.id + ":" + t, rows,
+            "Nothing recorded in this track yet &mdash; use &ldquo;+ Add a flight&rdquo;.")}
           <div class="addrow"><button type="button" class="btn btn-sm btn-add"
             data-add="${esc(sec.id)}" data-track="${esc(t)}">+ Add a flight</button></div>
         </details>`;
     }).join("");
+  }
+
+  /* the two ground blocks — one table each, the same sort, the same row map */
+  function groundTableHTML(sec, list) {
+    const rows = sortedRows(list).map(({ e, i }) => trHTML(sec, e, i));
+    return tblHTML(sec, sec.id, rows, "No entries &mdash; use &ldquo;+ Add&rdquo;.");
   }
 
   /* THE FIXED SECTIONS (round 5): the syllabus rows first, in syllabus order,
@@ -1404,8 +1511,12 @@ WA.renderStudent = async function (view, me, opts) {
   }
 
   function secHTML(sec) {
+    /* ROUND 12b — the four table sections break out of the form's 760 px
+       reading column: eight columns of a flight log do not fit in it, and a
+       row that wrapped would stop being a row. Everything else keeps the
+       column, because a stack of labelled fields is easier to read narrow. */
     return `
-      <section class="card">
+      <section class="card${sec.log || sec.table ? " wide-sec" : ""}">
         <div class="sec-h"><h2>${esc(WA.secLabel(sec.id))}</h2>${WA.tipDot(sec.id)}
           <span class="cnt" id="cnt-${esc(sec.id)}" title="${
             sec.fixed ? "the fixed syllabus slots, and how many of them have been flown"
@@ -1513,7 +1624,8 @@ WA.renderStudent = async function (view, me, opts) {
      multi-select), which is why it is one function and not a flag per box. */
   function applyLocks() {
     if (asCO) return;
-    for (const row of form.querySelectorAll(".rrow.is-colock")) {
+    /* round 12b — .frow is the same row in its table form (a <tr>) */
+    for (const row of form.querySelectorAll(".rrow.is-colock, .frow.is-colock")) {
       for (const el of row.querySelectorAll("input, select, textarea, button")) {
         el.disabled = true;
       }
@@ -1526,17 +1638,24 @@ WA.renderStudent = async function (view, me, opts) {
     return box;
   }
   /* ONE row, in place — a picker that reveals its free-text box must not
-     re-render the whole section under the student's fingers */
+     re-render the whole section under the student's fingers. The selector is
+     the row's ADDRESS (data-row) and not its shape, so the same function
+     redraws a card row and a table row: <tr> replaces <tr> and the row keeps
+     its place in the sort, because the sort is a property of the block and not
+     of the row. */
   function redrawRow(secId, i, focusSel) {
-    const el = form.querySelector(`.rrow[data-row="${secId}:${i}"]`);
+    const el = form.querySelector(`[data-row="${secId}:${i}"]`);
     if (!el) { redraw(secId); return; }
     const sec = secById(secId);
     const meta = sec.fixed ? { slot: slotFlags(secId, S.data[secId])[i] } : null;
-    el.outerHTML = rowHTML(sec, S.data[secId][i], i, meta);
+    el.outerHTML = (sec.log || sec.table)
+      ? trHTML(sec, S.data[secId][i], i)
+      : rowHTML(sec, S.data[secId][i], i, meta);
     $("cnt-" + secId).textContent = cntHTML(secId);
+    if (sec.log || sec.table) refreshTblCount(secId, i);
     applyLocks();
     if (focusSel) {
-      const back = form.querySelector(`.rrow[data-row="${secId}:${i}"] ${focusSel}`);
+      const back = form.querySelector(`[data-row="${secId}:${i}"] ${focusSel}`);
       if (back) back.focus();
     }
   }
@@ -1573,64 +1692,72 @@ WA.renderStudent = async function (view, me, opts) {
     note.innerHTML = html;
   }
 
-  /* ── ROUND 12 — the same three live refreshes for the log rows ────────────
-     The verdict under a typed flight code / course, the duration conversion
-     offer, and the row's own summary line. All in place, because none of them
-     may redraw the box the student is typing into (round 5b). */
-  function refreshLogNote(secId, i, field) {
-    const box = form.querySelector(`.rrow[data-row="${secId}:${i}"] [data-field="~${field}"]`);
-    if (!box) return;
-    const label = box.closest("label.f");
-    if (!label) return;
+  /* ── ROUND 12b — THE LIVE CELLS ───────────────────────────────────────────
+     Four things follow a keystroke inside a table row, and each of them is
+     replaced ON ITS OWN, never by redrawing the row: the box the student is
+     typing into must keep the focus and the caret (the round-5b rule).
+       · the flag beside a typed flight code / course
+       · the duration's conversion offer
+       · the MISSION cell — the moment a grade appears it stops being a choice
+         and becomes a reading of the number, and the moment it goes it is a
+         choice again
+       · the block's own count in its <summary> */
+  const cellOf = (secId, i, sel) =>
+    form.querySelector(`[data-row="${secId}:${i}"] ${sel}`);
+
+  function refreshCellFlag(secId, i, field) {
+    const cell = cellOf(secId, i, field === "course" ? "td.c-cs" : "td.c-fl");
+    if (!cell) return;
     const e = S.data[secId][i];
-    const html = field === "sortie" ? logSortieNoteHTML(secId, e)
-               : field === "course" ? courseNoteHTML(e) : "";
-    let note = label.querySelector(".fnote");
-    if (!html) { if (note) note.remove(); return; }
-    if (!note) {
-      note = document.createElement("span");
-      note.className = "fnote";
-      label.appendChild(note);
-    }
-    note.innerHTML = html;
-    refreshLogHead(secId, i);
+    const html = field === "course" ? courseFlag(e) : logSortieFlag(secId, e);
+    let flag = cell.querySelector(".cflag");
+    if (!html) { if (flag) flag.remove(); return; }
+    const tmp = document.createElement("span");
+    tmp.innerHTML = html.trim();
+    const fresh = tmp.firstElementChild;
+    if (!fresh) return;
+    if (flag) flag.replaceWith(fresh); else cell.appendChild(fresh);
   }
-  function refreshDurNote(secId, i) {
-    const box = form.querySelector(`.rrow[data-row="${secId}:${i}"] [data-field="duration"]`);
+  function refreshDurFix(secId, i) {
+    const cell = cellOf(secId, i, "td.c-du");
+    if (!cell) return;
+    const box = cell.querySelector('[data-field="duration"]');
     if (!box) return;
-    const label = box.closest("label.f");
-    if (!label) return;
-    const html = durnoteHTML(secId, i, S.data[secId][i].duration);
-    let note = label.querySelector(".fixnote");
-    if (!html) { if (note) note.remove(); return; }
-    if (!note) {
-      note = document.createElement("span");
-      note.className = "fixnote";
-      label.appendChild(note);
+    for (const old of cell.querySelectorAll(".cfix, .cflag")) old.remove();
+    const html = durFix(secId, i, S.data[secId][i].duration);
+    if (html) box.insertAdjacentHTML("afterend", html);
+    applyLocks();
+  }
+  /* the whole cell, because it changes SHAPE (a select becomes a chip) */
+  function refreshMissionCell(secId, i) {
+    const cell = cellOf(secId, i, "td.c-ms");
+    if (!cell) return;
+    cell.innerHTML = missionCell(secId, i, S.data[secId][i]);
+    applyLocks();
+  }
+  /* the grade box's "→63" offer, in a cell that must stay one line */
+  function refreshGradeFix(secId, i) {
+    const cell = cellOf(secId, i, "td.c-gr");
+    if (!cell) return;
+    const box = cell.querySelector('[data-field="grade"]');
+    if (!box) return;
+    for (const old of cell.querySelectorAll(".cfix")) old.remove();
+    const v = S.data[secId][i].grade;
+    if (fixnoteHTML(secId, i, "grade", v)) {
+      const r = Math.round(Number(v));
+      const at = cell.querySelector(".ngb") || box;
+      at.insertAdjacentHTML("afterend",
+        ` <button type="button" class="cfix" data-round="${esc(secId)}:${i}:grade" title="${
+          esc("Grades are whole numbers — " + v + " % is not one. Press to store " + r + " %.")
+        }">&rarr;${esc(r)}</button>`);
     }
-    note.innerHTML = html;
+    applyLocks();
   }
-  /* the one-line summary that makes a log row read as a table row */
-  function refreshLogHead(secId, i) {
-    const row = form.querySelector(`.rrow[data-row="${secId}:${i}"]`);
-    if (!row) return;
-    const line = row.querySelector(".logline");
-    if (!line) return;
-    const e = S.data[secId][i];
-    const html = secId === "lessons" ? lessonRow(i, e)
-               : secId === "exams" ? examRow(i, e)
-               : logHeadHTML(secId, i, e);
-    /* only the summary line is replaced — the boxes below it keep the focus */
-    const tmp = document.createElement("div");
-    tmp.innerHTML = html;
-    const fresh = tmp.querySelector(".logline");
-    if (fresh) line.innerHTML = fresh.innerHTML;
-    $("cnt-" + secId).textContent = cntHTML(secId);
-    const det = row.closest("details.logtbl");
-    if (det) refreshLogSummary(det, secId);
-  }
-  /* the per-table count in the collapsible's own header */
-  function refreshLogSummary(det, secId) {
+  /* the per-block count in the collapsible's own header (flights / F/S) */
+  function refreshTblCount(secId, i) {
+    const row = form.querySelector(`[data-row="${secId}:${i}"]`);
+    const det = row ? row.closest("details.logtbl") : null;
+    if (!det) return;
     const t = String(det.dataset.logtbl || "").split(":")[1];
     const sum = det.querySelector("summary .cnt");
     if (!sum || !t) return;
@@ -1640,6 +1767,39 @@ WA.renderStudent = async function (view, me, opts) {
     sum.textContent = list.length + " " + (list.length === 1 ? "flight" : "flights") +
       (hrs > 0 ? " · " + (Math.round(hrs * 10) / 10) + " h" : "") +
       (lag ? " · " + lag + " awaiting a grade" : "");
+  }
+
+  /* ── THE SORT, APPLIED WITHOUT REDRAWING ANYTHING ─────────────────────────
+     A row is put in its place by MOVING its <tr>, never by rebuilding the
+     block: a moved node is the same node, so the button the student is
+     pressing still exists when the mouse comes up, and the box they were
+     typing in still holds its value. It happens when the date box is LEFT —
+     while the date is being typed the row stays where the eye left it, and
+     nothing jumps under the cursor. */
+  function resortSection(secId, refocus) {
+    const sec = secById(secId);
+    if (!sec || !SORTED[secId]) return;
+    const root = $("rows-" + secId);
+    if (!root) return;
+    /* whatever had the focus keeps it: moving a <tr> blurs what is inside it,
+       so the one element that may be interrupted is put back by hand */
+    const keep = refocus ||
+      (document.activeElement && document.activeElement !== document.body
+        ? document.activeElement : null);
+    let moved = false;
+    for (const tb of root.querySelectorAll("tbody[data-tbody]")) {
+      const key = String(tb.dataset.tbody || "");
+      const track = key.indexOf(":") >= 0 ? key.split(":")[1] : undefined;
+      const want = sortedRows(S.data[secId] || [], track).map(({ i }) => secId + ":" + i);
+      const have = Array.from(tb.children).map((tr) => String(tr.dataset.row || ""));
+      if (want.join("|") === have.join("|")) continue;
+      moved = true;
+      for (const addr of want) {
+        const tr = tb.querySelector(`tr[data-row="${addr}"]`);
+        if (tr) tb.appendChild(tr);
+      }
+    }
+    if (moved && keep && document.contains(keep)) keep.focus();
   }
 
   /* the same note under a grade box, live — added/removed without redrawing
@@ -1832,8 +1992,11 @@ WA.renderStudent = async function (view, me, opts) {
       const at = S.data[id].length - 1;
       redraw(id);
       markDirty();
-      const last = form.querySelector(`.rrow[data-row="${id}:${at}"]`) ||
-        (() => { const r = $("rows-" + id).querySelectorAll(".rrow"); return r[r.length - 1]; })();
+      /* the ADDRESS, not the position: a new row has no date yet, so the sort
+         has just put it at the END of its block — and it is found by the index
+         it was pushed at, wherever on the screen that lands */
+      const last = form.querySelector(`[data-row="${id}:${at}"]`) ||
+        (() => { const r = $("rows-" + id).querySelectorAll(".rrow, .frow"); return r[r.length - 1]; })();
       if (last) {
         const first = last.querySelector("input, select");
         if (first) first.focus();
@@ -1863,21 +2026,9 @@ WA.renderStudent = async function (view, me, opts) {
       const at = S.data[sec].length - 1;
       redraw(sec);
       markDirty();
-      const box = form.querySelector(`.rrow[data-row="${sec}:${at}"] [data-field="instructor"]`);
+      const box = form.querySelector(`[data-row="${sec}:${at}"] [data-field="instructor"]`);
       if (box) box.focus();
       toast("Same-day re-fly #" + row.seq + " — the flight and the date are carried over");
-      return;
-    }
-    /* the ground lesson's attendance chips — "the class covered it and this
-       student did not" is the only way a makeup can be visible at all */
-    const abs = ev.target.closest("[data-absent]");
-    if (abs) {
-      const [ix, on] = abs.dataset.absent.split(":");
-      const e2 = S.data.lessons[Number(ix)];
-      if (!e2) return;
-      e2.absent = on === "1";
-      redrawRow("lessons", Number(ix));
-      markDirty();
       return;
     }
     /* 1:20 → 1.3, and 1.25 → 1.3 — offered, never performed silently */
@@ -1959,9 +2110,9 @@ WA.renderStudent = async function (view, me, opts) {
       }
       /* ROUND 6 — NG drops the GRADE and nothing else: the instructor who
          authorised the solo stays on the row, because he authorised it.
-         ROUND 12 — on a log row it drops the VERDICT with it: a flight nobody
+         ROUND 12b — on a log row it drops the MISSION with it: a flight nobody
          was in a position to score was not characterised anything either. */
-      if (e.ng) { e.grade = null; if (sec === "flights" || sec === "fs") e.verdict = null; }
+      if (e.ng) { e.grade = null; if (sec === "flights" || sec === "fs") e.mission = null; }
       /* ROUND 9 residuals-verify item 9 — this handler is the one place that
          itself DESTROYS a value: on a row whose only real value was that
          grade, the line above just emptied it while setting ng, and ng alone
@@ -2112,11 +2263,11 @@ WA.renderStudent = async function (view, me, opts) {
         soloEmptyReset(sec, entry);
         refreshSlotBadge(sec, i);
         refreshCodeNote(sec, i, key);
-        /* ROUND 12 — the same live verdict under a TYPED flight code / course:
-           the wrong-table, wrong-band, checkride and off-catalogue answers all
+        /* ROUND 12b — the same live answer beside a TYPED flight code / course:
+           the wrong-table, wrong-band, checkride and off-catalogue flags all
            appear on the keystroke, not on the next save */
         if (sec === "flights" || sec === "fs" || sec === "lessons") {
-          refreshLogNote(sec, i, key);
+          refreshCellFlag(sec, i, key);
         }
       }
       /* ROUND 12 — CHOOSING THE FLIGHT PREFILLS THE DURATION. The syllabus
@@ -2130,8 +2281,10 @@ WA.renderStudent = async function (view, me, opts) {
         if (h) { entry.duration = h; redrawRow(sec, i, `[data-field="@sortie"]`); }
       }
       /* the kind decides whether the flight box is off-catalogue BY NATURE,
-         which changes the note under it and the placeholder inside it */
-      if ((sec === "flights" || sec === "fs") && key === "kind") redrawRow(sec, i);
+         which changes the flag beside it and the placeholder inside it */
+      if ((sec === "flights" || sec === "fs") && key === "kind") {
+        redrawRow(sec, i, `[data-field="@kind"]`);
+      }
       /* a group change re-lists the courses, and a course chosen under the old
          group cannot survive it — the (group, course) pair is the join key */
       if (sec === "lessons" && key === "group") {
@@ -2163,12 +2316,13 @@ WA.renderStudent = async function (view, me, opts) {
        remembered here and compared afterwards. */
     const wasPass = sec === "evaluations" && e_passState(entry.evaluation);
 
-    /* ROUND 12 — DID THIS LOG ROW HAVE A GRADE BEFORE THE KEYSTROKE? The
-       verdict box exists ONLY where the grade is absent, so the moment a
-       number appears the box must leave (and its value with it) and the moment
-       the number goes the box must come back. Both on the keystroke — the
-       round-5b rule applied to a new pair. */
+    /* ROUND 12b — DID THIS LOG ROW HAVE A GRADE BEFORE THE KEYSTROKE? The
+       MISSION cell belongs to exactly one of those two states — a choice
+       without a grade, a reading of the number with one — so it changes shape
+       on the keystroke that makes or unmakes the grade. The round-5b rule
+       applied to a pair of cells. */
     const isLog = sec === "flights" || sec === "fs";
+    const isTbl = isLog || sec === "lessons" || sec === "exams";
     const hadGrade = isLog && entry.grade !== null && entry.grade !== undefined &&
                      entry.grade !== "" && isFinite(Number(entry.grade));
 
@@ -2176,14 +2330,15 @@ WA.renderStudent = async function (view, me, opts) {
       entry[f] = el.checked;
     } else if (el.type === "number") {
       entry[f] = el.value === "" ? null : num(el.value);
-      refreshFixnote(sec, i, f);
+      /* the whole-number offer, in a labelled field or in a cell */
+      if (isTbl && f === "grade") refreshGradeFix(sec, i); else refreshFixnote(sec, i, f);
     } else if (f === "duration") {
       /* a TEXT box on purpose, so 1:20 can be typed at all. It is parsed only
-         where it is exact; anything else stays as typed and the note offers
-         the conversion (nothing is converted silently). */
+         where it is exact; anything else stays as typed and the offer beside
+         it does the conversion (nothing is converted silently). */
       const p = durParse(el.value);
       entry.duration = p.empty ? null : (p.hm || p.bad ? el.value : p.dec);
-      refreshDurNote(sec, i);
+      refreshDurFix(sec, i);
     } else {
       entry[f] = el.value;
     }
@@ -2239,24 +2394,24 @@ WA.renderStudent = async function (view, me, opts) {
     } else if (isLog && f === "grade" &&
                hadGrade !== (entry.grade !== null && entry.grade !== undefined &&
                              entry.grade !== "" && isFinite(Number(entry.grade)))) {
-      /* ROUND 12 — the grade has just appeared, or just gone. The verdict box
-         belongs to exactly one of those two states, so it arrives or leaves on
-         this keystroke — and a verdict typed before the number is DROPPED
-         rather than left to be refused by the save in words about a box that
-         is no longer on the screen. */
-      if (!hadGrade && entry.verdict) {
-        const was = WA.verdictLabel(entry.verdict);
-        entry.verdict = null;
-        toast("The grade decides it now — the “" + was + "” verdict is read from the number instead");
+      /* ROUND 12b — the grade has just appeared, or just gone. A mission set by
+         hand before the number is DROPPED rather than left to be refused by the
+         save in words about a cell that no longer takes a choice. Only the
+         MISSION CELL is redrawn: the grade box keeps the focus and the caret. */
+      if (!hadGrade && entry.mission) {
+        const was = WA.missionLabel(entry.mission);
+        entry.mission = null;
+        toast("The grade decides it now — “" + was + "” is read from the number instead");
       }
-      redrawRow(sec, i, `[data-field="grade"]`);
-    } else if (isLog && (f === "date" || f === "instructor" || f === "duration")) {
-      /* the row's summary line IS the table row the directive asked for, so it
-         follows the keystroke instead of waiting for a redraw */
-      refreshLogHead(sec, i);
-    } else if ((sec === "lessons" || sec === "exams") &&
-               (f === "date" || f === "end_date" || f === "instructor" || f === "periods")) {
-      refreshLogHead(sec, i);
+      refreshMissionCell(sec, i);
+      $("cnt-" + sec).textContent = cntHTML(sec);
+      refreshTblCount(sec, i);
+    } else if (isTbl && (f === "date" || f === "grade" || f === "duration")) {
+      /* the block's own counters — flights, hours, and how many are still
+         waiting for a grade — follow the keystroke that changes them */
+      $("cnt-" + sec).textContent = cntHTML(sec);
+      refreshTblCount(sec, i);
+      if (isLog && f === "date") refreshMissionCell(sec, i);
     } else if (f === "note" && sec === "nfs") {
       /* the note IS the cause when the reason is "Other" — the row's own
          completeness note has to follow what is typed into it */
@@ -2295,8 +2450,32 @@ WA.renderStudent = async function (view, me, opts) {
       }
     }
     if (wasLegacy !== !!entry.legacy) showLegacyNote();
+    /* a row that has just stopped being a leftover (or become one) wears that
+       state as a class on the <tr> — there is no paragraph above it to redraw */
+    if (isTbl) {
+      const tr = form.querySelector(`[data-row="${sec}:${i}"]`);
+      if (tr) tr.classList.toggle("is-legacy", stillLegacy(sec, entry));
+    }
     markDirty();
   });
+
+  /* ── THE DATE SORT, APPLIED WHEN THE DATE IS SETTLED (round 12b) ──────────
+     «Sorting με βαση τις ημερομηνιες.» NOT on the keystroke: a <input
+     type=date> is typed in three pieces, and a row that jumped after the day
+     was entered would take the cursor with it half-way through the year. It
+     moves when the date is COMMITTED (change) or when the box is LEFT
+     (focusout) — and it moves by MOVING the <tr>, so nothing is rebuilt,
+     nothing loses its value, and the button a click is already travelling
+     towards still exists when the mouse comes up. */
+  const dateSettled = (ev) => {
+    const el = ev.target;
+    if (!el || !el.dataset) return;
+    const sec = el.dataset.sec, f = el.dataset.field;
+    if (!sec || !SORTED[sec] || f !== "date") return;   /* `date` IS the sort key */
+    resortSection(sec, ev.type === "focusout" ? ev.relatedTarget : null);
+  };
+  form.addEventListener("change", dateSettled);
+  form.addEventListener("focusout", dateSettled);
 
   /* ── collect + client-side validation (the server re-validates all of it) ── */
   function buildPayload() {
@@ -2558,20 +2737,20 @@ WA.renderStudent = async function (view, me, opts) {
           return;
         }
         const hasGrade = gr(e.grade) !== null;
-        /* the two contradictions. The form cannot produce either — the verdict
-           box is only drawn where there is no grade, and NG clears both — so
-           these are the belt to that braces, and they say the server's words. */
+        /* the two contradictions. The form cannot produce either — the mission
+           cell only takes a choice where there is no grade, and NG clears both
+           — so these are the belt to that braces, in the server's own words. */
         if (e.ng && hasGrade) {
           need(k, i, "a non-graded (NG) flight carries no grade"); return;
         }
-        if (e.verdict && hasGrade) {
-          need(k, i, "this row has a grade, so its verdict is read from it — a stored verdict " +
+        if (e.mission && hasGrade) {
+          need(k, i, "this row has a grade, so its mission is read from it — a stored mission " +
             "beside a stored grade is a second source of truth that can contradict the first");
           return;
         }
-        if (e.verdict && e.ng) {
+        if (e.mission && e.ng) {
           need(k, i, "a non-graded (NG) flight is not scorable at all — it carries neither a " +
-            "grade nor a verdict");
+            "grade nor a mission");
           return;
         }
         push(k, {
@@ -2589,8 +2768,7 @@ WA.renderStudent = async function (view, me, opts) {
           duration: dp.empty ? null : dp.dec,
           grade: e.ng ? null : gr(e.grade),
           ng: !!e.ng,
-          verdict: (!e.ng && !hasGrade && WA.verdict(e.verdict)) ? e.verdict : null,
-          note: txt(e.note) || null,
+          mission: (!e.ng && !hasGrade && WA.mission(e.mission)) ? e.mission : null,
         }, e);
       });
     }
@@ -2617,22 +2795,14 @@ WA.renderStudent = async function (view, me, opts) {
           return;
         }
       }
-      const per = (e.periods === null || e.periods === undefined || e.periods === "")
-        ? null : Math.round(Number(e.periods));
-      if (per !== null && (!isFinite(per) || per < 0 || per > 400)) {
-        need("lessons", i, "the periods must be a whole number between 0 and 400 — leave it empty for the FULL course");
-        return;
-      }
+      /* ROUND 12b — four cells and nothing else. The instructor, the note, the
+         periods and the attendance chips are gone from the form AND from the
+         payload: the server refuses each of them by name. */
       push("lessons", {
         date: e.date || null,
         end_date: e.end_date || null,
         group: e.group || null,
         course: course || null,
-        periods: per,
-        absent: !!e.absent,
-        instructor: WA.normLine(e.instructor) || null,
-        ...(txt(e.instructor_oid) ? { instructor_oid: WA.normLine(e.instructor_oid) } : {}),
-        note: txt(e.note) || null,
       }, e);
     });
     d.exams.forEach((e, i) => {
@@ -2648,9 +2818,6 @@ WA.renderStudent = async function (view, me, opts) {
         date: e.date || null,
         exam: e.exam || null,
         grade: gr(e.grade),
-        instructor: WA.normLine(e.instructor) || null,
-        ...(txt(e.instructor_oid) ? { instructor_oid: WA.normLine(e.instructor_oid) } : {}),
-        note: txt(e.note) || null,
       }, e);
     });
     /* ── THE CO'S ENTRIES MUST ALL STILL BE THERE (round 8) ─────────────────
@@ -2711,8 +2878,9 @@ WA.renderStudent = async function (view, me, opts) {
       const ADOPT = ["category", "reason", "flight_code", "sortie", "slot",
                      "evaluation", "instructor", "evaluator", "with",
                      "note", "result", "phase",
-                     /* round 12 — the log rows' own strings */
-                     "track", "kind", "verdict", "group", "course", "exam",
+                     /* round 12 — the log rows' own strings (12b: `mission`
+                        replaced `verdict`, and `note` is gone from the four) */
+                     "track", "kind", "mission", "group", "course", "exam",
                      "instructor_oid", "end_date"];
       for (const sec of SECTIONS) {
         const list = srv ? (Array.isArray(srv[sec.id]) ? srv[sec.id] : []) : null;

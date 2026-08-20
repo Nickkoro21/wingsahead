@@ -1430,6 +1430,23 @@ $$;
 -- and, on the placeholder kinds:
 --   «να αφησουμε placeholder για τυχον fcf, cef, repeat»
 --
+-- ROUND 12b — THE USER'S REVIEW OF THE ABOVE (2026-08-20), verbatim:
+--   «Μπορουμε αντι να το εχουμε σε αυτη την μορφη να ειναι σε πινακα με στηλες
+--   και σειρες ολες τις πτησεις. Απλα για cef, fcf, repeat θα προσθετει εξτρα
+--   γραμμες. Sorting με βαση τις ημερομηνιες. Δε θελω πεδιο note, Or a verdict
+--   with no number. Θελω μονο mission complete, mission incomplete. Ομοιως για
+--   μαθηματα και εξετασεις. Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις για
+--   να ειναι απλο.»
+-- What that changes on THIS side of the wire: `note` and `verdict` leave
+-- wa.entry_keys for the flight logs, `mission` (complete / incomplete) replaces
+-- the three-way verdict, and lessons / exams lose their instructor, their note
+-- and — with them — the periods and attendance boxes the drawn table has no
+-- cell for. The rest of this block stands as written. Nothing had shipped when
+-- the review landed (the cloud schema was never re-run and the app was never
+-- pushed), so the four sections are simply RESHAPED: no migration, no legacy
+-- path, and a stored key that is no longer named is dropped on read by
+-- wa.strip_entry like any retired one.
+--
 -- THE 4+4 TABLES ARE A RENDER GROUPING, NOT EIGHT STORAGE KEYS. Adding a
 -- section to this app is expensive by design — a dozen lists name every one of
 -- them by hand — so eight sections would be eight copies of one identical rule.
@@ -1495,38 +1512,56 @@ language sql immutable as $$
   select array['syllabus','repeat','fcf','cef','other']::text[]
 $$;
 
--- ── THE VERDICT WITHOUT A NUMBER (round 12) ───────────────────────────────
--- The squadron's scheduler knows pass / lag / fail and has NO percentage for a
--- sortie; this record knows percentages. `verdict` is how the first crosses
--- into the second, and it exists ONLY WHERE THE GRADE IS ABSENT: a stored
--- verdict beside a stored grade is a second source of truth that can
--- contradict the first — the exact defect round 11 removed from the FPC («an
--- FPC's result is its grade against the printed scale»). Where a grade exists
--- the verdict is DERIVED (wa.grade_verdict) and a stored one is refused by name.
--- Without it, a flight the squadron recorded as FAILED would arrive in the
--- student's record indistinguishable from one still awaiting its debrief — a
--- failure invisible in the record that exists to show it.
-create or replace function wa.verdicts() returns text[]
+-- ── THE MISSION (round 12b — the user's review of the table form) ─────────
+-- «Or a verdict with no number. Θελω μονο mission complete, mission
+-- incomplete. Ομοιως για μαθηματα και εξετασεις.»
+--
+-- Round 12's three-way verdict (pass / lagging / failed) is GONE. The squadron
+-- asked for exactly two answers, and they are the two a sortie has when nobody
+-- wrote a percentage: the mission was COMPLETE, or it was NOT. The three-band
+-- distinction it replaces was the printed grade scale wearing a second name —
+-- and where a grade exists that scale is already there, in the number.
+--
+-- WHERE IT MAY LIVE — unchanged doctrine, one word narrower:
+--   · a grade exists  → the mission is DERIVED (wa.grade_mission) and a stored
+--     one is REFUSED by name. A stored mission beside a stored grade is a
+--     second source of truth that can contradict the first — the defect round
+--     11 removed from the FPC.
+--   · no grade, not NG → it may be SET BY HAND: the squadron characterised the
+--     flight without a number, which is the whole reason the key exists. Left
+--     empty it means the debrief has not landed yet.
+--   · NG → neither. A familiarisation ride nobody was in a position to score is
+--     not a mission verdict either.
+create or replace function wa.missions() returns text[]
 language sql immutable as $$
-  select array['pass','lagging','failed']::text[]
+  select array['complete','incomplete']::text[]
 $$;
 
--- the three-way collapse of the printed five-band scale, at the SAME
--- thresholds (ΠΔ 151/13: 60 % separates acceptable from unacceptable, 50-59 %
--- is ΥΣΤΕΡΗΣΗ / ΣΧΕΔΟΝ ΚΑΛΩΣ): excellent · very_good · good → pass.
--- MIRROR: app/app.js → WA.gradeVerdict.
-create or replace function wa.grade_verdict(g numeric) returns text
+-- THE TWO-WAY COLLAPSE of the printed five-band scale, at the SAME threshold
+-- (ΠΔ 151/13: 60 % separates acceptable from unacceptable): excellent ·
+-- very_good · good → complete; lagging · failed → incomplete.
+-- MIRROR: app/app.js → WA.gradeMission.
+create or replace function wa.grade_mission(g numeric) returns text
 language sql immutable as $$
   select case wa.grade_band(g)
-    when 'excellent' then 'pass' when 'very_good' then 'pass' when 'good' then 'pass'
-    when 'lagging'   then 'lagging'
-    when 'failed'    then 'failed'
+    when 'excellent' then 'complete' when 'very_good' then 'complete'
+    when 'good'      then 'complete'
+    when 'lagging'   then 'incomplete'
+    when 'failed'    then 'incomplete'
     else null end
 $$;
 
--- a whole number in a range, nullable — the ground-lesson periods box.
--- NULL IS NOT ZERO here: it means the FULL course, which is FDMS's own
--- semantics for a lesson event that carries no periods_done (covCore).
+-- SUPERSEDED BY THE TWO ABOVE, and dropped so no surface can call them back.
+-- Nothing shipped ever stored a `verdict`: round 12 has not been pushed to
+-- Pages and the cloud schema has not been re-run, so this replacement needs no
+-- migration and leaves no legacy path behind it (a stored verdict on the local
+-- demo stack is dropped on read by wa.strip_entry, like any retired key).
+drop function if exists wa.grade_verdict(numeric);
+drop function if exists wa.verdicts();
+
+-- a whole number in a range, nullable. Round 12 wrote it for the ground-lesson
+-- periods box; round 12b removed that box and the flight log's `seq` is now its
+-- only caller — so it stays, and it is where a small counted integer belongs.
 create or replace function wa.chk_int(v jsonb, p_where text, p_min int, p_max int)
 returns void language plpgsql immutable as $$
 declare n numeric;
@@ -1621,28 +1656,31 @@ language sql immutable as $$
     --   duration        decimal hours, one decimal, nullable
     --   grade           0-100 whole, nullable — NULL = the debrief has not landed
     --   ng              non-graded BY NATURE; ng ⇒ grade must be null
-    --   verdict         only where the grade is absent (wa.verdicts())
-    --   note            ≤300, also the carrier for a lag/fail's maneuvers text
+    --   mission         complete / incomplete — only where the grade is absent
+    --                   and the row is not NG (wa.missions())
+    -- ROUND 12b — `note` and `verdict` ARE GONE. «Δε θελω πεδιο note, Or a
+    -- verdict with no number. Θελω μονο mission complete, mission incomplete.»
+    -- Both are refused by name on write and dropped on read (wa.strip_entry).
     when 'flights'      then array['date','track','sortie','seq','kind','instructor',
-                                   'instructor_oid','duration','grade','ng','verdict',
-                                   'note','legacy','entered_by']
+                                   'instructor_oid','duration','grade','ng','mission',
+                                   'legacy','entered_by']
     when 'fs'           then array['date','track','sortie','seq','kind','instructor',
-                                   'instructor_oid','duration','grade','ng','verdict',
-                                   'note','legacy','entered_by']
+                                   'instructor_oid','duration','grade','ng','mission',
+                                   'legacy','entered_by']
     -- A GROUND LESSON IS A BLOCK, not a point: date = start, end_date = end,
-    -- null = a single day. `periods` NULL means the FULL course (FDMS's own
-    -- covCore semantics), and `absent` is how "the class covered it and this
-    -- student did not" is said from the student's side. No grade: a lesson is
-    -- attended, not scored.
-    when 'lessons'      then array['date','end_date','group','course','periods','absent',
-                                   'instructor','instructor_oid','note','legacy','entered_by']
+    -- null = a single day. ROUND 12b — the row is GROUP · COURSE · START · END
+    -- and nothing else: «Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις για να
+    -- ειναι απλο», and the same review removed the note field everywhere. The
+    -- periods and attendance boxes went with them — the table the user drew has
+    -- four cells, and a key with no cell is a key nobody could ever edit. No
+    -- grade either: a lesson is attended, not scored.
+    when 'lessons'      then array['date','end_date','group','course','legacy','entered_by']
     -- THE EIGHT GROUND-EXAM GROUPS AND NOTHING ELSE. Four theory groups carry a
     -- nested exams[] (FF 190 · PT 190 · AΕ 190 · JX 190 · JX 191 · NA 191) which
     -- FDMS treats as COURSES OF THEIR GROUP — they belong in `lessons`, and
     -- filing them here as well would make the two systems disagree about what a
-    -- student is owed.
-    when 'exams'        then array['date','exam','grade','instructor','instructor_oid',
-                                   'note','legacy','entered_by']
+    -- student is owed. ROUND 12b: EXAM · DATE · GRADE, no examiner, no note.
+    when 'exams'        then array['date','exam','grade','legacy','entered_by']
     else array[]::text[] end
 $$;
 
@@ -2048,23 +2086,32 @@ begin
             perform wa.chk_grade(e->'grade', w || '.grade', false);
           end if;
 
-          -- THE VERDICT, AND WHERE IT MAY LIVE. Only where the grade is absent.
-          perform wa.chk_text(e->'verdict', w || '.verdict', false, 20);
-          perform wa.chk((e->>'verdict') is null or (e->>'verdict') = any(wa.verdicts()),
-                         w || '.verdict',
-                         format('unknown verdict — %s', array_to_string(wa.verdicts(), ' / ')));
-          perform wa.chk((e->>'verdict') is null or jsonb_typeof(e->'grade') <> 'number',
-                         w || '.verdict',
-                         format('this row has a grade, so its verdict is READ from it (%s %% is “%s”) — a stored verdict beside a stored grade is a second source of truth that can contradict the first',
-                                -- round-12 verify finding 1: the grade is whole by construction
-                                -- (chk_grade above), so it prints UNCHANGED — the trailing-zero
-                                -- trim borrowed from chk_grade turned 100 into "1 %" here.
+          -- THE MISSION, AND WHERE IT MAY LIVE (round 12b). Only where the
+          -- grade is absent and the row is not NG. Two answers, no third.
+          perform wa.chk_text(e->'mission', w || '.mission', false, 20);
+          perform wa.chk((e->>'mission') is null or (e->>'mission') = any(wa.missions()),
+                         w || '.mission',
+                         format('unknown mission — %s', array_to_string(wa.missions(), ' / ')));
+          perform wa.chk((e->>'mission') is null or jsonb_typeof(e->'grade') <> 'number',
+                         w || '.mission',
+                         format('this row has a grade, so its mission is READ from it (%s %% is “mission %s”) — a stored mission beside a stored grade is a second source of truth that can contradict the first',
+                                -- round-12 verify finding 1, kept: the grade is whole by
+                                -- construction (chk_grade above), so it prints UNCHANGED —
+                                -- the trailing-zero trim borrowed from chk_grade once turned
+                                -- 100 into "1 %" here.
                                 (e->>'grade'),
-                                wa.grade_verdict((e->>'grade')::numeric)));
-          perform wa.chk((e->>'verdict') is null or not is_ng,
-                         w || '.verdict',
-                         'a non-graded (NG) flight is not scorable at all — it carries neither a grade nor a verdict');
-          perform wa.chk_text(e->'note', w || '.note', false, 300);
+                                wa.grade_mission((e->>'grade')::numeric)));
+          perform wa.chk((e->>'mission') is null or not is_ng,
+                         w || '.mission',
+                         'a non-graded (NG) flight is not scorable at all — it carries neither a grade nor a mission');
+
+          -- ROUND 12b — THE TWO RETIRED KEYS, REFUSED BY NAME. The generic
+          -- whitelist below would answer "unknown field"; these say WHY, which
+          -- is the ruling and not a typo report.
+          perform wa.chk(not (e ? 'note'), w || '.note',
+            'the note field was removed from the flight log — «Δε θελω πεδιο note»: a flight row is the flight, the date, who flew it, how long it lasted and how it went');
+          perform wa.chk(not (e ? 'verdict'), w || '.verdict',
+            'the three-way verdict (pass / lagging / failed) was replaced by MISSION — «Θελω μονο mission complete, mission incomplete»');
 
         elsif k = 'lessons' then
           perform wa.chk_entry_date(e, w);
@@ -2082,6 +2129,18 @@ begin
           perform wa.chk(wa.is_legacy(e)
                          or nullif(trim(coalesce(e->>'group', '')), '') is not null,
                          w || '.group', 'every ground lesson names the group it belongs to');
+          -- ROUND 12b — THE SIMPLICITY RULING, REFUSED BY NAME. «Μη βαλεις
+          -- εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο» — and the
+          -- same review took the note field with it. The periods and attendance
+          -- boxes went too: the table the user drew is GROUP · COURSE · START ·
+          -- END, and a key with no cell is a key nobody could ever edit.
+          perform wa.chk(not (e ? 'instructor') and not (e ? 'instructor_oid'),
+            w || '.instructor',
+            'a ground lesson does not name an instructor — «Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο»');
+          perform wa.chk(not (e ? 'note'), w || '.note',
+            'the note field was removed — «Δε θελω πεδιο note»');
+          perform wa.chk(not (e ? 'periods') and not (e ? 'absent'), w || '.periods',
+            'a ground lesson row is GROUP · COURSE · START · END — the periods and attendance boxes were removed with the round-12b simplification');
           -- THE COURSE, off-catalogue accepted and marked (the sortie rule):
           -- course codes are derived at run time from the printed duration
           -- block, so they are the value most likely to lag reality. What IS
@@ -2095,12 +2154,6 @@ begin
                          w || '.course',
                          format('“%s” is a course of another group — a course is identified by the PAIR (group, course), never by its code alone (OJT is a course of four different groups)',
                                 e->>'course'));
-          -- NULL PERIODS MEANS THE FULL COURSE — FDMS's own semantics.
-          perform wa.chk_int(e->'periods', w || '.periods', 0, 400);
-          perform wa.chk_bool(e->'absent', w || '.absent');
-          perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
-          perform wa.chk_text(e->'instructor_oid', w || '.instructor_oid', false, 64);
-          perform wa.chk_text(e->'note', w || '.note', false, 300);
 
         elsif k = 'exams' then
           perform wa.chk_entry_date(e, w);
@@ -2115,9 +2168,12 @@ begin
           -- NULLABLE, for the same reason a flight's grade is: the result can
           -- take longer to arrive than the exam did to sit.
           perform wa.chk_grade(e->'grade', w || '.grade', false);
-          perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
-          perform wa.chk_text(e->'instructor_oid', w || '.instructor_oid', false, 64);
-          perform wa.chk_text(e->'note', w || '.note', false, 300);
+          -- ROUND 12b — the same simplicity ruling, one section over.
+          perform wa.chk(not (e ? 'instructor') and not (e ? 'instructor_oid'),
+            w || '.instructor',
+            'a ground exam does not name an examiner — «Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο»');
+          perform wa.chk(not (e ? 'note'), w || '.note',
+            'the note field was removed — «Δε θελω πεδιο note»');
         end if;
 
         -- PENDING IS GONE (round 8) — refused by name, before the generic
@@ -2580,20 +2636,23 @@ begin
         if coalesce(e->>'track', '') = '' and wa.code_track(e->>'sortie') is not null then
           e := (e - 'track') || jsonb_build_object('track', wa.code_track(e->>'sortie'));
         end if;
-        -- A VERDICT BESIDE A GRADE IS DROPPED, not flagged — and this is the
-        -- ONE place round 12 removes a stored value. It is lossless: where a
-        -- grade exists the verdict is DERIVED from it (wa.grade_verdict), so
+        -- A MISSION BESIDE A GRADE IS DROPPED, not flagged — and this is the
+        -- ONE place this round removes a stored value. It is lossless: where a
+        -- grade exists the mission is DERIVED from it (wa.grade_mission), so
         -- what is dropped is a copy, not a fact. Flagging it instead would
-        -- leave a row nobody could ever save, because the form draws no verdict
+        -- leave a row nobody could ever save, because the form draws no mission
         -- box on a graded row — a trap, not a question.
-        if jsonb_typeof(e->'grade') = 'number' and (e->>'verdict') is not null then
-          e := (e - 'verdict') || jsonb_build_object('verdict', null);
+        -- (`verdict`, round 12's three-way key, needs no branch here: it is not
+        -- in wa.entry_keys any more, so wa.strip_entry drops it on read like
+        -- any retired key. Nothing shipped ever stored one.)
+        if jsonb_typeof(e->'grade') = 'number' and (e->>'mission') is not null then
+          e := (e - 'mission') || jsonb_build_object('mission', null);
         end if;
-        if (e->>'ng')::boolean and (e->>'verdict') is not null then
-          e := (e - 'verdict') || jsonb_build_object('verdict', null);
+        if (e->>'ng')::boolean and (e->>'mission') is not null then
+          e := (e - 'mission') || jsonb_build_object('mission', null);
         end if;
-        if (e->>'verdict') is not null and not ((e->>'verdict') = any(wa.verdicts())) then
-          e := (e - 'verdict') || jsonb_build_object('verdict', null, 'legacy', true);
+        if (e->>'mission') is not null and not ((e->>'mission') = any(wa.missions())) then
+          e := (e - 'mission') || jsonb_build_object('mission', null, 'legacy', true);
         end if;
         -- what the row must carry to be a flight at all
         if not wa.is_iso_date(e->>'date')
@@ -2619,9 +2678,9 @@ begin
       if (e->>'group') is not null and not ((e->>'group') = any(wa.lesson_groups())) then
         e := (e - 'group') || jsonb_build_object('group', null, 'legacy', true);
       end if;
-      if coalesce(jsonb_typeof(e->'absent'), '-') <> 'boolean' then
-        e := (e - 'absent') || jsonb_build_object('absent', false);
-      end if;
+      -- ROUND 12b — the `absent` default is gone with the box: attendance,
+      -- periods, the instructor and the note are no longer keys of a lesson, so
+      -- wa.strip_entry drops any that a stored row still carries.
       if not wa.is_iso_date(e->>'date') or coalesce(e->>'group', '') = '' then
         e := e || jsonb_build_object('legacy', true);
       end if;

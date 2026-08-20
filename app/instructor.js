@@ -96,18 +96,20 @@ WA.renderInstructor = async function (view, me, opts) {
         const n = list.filter((e) => (e.track || "") === t).length;
         return n ? `<b>${esc(WA.itemCatLabel(t))}</b> ${esc(n)}` : "";
       }).filter(Boolean).join(" · ");
+      /* ROUND 12b — the missions that were NOT completed. A summary line that
+         counted only hours would let the one fact an instructor most needs to
+         see pass unmentioned. */
+      const bad = list.filter((e) => WA.rowMission(e) === "incomplete").length;
       return `<div class="line">${esc(WA.secLabel(k))}: ${per}` +
         (hrs > 0 ? ` <span class="k">· ${esc(Math.round(hrs * 10) / 10)} h</span>` : "") +
         (lag ? ` <span class="k" title="Flown, and the debrief has not landed yet — the grade is genuinely not known, not missing">· ${esc(lag)} awaiting a grade</span>` : "") +
+        (bad ? ` <span class="k" title="Missions that were not completed — read from the grade where there is one, said by the squadron where there is not">· ${esc(bad)} incomplete</span>` : "") +
         `</div>`;
     }).join("") +
     ((rec.lessons || []).length || (rec.exams || []).length
       ? `<div class="line">Ground: <b>${esc((rec.lessons || []).length)}</b> lesson${
           (rec.lessons || []).length === 1 ? "" : "s"} · <b>${esc((rec.exams || []).length)}</b> exam${
-          (rec.exams || []).length === 1 ? "" : "s"}${
-          (rec.lessons || []).filter((e) => e.absent).length
-            ? ` <span class="k" title="The class covered these and the student did not">· ${
-                esc((rec.lessons || []).filter((e) => e.absent).length)} absent</span>` : ""}</div>`
+          (rec.exams || []).length === 1 ? "" : "s"}</div>`
       : "");
     /* one line per entry — items inside an entry are separated by · , so the
        entries themselves must not be, or a multi-item FAIL reads as three */

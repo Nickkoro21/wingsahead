@@ -771,19 +771,32 @@ WA.renderAdmin = async function (view, me) {
      4 Flights + 4 F/S + Ground lessons + Ground exams.
      ══════════════════════════════════════════════════════════════════════════ */
   /* the grade cell of a log row — and the one place the debrief lag is shown
-     as what it is: a fact, not a gap. A verdict with no percentage is named
-     («the squadron's scheduler has no number for it») rather than blank, or a
-     FAIL the squadron knows about would be invisible in the CO's own table. */
+     as what it is: a fact, not a gap. */
   function logGradeCell(e) {
     if (e.ng) return `<td><span class="badge">NG &mdash; non-graded</span></td>`;
     if (e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade))) {
       return `<td class="num">${WA.pct(e.grade)}</td>`;
     }
-    const v = WA.verdict(e.verdict);
-    if (v) {
-      return `<td><span class="badge badge-warn" title="${esc(v.tip)}">${esc(v.label)}</span></td>`;
-    }
     return `<td class="lag">${WA.debriefChip(e) || "&mdash;"}</td>`;
+  }
+  /* ROUND 12b — THE MISSION, IN ITS OWN COLUMN. Where a grade exists it is
+     READ from the number and marked as such; where none does it is what the
+     squadron said about the flight without one. A mission the squadron
+     recorded as INCOMPLETE must never be indistinguishable from a flight still
+     waiting for its debrief — that is the whole reason the key exists, and the
+     column is where the CO sees it. */
+  function logMissionCell(e) {
+    if (e.ng) {
+      return `<td><span class="k" title="A non-graded (NG) flight is not scorable at all — it carries neither a grade nor a mission">&mdash;</span></td>`;
+    }
+    const m = WA.rowMission(e);
+    if (!m) return `<td><span class="k">&mdash;</span></td>`;
+    const def = WA.mission(m) || {};
+    const derived = WA.missionDerived(e);
+    return `<td><span class="mchip is-${esc(m)}" title="${esc(derived
+      ? "Read from the grade: " + e.grade + " % is “" + (def.label || m) + "” (the 60 % threshold of ΠΔ 151/13)"
+      : def.tip || "")}">${esc(def.label || m)}${
+      derived ? ` <span class="k">read from the grade</span>` : ""}</span></td>`;
   }
   function logRows(s, band, track) {
     const list = (Array.isArray(s.record[band]) ? s.record[band] : [])
@@ -808,13 +821,13 @@ WA.renderAdmin = async function (view, me) {
         <td class="num">${e.duration === null || e.duration === undefined || e.duration === ""
           ? `<span class="k">—</span>` : esc(e.duration)}</td>
         ${logGradeCell(e)}
-        <td>${esc(e.note || "—")}</td>
+        ${logMissionCell(e)}
         ${srcCell(e)}</tr>`;
     });
   }
   function logBandBlock(s, band) {
     const all = Array.isArray(s.record[band]) ? s.record[band] : [];
-    const head = ["Flight", "Date", "Instructor", "Hours", "Grade", "Note", "Source"];
+    const head = ["Flight", "Date", "Instructor", "Hours", "Grade", "Mission", "Source"];
     const body = WA.TRACKS.map((t) => {
       const rows = logRows(s, band, t);
       const list = all.filter((e) => (e.track || "") === t);
@@ -834,26 +847,22 @@ WA.renderAdmin = async function (view, me) {
           hrs > 0 ? " · " + (Math.round(hrs * 10) / 10) + " h" : ""}</span></h2>
       ${body}`;
   }
+  /* ROUND 12b — GROUP · COURSE · DATES, and nothing else: «Μη βαλεις
+     εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο», and the same
+     review removed the note field and with it the periods and attendance
+     boxes. What the CO reads is what the student's own table holds. */
   function lessonsTable(s) {
     const list = (Array.isArray(s.record.lessons) ? s.record.lessons : []).slice()
       .sort((a, b) => String(a.date).localeCompare(String(b.date)));
     if (!list.length) return `<p class="hint">No ground lessons recorded.</p>`;
-    return evTable(["Group", "Course", "Dates", "Periods", "Instructor", "Attendance", "Note", "Source"],
+    return evTable(["Group", "Course", "Dates", "Source"],
       list.map((e) => {
         const c = WA.lessonCourse(e.group, e.course);
-        return `<tr class="${e.absent ? "is-unflown" : ""}">
+        return `<tr>
           <td title="${esc(WA.groundGroupLabel(e.group))}"><b>${esc(e.group || "—")}</b></td>
           <td>${esc(e.course || "—")}${c ? "" :
             (e.course ? `<span class="offcat" title="Not in the generated syllabus catalogue for this group">*</span>` : "")}</td>
           <td>${esc(fmtD(e.date))}${e.end_date && e.end_date !== e.date ? " &ndash; " + esc(fmtD(e.end_date)) : ""}</td>
-          <td class="num">${e.periods === null || e.periods === undefined || e.periods === ""
-            ? `<span class="k" title="Empty means the FULL course — the same meaning the squadron's scheduler gives it">full${c ? " (" + esc(c.p) + ")" : ""}</span>`
-            : esc(e.periods) + (c ? ` <span class="k">of ${esc(c.p)}</span>` : "")}</td>
-          <td>${esc(e.instructor || "—")}</td>
-          <td>${e.absent
-            ? `<span class="badge badge-warn" title="The class covered this and the student did not — the makeup is owed">absent</span>`
-            : `<span class="k">attended</span>`}</td>
-          <td>${esc(e.note || "—")}</td>
           ${srcCell(e)}</tr>`;
       }));
   }
@@ -861,7 +870,7 @@ WA.renderAdmin = async function (view, me) {
     const list = (Array.isArray(s.record.exams) ? s.record.exams : []).slice()
       .sort((a, b) => String(a.date).localeCompare(String(b.date)));
     if (!list.length) return `<p class="hint">No ground exams recorded.</p>`;
-    return evTable(["Exam", "Date", "Examiner", "Grade", "Note", "Source"],
+    return evTable(["Exam", "Date", "Grade", "Source"],
       list.map((e) => {
         const x = WA.exam(e.exam);
         const has = e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade));
@@ -869,10 +878,8 @@ WA.renderAdmin = async function (view, me) {
           <td title="${esc(WA.examLabel(e.exam))}"><b>${esc(e.exam || "—")}</b>${
             x && x.cond ? ` <span class="badge badge-acc" title="Foreign SPs only — a HAF student does not owe this exam">foreign SPs only</span>` : ""}</td>
           <td>${esc(fmtD(e.date))}</td>
-          <td>${esc(e.instructor || "—")}</td>
           ${has ? `<td class="num">${WA.pct(e.grade)}</td>`
                 : `<td class="lag">${WA.debriefChip(e) || "&mdash;"}</td>`}
-          <td>${esc(e.note || "—")}</td>
           ${srcCell(e)}</tr>`;
       }));
   }
@@ -1218,15 +1225,18 @@ WA.renderAdmin = async function (view, me) {
                     return n ? `<b>${esc(WA.itemCatLabel(t))}</b> ${esc(n)}` : "";
                   }).filter(Boolean).join(" · ") +
                   (hrs > 0 ? ` <span class="k">· ${esc(Math.round(hrs * 10) / 10)} h</span>` : "") +
-                  (lag ? ` <span class="k" title="Flown, and the debrief has not landed yet — the grade is genuinely not known, not missing">· ${esc(lag)} awaiting a grade</span>` : "")
+                  (lag ? ` <span class="k" title="Flown, and the debrief has not landed yet — the grade is genuinely not known, not missing">· ${esc(lag)} awaiting a grade</span>` : "") +
+                  /* ROUND 12b — a mission the squadron recorded as INCOMPLETE
+                     is the one thing in this log a brief must not swallow */
+                  ((() => {
+                    const bad = list.filter((e) => WA.rowMission(e) === "incomplete").length;
+                    return bad ? ` <span class="k" title="Flights whose mission was not completed — read from the grade where there is one, said by the squadron where there is not">· ${esc(bad)} incomplete</span>` : "";
+                  })())
                 : "<span class='k'>none recorded</span>"}</div>`;
           }).join("")}
           <div class="kline"><span class="k">Ground</span>
             ${(s.record.lessons || []).length || (s.record.exams || []).length
               ? `<b>${esc((s.record.lessons || []).length)}</b> lesson${(s.record.lessons || []).length === 1 ? "" : "s"}` +
-                ((s.record.lessons || []).filter((e) => e.absent).length
-                  ? ` <span class="k" title="The class covered these and the student did not — the makeup is owed">(${
-                      esc((s.record.lessons || []).filter((e) => e.absent).length)} absent)</span>` : "") +
                 ` · <b>${esc((s.record.exams || []).length)}</b> exam${(s.record.exams || []).length === 1 ? "" : "s"}` +
                 ((s.record.exams || []).filter(WA.awaitingDebrief).length
                   ? ` <span class="k">· ${esc((s.record.exams || []).filter(WA.awaitingDebrief).length)} awaiting a result</span>` : "")
@@ -1391,11 +1401,26 @@ WA.renderAdmin = async function (view, me) {
         if (e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade))) {
           return WA.pct(e.grade);
         }
-        const v = WA.verdict(e.verdict);
-        if (v) return esc(v.label) + ` <span class="pr-n">(${esc(v.el)} — the squadron recorded no percentage)</span>`;
+        /* ROUND 12b — A ROW WHOSE MISSION IS SET IS NOT WAITING FOR ANYTHING.
+           The squadron characterised the flight; what it never wrote down is
+           the percentage, and saying "awaiting debrief" here would put a chase
+           on a brief for a flight nobody is chasing. */
+        if (!WA.awaitingDebrief(e)) return `<span class="pr-n">no percentage recorded</span>`;
         return `<span class="pr-n">awaiting debrief${(() => {
           const n = WA.daysAgo(e.date); return n === null ? "" : " — flown " + n + " d ago";
         })()}</span>`;
+      };
+      /* ROUND 12b — the mission IN WORDS, and where it came from. Paper is
+         monochrome: a chip cannot say "read from the grade", so the cell does. */
+      const logMissionWord = (e) => {
+        if (e.ng) return `<span class="pr-n">not scorable</span>`;
+        const m = WA.rowMission(e);
+        if (!m) return `<span class="pr-n">—</span>`;
+        /* where it is READ from the number, paper says so — it cannot hover.
+           Where it was said by the squadron the Grade cell beside it already
+           reads "no percentage recorded", so the label stands alone. */
+        return esc(WA.missionLabel(m)) +
+          (WA.missionDerived(e) ? ` <span class="pr-n">(read from the grade)</span>` : "");
       };
       const logPrint = ["flights", "fs"].map((k) => WA.TRACKS.map((t) => {
         const list = (Array.isArray(s.record[k]) ? s.record[k] : [])
@@ -1411,22 +1436,18 @@ WA.renderAdmin = async function (view, me) {
           <td>${esc(fmtD(e.date))}</td>
           <td>${esc(e.instructor || "—")}</td>
           <td>${e.duration === null || e.duration === undefined || e.duration === "" ? "—" : esc(e.duration)}</td>
-          <td>${logGradeWord(e)}</td></tr>`);
+          <td>${logGradeWord(e)}</td>
+          <td>${logMissionWord(e)}</td></tr>`);
         return `<div class="pr-sec">${esc(WA.secLabel(k))} — ${esc(WA.itemCatLabel(t))}
             (${list.length} flown${hrs > 0 ? ", " + (Math.round(hrs * 10) / 10) + " h" : ""})</div>
-          ${prT(["Flight", "Date", "Instructor", "Hours", "Grade"], rws)}`;
+          ${prT(["Flight", "Date", "Instructor", "Hours", "Grade", "Mission"], rws)}`;
       }).join("")).join("");
       const lessonRows = (s.record.lessons || []).slice()
         .sort((a, b) => String(a.date).localeCompare(String(b.date))).map((e) => {
           const c = WA.lessonCourse(e.group, e.course);
           return `<tr><td>${esc(e.group || "—")}${WA.coTag(e)}</td>
-            <td>${esc(e.course || "—")}</td>
-            <td>${esc(fmtD(e.date))}${e.end_date && e.end_date !== e.date ? " – " + esc(fmtD(e.end_date)) : ""}</td>
-            <td>${e.periods === null || e.periods === undefined || e.periods === ""
-              ? `full course${c ? " (" + esc(c.p) + ")" : ""}`
-              : esc(e.periods) + (c ? " of " + esc(c.p) : "")}</td>
-            <td>${esc(e.instructor || "—")}</td>
-            <td>${e.absent ? "ABSENT — the class covered it, this student did not" : "attended"}</td></tr>`;
+            <td>${esc(e.course || "—")}${c ? "" : (e.course ? ` <span class="pr-n">(off-catalogue)</span>` : "")}</td>
+            <td>${esc(fmtD(e.date))}${e.end_date && e.end_date !== e.date ? " – " + esc(fmtD(e.end_date)) : ""}</td></tr>`;
         });
       const examRows = (s.record.exams || []).slice()
         .sort((a, b) => String(a.date).localeCompare(String(b.date))).map((e) => {
@@ -1434,7 +1455,6 @@ WA.renderAdmin = async function (view, me) {
           return `<tr><td>${esc(e.exam || "—")}${WA.coTag(e)}${
               (WA.exam(e.exam) || {}).cond ? ` <span class="pr-n">(foreign SPs only)</span>` : ""}</td>
             <td>${esc(fmtD(e.date))}</td>
-            <td>${esc(e.instructor || "—")}</td>
             <td>${has ? WA.pct(e.grade) : `<span class="pr-n">awaiting the result</span>`}</td></tr>`;
         });
       return `
@@ -1474,15 +1494,17 @@ WA.renderAdmin = async function (view, me) {
           <div class="pr-sec">CEF — Εξέταση Καταλληλότητας (Squadron Evaluator)</div>
           ${prT(["Entry", "Evaluator", "Date", "Result", "Grade"], ckRows("cef"))}
           ${/* ROUND 12 — THE LOG TABLES ON PAPER. Paper is monochrome, so the
-               debrief lag and a verdict-with-no-number are printed IN WORDS
+               debrief lag and a mission-with-no-number are printed IN WORDS
                rather than as a colour or a blank: a photocopied brief that
                showed an empty Grade cell for a flight the squadron recorded as
-               ΑΠΟΤΥΧΙΑ would hide exactly what it exists to show. */ ""}
+               an INCOMPLETE mission would hide exactly what it exists to
+               show — and where the mission is read from the grade, the cell
+               says so, because paper cannot hover. */ ""}
           ${logPrint}
           ${lessonRows.length ? `<div class="pr-sec">Ground lessons — the theory groups and their courses</div>
-            ${prT(["Group", "Course", "Dates", "Periods", "Instructor", "Attendance"], lessonRows)}` : ""}
+            ${prT(["Group", "Course", "Dates"], lessonRows)}` : ""}
           ${examRows.length ? `<div class="pr-sec">Ground exams</div>
-            ${prT(["Exam", "Date", "Examiner", "Grade"], examRows)}` : ""}
+            ${prT(["Exam", "Date", "Grade"], examRows)}` : ""}
           <div class="pr-sec">Assessment for fighters — weighted mean ${
             ass.n ? esc(WA.levelFormula(ass.counts, ass.n) + " = " + WA.meanText(ass.mean))
                   : "no assessment submitted yet"}</div>
@@ -1810,14 +1832,15 @@ WA.renderAdmin = async function (view, me) {
      nobody has flown is not exported as an entry, and the grade is the RAW
      stored number — a fractional legacy grade is never rounded away here. */
   function exportEntriesCSV() {
-    /* ROUND 12 — two new columns, and both are facts no other column carries:
-       "Hours" is the flown duration (WA-only until FDMS grows the field), and
-       "Awaiting" is the debrief lag — «δεκτο το null». A spreadsheet that read
-       a blank Grade as a zero would be reading a failure that never happened,
-       so the lag is stated in a column of its own. */
+    /* ROUND 12 — three columns no other column carries: "Hours" is the flown
+       duration (WA-only until FDMS grows the field), "Awaiting" is the debrief
+       lag — «δεκτο το null» — and (round 12b) "Mission" is complete /
+       incomplete, marked when it is READ FROM THE GRADE rather than said. A
+       spreadsheet that read a blank Grade as a zero would be reading a failure
+       that never happened, so both facts are stated in columns of their own. */
     const rows = [["Student", "Class", "Section", "Date", "Detail", "Flight code",
       "Items", "Item count", "With whom / authorised by", "Grade", "To correct", "Entered by", "Counts",
-      "Hours", "Awaiting"]];
+      "Hours", "Awaiting", "Mission"]];
     /* "Counts" — round 11 residual (verify item 10): a re-flown checkride
        exports BOTH attempts; this column says which one the numbers use,
        decided by the same helper as every other surface. Non-evaluation rows
@@ -1829,7 +1852,20 @@ WA.renderAdmin = async function (view, me) {
         WA.pctRaw(grade),
         e.legacy ? "yes" : "", WA.coWord(e), counts || "",
         hours === undefined || hours === null ? "" : hours,
-        WA.debriefWord(e)]);
+        /* the debrief lag belongs to the sections that HAVE a grade. A ground
+           lesson is attended, not scored, so it is never "awaiting" anything —
+           and a column that said it was would put a chase on every lesson in
+           the squadron (found by this round's own CSV read-back). */
+        (sec === "flights" || sec === "fs" || sec === "exams") ? WA.debriefWord(e) : "",
+        /* round 12b — only the two flight logs have a mission; everything
+           else leaves the cell empty rather than inventing one */
+        (sec === "flights" || sec === "fs")
+          ? (e.ng ? "not scorable (NG)"
+                  : (WA.rowMission(e)
+                      ? WA.missionLabel(WA.rowMission(e)) +
+                        (WA.missionDerived(e) ? " (read from the grade)" : " (no percentage recorded)")
+                      : ""))
+          : ""]);
     for (const s of visible()) {
       const r = s.record;
       (r.nfs || []).forEach((e) => add(s, "nfs", e,
@@ -1872,35 +1908,29 @@ WA.renderAdmin = async function (view, me) {
           e.flight_code, "", e.evaluator, e.grade));
       }
       /* ROUND 12 — the log rows. Detail carries the track, the kind when it is
-         not an ordinary syllabus sortie, the seq of a same-day re-fly, and the
-         VERDICT when the squadron characterised the flight without a number:
-         an unmarked blank in a Grade column beside a real ΑΠΟΤΥΧΙΑ is exactly
-         the disagreement the verdict key exists to prevent. */
+         not an ordinary syllabus sortie, and the seq of a same-day re-fly; the
+         MISSION has a column of its own (round 12b), because an unmarked blank
+         in a Grade column beside a mission the squadron called INCOMPLETE is
+         exactly the disagreement the key exists to prevent. */
       for (const k of ["flights", "fs"]) {
         (r[k] || []).forEach((e) => {
           const bits = [WA.itemCatLabel(e.track)];
           if (e.kind && e.kind !== "syllabus") bits.push(WA.flightKindLabel(e.kind));
           if (Number(e.seq || 1) > 1) bits.push("same-day re-fly #" + Number(e.seq));
           if (e.ng) bits.push("NG (non-graded)");
-          if (!e.ng && WA.verdict(e.verdict)) {
-            bits.push("verdict " + WA.verdictLabel(e.verdict) + " — no percentage recorded");
-          }
-          if (e.note) bits.push(e.note);
           add(s, k, e, bits.join(" — "), e.sortie, "", e.instructor, e.grade,
               undefined, "", e.duration);
         });
       }
       (r.lessons || []).forEach((e) => add(s, "lessons", e,
         [WA.groundGroupLabel(e.group),
-         e.end_date && e.end_date !== e.date ? "to " + fmtD(e.end_date) : "",
-         e.periods === null || e.periods === undefined ? "full course" : e.periods + " periods",
-         e.absent ? "ABSENT — the class covered it, this student did not" : "",
-         e.note || ""].filter(Boolean).join(" — "),
-        e.course, "", e.instructor, null));
+         e.end_date && e.end_date !== e.date ? "to " + fmtD(e.end_date) : ""
+        ].filter(Boolean).join(" — "),
+        e.course, "", "", null));
       (r.exams || []).forEach((e) => add(s, "exams", e,
-        [WA.examLabel(e.exam), (WA.exam(e.exam) || {}).cond ? "foreign SPs only" : "",
-         e.note || ""].filter(Boolean).join(" — "),
-        e.exam, "", e.instructor, e.grade));
+        [WA.examLabel(e.exam), (WA.exam(e.exam) || {}).cond ? "foreign SPs only" : ""
+        ].filter(Boolean).join(" — "),
+        e.exam, "", "", e.grade));
     }
     download("wings-ahead-entries" + classSuffix() + "-" + stamp() + ".csv",
              "text/csv;charset=utf-8", csv(rows));

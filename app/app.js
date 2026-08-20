@@ -1007,15 +1007,17 @@ WA.ENTRY_KEYS = {
      NOT derived from the code, because kind fcf/cef/other have no syllabus
      code at all. `seq` is AUTHORED (1, and 2 for a deliberate same-day
      re-fly), never derived from an array index: an index is a position and
-     this is a fact. `instructor_oid` is never drawn as a box. */
+     this is a fact. `instructor_oid` is never drawn as a box.
+     ROUND 12b — `note` and `verdict` are GONE, `mission` (complete /
+     incomplete) took the verdict's place, and lessons / exams keep four cells
+     and three: «Δε θελω πεδιο note … Θελω μονο mission complete, mission
+     incomplete … Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις». */
   flights:      ["date", "track", "sortie", "seq", "kind", "instructor", "instructor_oid",
-                 "duration", "grade", "ng", "verdict", "note", "legacy", "entered_by"],
+                 "duration", "grade", "ng", "mission", "legacy", "entered_by"],
   fs:           ["date", "track", "sortie", "seq", "kind", "instructor", "instructor_oid",
-                 "duration", "grade", "ng", "verdict", "note", "legacy", "entered_by"],
-  lessons:      ["date", "end_date", "group", "course", "periods", "absent",
-                 "instructor", "instructor_oid", "note", "legacy", "entered_by"],
-  exams:        ["date", "exam", "grade", "instructor", "instructor_oid",
-                 "note", "legacy", "entered_by"],
+                 "duration", "grade", "ng", "mission", "legacy", "entered_by"],
+  lessons:      ["date", "end_date", "group", "course", "legacy", "entered_by"],
+  exams:        ["date", "exam", "grade", "legacy", "entered_by"],
 };
 
 /* ── AN EMPTY FIXED SLOT (round 5) ─────────────────────────────────────────
@@ -1214,15 +1216,17 @@ WA.migrateRecord = function (rec) {
       /* the track rides in a syllabus code's own letter, so reading it off
          there destroys nothing and invents nothing */
       if (!o.track && WA.codeTrack(o.sortie)) o.track = WA.codeTrack(o.sortie);
-      /* A VERDICT BESIDE A GRADE IS DROPPED, not flagged — the one place this
+      /* A MISSION BESIDE A GRADE IS DROPPED, not flagged — the one place this
          round removes a stored value, and it is lossless: where a grade exists
-         the verdict is DERIVED from it. Flagging instead would leave a row
-         nobody could save, because the form draws no verdict box on a graded
-         row — a trap, not a question. */
+         the mission is DERIVED from it. Flagging instead would leave a row
+         nobody could save, because the form draws no mission box on a graded
+         row — a trap, not a question. (Round 12's `verdict` needs no branch of
+         its own: it is not in WA.ENTRY_KEYS any more, so the final whitelist
+         pass below drops it like any retired key.) */
       if (o.grade !== null && o.grade !== undefined && o.grade !== "" &&
-          isFinite(Number(o.grade)) && o.verdict) o.verdict = null;
-      if (o.ng && o.verdict) o.verdict = null;
-      if (o.verdict && !WA.verdict(o.verdict)) { o.verdict = null; o.legacy = true; }
+          isFinite(Number(o.grade)) && o.mission) o.mission = null;
+      if (o.ng && o.mission) o.mission = null;
+      if (o.mission && !WA.mission(o.mission)) { o.mission = null; o.legacy = true; }
       if (!isDate(o.date) || !String(o.sortie || "").trim() ||
           !String(o.instructor || "").trim() || !o.track) o.legacy = true;
       return o;
@@ -1235,7 +1239,9 @@ WA.migrateRecord = function (rec) {
   out.lessons = (arr(src.lessons) || []).map((e) => {
     const o = { ...e };
     if (o.group && !WA.groundGroup(o.group)) { o.group = null; o.legacy = true; }
-    if (typeof o.absent !== "boolean") o.absent = false;
+    /* round 12b — no `absent` default: attendance, periods, the instructor and
+       the note are not keys of a lesson any more, and the whitelist pass drops
+       whatever a stored row still carries under those names */
     if (!isDate(o.date) || !o.group) o.legacy = true;
     return o;
   });
@@ -1498,8 +1504,8 @@ WA.gradeBandText = function (g) {
 /* ══════════════════════════════════════════════════════════════════════════
    ROUND 12 — THE LOG TABLES: the four sections' vocabulary.
    ──────────────────────────────────────────────────────────────────────────
-   MIRROR: db/schema.sql → wa.flight_kinds() / wa.verdicts() /
-   wa.grade_verdict(). Change one, change the other.
+   MIRROR: db/schema.sql → wa.flight_kinds() / wa.missions() /
+   wa.grade_mission(). Change one, change the other.
    ══════════════════════════════════════════════════════════════════════════ */
 WA.LOG_BANDS = [
   { id: "flights", label: "Flights", short: "Flights", device: "T-6A",
@@ -1528,52 +1534,64 @@ WA.flightKindLabel = function (id) {
 /* does this kind free the flight box from the syllabus catalogue? */
 WA.kindOffCatalogue = function (id) { return !!(WA.flightKind(id) || {}).off; };
 
-/* THE VERDICT WITHOUT A NUMBER. It exists only where the grade is absent: a
-   stored verdict beside a stored grade is a second source of truth that can
-   contradict the first — the defect round 11 removed from the FPC. */
-WA.VERDICTS = [
-  { id: "pass", label: "Pass", el: "ΕΠΙΤΥΧΙΑ", cls: "ok",
-    tip: "The squadron's scheduler recorded this flight as a pass and has no percentage for it" },
-  { id: "lagging", label: "Lagging", el: "ΥΣΤΕΡΗΣΗ", cls: "warn",
-    tip: "Recorded as ΥΣΤΕΡΗΣΗ (50-59 %) with no percentage written down" },
-  { id: "failed", label: "Failed", el: "ΑΠΟΤΥΧΙΑ", cls: "bad",
-    tip: "Recorded as ΑΠΟΤΥΧΙΑ (0-49 %) with no percentage written down" },
+/* ── THE MISSION (round 12b) ───────────────────────────────────────────────
+   «Or a verdict with no number. Θελω μονο mission complete, mission
+   incomplete.» Two answers and no third: round 12's pass / lagging / failed
+   was the printed grade scale wearing a second name, and where a grade exists
+   that scale is already there — in the number.
+   It exists only where the grade is absent and the row is not NG: a stored
+   mission beside a stored grade is a second source of truth that can
+   contradict the first — the defect round 11 removed from the FPC.
+   MIRROR: db/schema.sql → wa.missions() / wa.grade_mission(). */
+WA.MISSIONS = [
+  { id: "complete", label: "Mission complete", short: "complete", cls: "ok",
+    tip: "The squadron recorded this flight as a completed mission and has no percentage for it" },
+  { id: "incomplete", label: "Mission incomplete", short: "incomplete", cls: "bad",
+    tip: "The squadron recorded this flight as an incomplete mission and has no percentage for it" },
 ];
-WA.verdict = function (id) { return WA.VERDICTS.find((v) => v.id === id) || null; };
-WA.verdictLabel = function (id) {
-  const v = WA.verdict(id);
-  return v ? v.label : (id ? String(id) : "");
+WA.mission = function (id) { return WA.MISSIONS.find((m) => m.id === id) || null; };
+WA.missionLabel = function (id) {
+  const m = WA.mission(id);
+  return m ? m.label : (id ? String(id) : "");
 };
-/* the three-way collapse of the printed five-band scale, at the SAME 60/50
-   thresholds. MIRROR: db/schema.sql → wa.grade_verdict. */
-WA.gradeVerdict = function (g) {
+/* the two-way collapse of the printed five-band scale, at the SAME 60 %
+   threshold. MIRROR: db/schema.sql → wa.grade_mission. */
+WA.gradeMission = function (g) {
   const b = WA.gradeBand(g);
   if (!b) return null;
-  return b.pass ? "pass" : b.id;      /* 'lagging' / 'failed' keep their names */
+  return b.pass ? "complete" : "incomplete";
 };
-/* what a row's verdict IS, whatever it stores: derived from the grade when
+/* what a row's mission IS, whatever it stores: derived from the grade when
    there is one, read off the row when there is not. One function, so the
-   badge, the CSV and the count cannot disagree. */
-WA.rowVerdict = function (e) {
+   cell, the CSV and the count cannot disagree. */
+WA.rowMission = function (e) {
   if (!e) return null;
   if (e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade))) {
-    return WA.gradeVerdict(e.grade);
+    return WA.gradeMission(e.grade);
   }
-  return WA.verdict(e.verdict) ? e.verdict : null;
+  return WA.mission(e.mission) ? e.mission : null;
+};
+/* is this row's mission DERIVED (and therefore not editable)? */
+WA.missionDerived = function (e) {
+  return !!e && e.grade !== null && e.grade !== undefined && e.grade !== "" &&
+         isFinite(Number(e.grade));
 };
 
 /* ── THE DEBRIEF LAG, WHICH IS THE REALITY THE DIRECTIVE NAMES ─────────────
    «δεκτο το null, γιατι καποιες φορες αργει το debriefing». A flown row with
-   no grade, not NG, and no verdict is a row WAITING FOR ITS DEBRIEF — never an
+   no grade, not NG, and no mission is a row WAITING FOR ITS DEBRIEF — never an
    error, never a legacy leftover, never something that blocks a save. It is
    shown quietly, and it goes amber once it has been waiting a while, because
-   at some point the quiet fact becomes a thing to chase. */
+   at some point the quiet fact becomes a thing to chase. A hand-set mission
+   ENDS the wait: the squadron characterised the flight, it just did so without
+   a percentage. (An exams row has no mission key, so `e.mission` is undefined
+   there and the same function reads it correctly.) */
 WA.DEBRIEF_AMBER_DAYS = 7;
 WA.awaitingDebrief = function (e) {
   if (!e || e.ng) return false;
   const hasGrade = e.grade !== null && e.grade !== undefined && e.grade !== "" &&
                    isFinite(Number(e.grade));
-  return !hasGrade && !WA.verdict(e.verdict) && !!String(e.date || "").trim();
+  return !hasGrade && !WA.mission(e.mission) && !!String(e.date || "").trim();
 };
 /* how many days ago that flight was — null when the date is unusable */
 WA.daysAgo = function (d) {
