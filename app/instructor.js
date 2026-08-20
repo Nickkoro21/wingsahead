@@ -89,7 +89,12 @@ WA.renderInstructor = async function (view, me, opts) {
        eighty of them would stop being readable at the moment it matters. */
     const logLine = ["flights", "fs"].map((k) => {
       const list = Array.isArray(rec[k]) ? rec[k] : [];
-      if (!list.length) return "";
+      /* ROUND 13 — an empty log is no longer an empty line: the syllabus is
+         pre-seeded, so "nothing flown" has a denominator and the card says it */
+      if (!list.length) {
+        return `<div class="line">${esc(WA.secLabel(k))}: <span class="k">nothing flown yet &mdash; all ${
+          esc(WA.slotCount(k))} sorties of the flow chart owed</span></div>`;
+      }
       const hrs = list.reduce((a, e) => a + (isFinite(Number(e.duration)) ? Number(e.duration) : 0), 0);
       const lag = list.filter(WA.awaitingDebrief).length;
       const per = WA.TRACKS.map((t) => {
@@ -100,16 +105,28 @@ WA.renderInstructor = async function (view, me, opts) {
          counted only hours would let the one fact an instructor most needs to
          see pass unmentioned. */
       const bad = list.filter((e) => WA.rowMission(e) === "incomplete").length;
+      /* ROUND 13 — how much of the printed flow chart is still owed. An
+         instructor about to brief a student is asking where in the stage they
+         are, and "12 flown" cannot answer that without its denominator. */
+      const cn = WA.stateCounts(k, list);
       return `<div class="line">${esc(WA.secLabel(k))}: ${per}` +
         (hrs > 0 ? ` <span class="k">· ${esc(Math.round(hrs * 10) / 10)} h</span>` : "") +
+        ` <span class="k" title="${esc("Of the " + WA.slotCount(k) +
+          " sorties the printed flow chart prescribes here, " + cn.done + " are complete and " +
+          cn.owed + " have nothing recorded against them yet")}">· ${esc(cn.owed)} of ${
+          esc(WA.slotCount(k))} owed</span>` +
         (lag ? ` <span class="k" title="Flown, and the debrief has not landed yet — the grade is genuinely not known, not missing">· ${esc(lag)} awaiting a grade</span>` : "") +
         (bad ? ` <span class="k" title="Missions that were not completed — read from the grade where there is one, said by the squadron where there is not">· ${esc(bad)} incomplete</span>` : "") +
         `</div>`;
     }).join("") +
     ((rec.lessons || []).length || (rec.exams || []).length
-      ? `<div class="line">Ground: <b>${esc((rec.lessons || []).length)}</b> lesson${
-          (rec.lessons || []).length === 1 ? "" : "s"} · <b>${esc((rec.exams || []).length)}</b> exam${
-          (rec.exams || []).length === 1 ? "" : "s"}</div>`
+      ? (() => {
+          const cl = WA.stateCounts("lessons", rec.lessons);
+          const cx = WA.stateCounts("exams", rec.exams);
+          return `<div class="line">Ground: <b>${esc(cl.done)}</b> of ${
+            esc(WA.slotCount("lessons"))} lessons · <b>${esc(cx.done)}</b> of ${
+            esc(WA.slotCount("exams"))} exams</div>`;
+        })()
       : "");
     /* one line per entry — items inside an entry are separated by · , so the
        entries themselves must not be, or a multi-item FAIL reads as three */

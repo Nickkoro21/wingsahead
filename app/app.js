@@ -683,10 +683,10 @@ WA.SECTIONS_META = {
   cef:          { label: "CEF", tip: "CEF = Εξέταση Καταλληλότητας (evaluation with a Squadron Evaluator) — flown after failures, so fewer is better. Each entry names the stage flight that triggered it and the evaluator who conducted it." },
   /* ROUND 12 — THE LOG TABLES. Four sections, ten blocks on screen: the band
      is the section, the track is on the row, and the pair is one table. */
-  flights:      { label: "Flights", tip: "The flight log — every sortie flown in the AIRCRAFT, one row each: the flight, the date, the instructor, how long it lasted and the grade. The grade may be left empty: a debrief sometimes takes a while, and the row says «awaiting debrief» rather than pretending the flight did not happen. Split into the four tracks of the syllabus; the eight checkrides are recorded in the Evaluations section, where the syllabus order applies to them." },
-  fs:           { label: "F/S", tip: "The same log for the SIMULATOR — every F/S sortie, in the same four tracks. Sim hours and flight hours are counted separately by the squadron, which is why they are two logs and not one." },
-  lessons:      { label: "Ground lessons", tip: "The ground academics — the twelve theory groups of the programme and the courses inside them. A lesson is a BLOCK, so it can carry an end date; the periods box left empty means the FULL course, and «absent» is how a class the student missed is recorded from their own side. A lesson is attended, not scored, so there is no grade here." },
-  exams:        { label: "Ground exams", tip: "The eight ground-exam groups of the syllabus. The grade may be left empty until the result is in. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and belong under Ground lessons: that is where the squadron's scheduler counts them.)" },
+  flights:      { label: "Flights", tip: "The flight log — every sortie of the printed flow chart is a row here FROM THE FIRST DAY (round 13): grey while it is owed, light green once something is written in it, green when the row is complete and the mission was completed, mustard when it is beyond the syllabus's one planned pass (a repeat, an FCF, a CEF, a same-day re-fly). The grade may be left empty: a debrief sometimes takes a while, and the row says «awaiting debrief» rather than pretending the flight did not happen. Split into the four tracks; the eight checkrides are recorded in the Evaluations section, where the syllabus order applies to them. An untouched row is STORED NOWHERE — the record keeps only what actually happened." },
+  fs:           { label: "F/S", tip: "The same log for the SIMULATOR — its own flow-chart sorties pre-seeded in the same four tracks, in the same four colours. Sim hours and flight hours are counted separately by the squadron, which is why they are two logs and not one." },
+  lessons:      { label: "Ground lessons", tip: "The ground academics — the twelve theory groups of the programme and all 47 courses inside them, present as rows from the first day and grouped by their theory group. A lesson is a BLOCK, so it can carry an end date. A lesson is attended, not scored, so there is no grade here and no instructor. An untouched course is stored nowhere; a course the catalogue does not know goes in as an extra." },
+  exams:        { label: "Ground exams", tip: "The eight ground-exam groups of the syllabus, present as rows from the first day: grey until the exam is sat, light green on the date alone, green once the result is in. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and belong under Ground lessons: that is where the squadron's scheduler counts them.)" },
 };
 WA.secLabel = function (k) { return (WA.SECTIONS_META[k] || {}).label || k; };
 WA.secTip = function (k) { return (WA.SECTIONS_META[k] || {}).tip || ""; };
@@ -1040,9 +1040,313 @@ WA.slotEmpty = function (sec, e) {
   }
   return false;
 };
-/* the entries of one section that actually happened (slots excluded) */
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 13 — THE PRE-SEEDED SYLLABUS SLOTS.
+   ──────────────────────────────────────────────────────────────────────────
+   THE REVIEW (2026-08-20): «Οπως ειναι τωρα πρεπει να καταχωρησει καθε πτηση
+   ο μαθητης. Εγω θελω να εχουμε ηδη ετοιμες τις πτησεις. Οταν ειναι complete
+   και ολα τα στοιχεια συμπληρωμενα θα γινεται χρωμα πρασινο. Οτι εχει
+   ξεκινισει να γραφει ο μαθητης αντιστοιχο ανοιχτο πρασινο. Οτι χρωσταει
+   καποια αποχρωση οπως γκρι. Οτι ειναι εξτρα θα εχει ενα μουσταρδι χρωμα ας
+   πουμε. Ομοιως για ολες τις κατηγοριες. Και ετοιμα τα ground lessons.»
+
+   THE PATTERN IS THE SOLO-SLOTS PATTERN, SCALED. solo_flights has rendered
+   eight fixed slots since round 5 and stores only what was flown; the same
+   idea now covers the four log sections — 125 flight/simulator sorties, 47
+   ground courses and 8 ground exams are drawn as rows FROM THE FIRST DAY.
+
+   AND THE STORAGE STAYS SPARSE, which is the whole engineering of it. An
+   untouched slot stores NOTHING: buildPayload drops it, so the server never
+   receives it, wa.slot_empty needs no new branch, the CO-entry arithmetic
+   ("3 of 80 entered by the CO") is not diluted by 180 placeholders nobody
+   reported, and the payload caps are exactly where they were.
+
+   THREE FUNCTIONS DECIDE EVERYTHING, and every surface calls them:
+     WA.slotKey     — WHICH slot a row could occupy (null = an extra)
+     WA.claims      — WHO actually occupies it (first row in stored order)
+     WA.rowState    — done · started · owed · extra
+   ONE ROW PER SLOT: a stored syllabus row CLAIMS its slot and no placeholder
+   is drawn beside it; a SECOND row for the same sortie is an EXTRA, because
+   the slot is the syllabus's ONE planned pass and a re-fly is not it.
+   NO SERVER CHANGE: the slots are a RENDER, never storage. The catalogues
+   live in app/items-catalog.js and the server keeps no second copy.
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.SLOT_SECTIONS = ["flights", "fs", "lessons", "exams"];
+WA.hasSlots = function (sec) { return WA.SLOT_SECTIONS.indexOf(sec) >= 0; };
+
+/* THE FOUR STATES, in the user's own terms. `label` is the word every count,
+   legend, CSV cell and tooltip uses — one vocabulary, so the colour on screen
+   and the word on paper can never say different things. */
+WA.ROW_STATES = [
+  { id: "done", label: "done", el: "πράσινο",
+    tip: "Complete — everything the row asks for is filled in AND the mission was completed: the date, the instructor, the duration, and a grade of 60 % or better (or a mission the squadron characterised complete without a percentage). A non-graded (NG) flight is done on its date, its instructor and its duration: nobody was in a position to score it. A ground lesson is done on its date, a ground exam on its date AND its result." },
+  { id: "started", label: "started", el: "ανοιχτό πράσινο",
+    tip: "Started — the row has been written in, but not everything is there yet. A flight with a date and no instructor, a flight still waiting for its debrief, an exam sat but not marked. It is not a problem and it blocks nothing; it is work in progress." },
+  { id: "owed", label: "owed", el: "γκρι",
+    tip: "Owed — the syllabus prescribes this sortie / course / exam and nothing has been recorded against it yet. It is a row of the printed flow chart, not something anybody reported, and NOTHING IS STORED for it until the first keystroke." },
+  { id: "extra", label: "extra", el: "μουστάρδι",
+    tip: "Extra — beyond the syllabus's one planned pass: a repeat, an FCF, a CEF, anything filed as Other, a same-day re-fly (#2 and up), a second row for a sortie whose slot is already taken, or a code the generated catalogue does not know. It is a real flight and it counts in the hours; it simply is not the planned pass." },
+];
+WA.rowStateDef = function (id) {
+  return WA.ROW_STATES.find((s) => s.id === id) || WA.ROW_STATES[2];
+};
+
+/* THE SLOT CATALOGUE OF ONE SECTION, in syllabus order — the flow chart for
+   the two flight logs (MINUS the eight checkrides, which are recorded in the
+   Evaluations section and must not exist twice), the 47 (group, course) pairs
+   for the lessons and the 8 exam groups. Built once and cached: it is derived
+   from the generated catalogue and cannot change while the page is open. */
+WA.slotDefs = function (sec) {
+  WA._slotDefs = WA._slotDefs || {};
+  if (WA._slotDefs[sec]) return WA._slotDefs[sec];
+  const out = [];
+  if (sec === "flights" || sec === "fs") {
+    for (const t of WA.TRACKS) {
+      for (const s of WA.logPickList(sec, t)) {
+        out.push({ key: t + "|" + s.c, sec, track: t, code: s.c, sortie: s });
+      }
+    }
+  } else if (sec === "lessons") {
+    for (const g of WA.groundGroups()) {
+      for (const c of (g.courses || [])) {
+        out.push({ key: g.g + "|" + c.c, sec, group: g.g, course: c.c, grp: g, crs: c });
+      }
+    }
+  } else if (sec === "exams") {
+    for (const x of WA.examList()) out.push({ key: x.id, sec, exam: x.id, def: x });
+  }
+  out.forEach((d, i) => { d.o = i; });
+  WA._slotDefs[sec] = out;
+  return out;
+};
+WA.slotIndex = function (sec) {
+  WA._slotIx = WA._slotIx || {};
+  if (WA._slotIx[sec]) return WA._slotIx[sec];
+  const ix = {};
+  for (const d of WA.slotDefs(sec)) ix[d.key] = d;
+  WA._slotIx[sec] = ix;
+  return ix;
+};
+/* how many slots one scope holds — a track of a log, or the whole section */
+WA.slotCount = function (sec, track) {
+  return WA.slotDefs(sec).filter((d) => track == null || d.track === track).length;
+};
+
+/* WHICH SLOT THIS ROW COULD OCCUPY — null when the row is an EXTRA by nature.
+   A flight qualifies only as the syllabus's planned pass: kind `syllabus`,
+   seq 1, and a code the track's own flow-chart list knows. A same-day re-fly
+   (seq > 1), a repeat / FCF / CEF / other, and an off-catalogue code are all
+   extras, and so is a course that is not a course OF ITS GROUP (the join key
+   is the PAIR — OJT is a course of four different groups). */
+WA.slotKey = function (sec, e) {
+  if (!e || typeof e !== "object") return null;
+  if (sec === "flights" || sec === "fs") {
+    if ((e.kind || "syllabus") !== "syllabus") return null;
+    if (Math.round(Number(e.seq) || 1) !== 1) return null;
+    const code = WA.normCode(e.sortie);
+    if (!code || !e.track) return null;
+    const k = e.track + "|" + code;
+    return WA.slotIndex(sec)[k] ? k : null;
+  }
+  if (sec === "lessons") {
+    const c = WA.normLine(e.course);
+    if (!e.group || !c) return null;
+    const k = e.group + "|" + c;
+    return WA.slotIndex(sec)[k] ? k : null;
+  }
+  if (sec === "exams") {
+    const x = WA.normLine(e.exam);
+    return (x && WA.slotIndex(sec)[x]) ? x : null;
+  }
+  return null;
+};
+/* WHO OCCUPIES EACH SLOT — in TWO PASSES, and the order of the passes is the
+   whole of the rule.
+     1. A ROW SOMEBODY HAS WRITTEN IN takes the slot, first one in stored
+        order. A second written row naming the same sortie is an EXTRA: the
+        slot is the syllabus's ONE planned pass and a re-fly is not it.
+     2. Only then may an untouched PLACEHOLDER take a slot still free — and
+        there the LAST one wins, because the placeholder that arrives later is
+        the one the student just created by hand: picking IN190 on a row they
+        added must move THAT row into the IN190 slot, not make it vanish
+        behind the seeded one. (The same doctrine as the evaluations section's
+        "an imported evaluation that is finally identified goes HOME".)
+   Stored order never changes under a half-typed row, so both passes are
+   deterministic. A placeholder that ends up claiming nothing is REDUNDANT: it
+   is drawn nowhere and stored nowhere — see WA.slotOwed. */
+WA.claims = function (sec, list) {
+  const arr = Array.isArray(list) ? list : [];
+  const taken = {}, claimed = new Array(arr.length).fill(false),
+        keys = new Array(arr.length);
+  for (let i = 0; i < arr.length; i++) keys[i] = WA.slotKey(sec, arr[i]);
+  for (let i = 0; i < arr.length; i++) {
+    const k = keys[i];
+    if (!k || WA.slotUntouched(sec, arr[i]) || taken[k]) continue;
+    taken[k] = true; claimed[i] = true;
+  }
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const k = keys[i];
+    if (!k || !WA.slotUntouched(sec, arr[i]) || taken[k]) continue;
+    taken[k] = true; claimed[i] = true;
+  }
+  return { claimed, keys, taken };
+};
+
+/* HAS ANYBODY TOUCHED THIS ROW? — the shape test, and the one the sparse rule
+   rides on: a row carrying NOTHING BUT ITS SLOT IDENTITY is a placeholder the
+   form drew, and it is never stored, never counted and never stamped.
+   `legacy` and `entered_by` are disqualifiers on purpose: a row an older form
+   left incomplete, or one the CO entered, is a REPORT — it must never be
+   mistaken for a placeholder and silently dropped on the next save. */
+WA.slotUntouched = function (sec, e) {
+  if (!e || typeof e !== "object") return false;
+  if (e.legacy || e.entered_by) return false;
+  const empty = (v) => v === null || v === undefined || String(v) === "";
+  /* `ng` IS DELIBERATELY NOT IN THIS LIST, and it is the round-9 solo ruling
+     applied to a log row: ON AN UNFLOWN SLOT, NG IS AN ANSWER ABOUT A FLIGHT
+     THAT HAS NOT HAPPENED. Counting it as a touch would make the row travel,
+     and the save would then refuse a DATE the student never meant to give —
+     after one tap on a chip. So the tap is remembered on the row (the cell
+     draws it), the slot stays OWED and stores nothing, and the answer is
+     carried into the record by the first keystroke that makes the flight real.
+     The solo section reaches the same place with _ngwant; here the value
+     itself can hold the answer, because nothing else reads it. */
+  if (sec === "flights" || sec === "fs") {
+    return empty(e.date) && empty(e.instructor) && empty(e.instructor_oid) &&
+           empty(e.duration) && empty(e.grade) && empty(e.mission);
+  }
+  if (sec === "lessons") return empty(e.date) && empty(e.end_date);
+  if (sec === "exams") return empty(e.date) && empty(e.grade);
+  return false;
+};
+/* AN OWED ROW: it carries a syllabus identity and NOTHING ELSE. That is the
+   whole test, and it deliberately does not ask whether the row claims its slot
+   — because the answer is the same either way: the row stores nothing, counts
+   nothing and is stamped by nobody. A placeholder that claims is DRAWN, grey,
+   as the slot; a redundant one (its slot already taken by a written row) is
+   drawn nowhere. Both are dropped from the payload by the same line. */
+WA.slotOwed = function (sec, e) {
+  return !!WA.slotKey(sec, e) && WA.slotUntouched(sec, e);
+};
+
+/* IS THIS ROW COMPLETE? — «Οταν ειναι complete και ολα τα στοιχεια
+   συμπληρωμενα». Two conditions, not one: everything filled AND the mission
+   completed. A flight flown, graded 48 % and re-flown is not "done" — it is
+   started, and the green belongs to the pass. NG is the named exception: a
+   flight nobody could score is complete on its date, its instructor and its
+   duration, because there is no grade to wait for. */
+WA.rowDone = function (sec, e) {
+  if (!e || typeof e !== "object") return false;
+  const has = (v) => !(v === null || v === undefined || String(v).trim() === "");
+  const isD = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ""));
+  if (sec === "flights" || sec === "fs") {
+    if (!isD(e.date) || !has(e.instructor) || !has(e.duration)) return false;
+    if (e.ng) return true;
+    return WA.rowMission(e) === "complete";
+  }
+  if (sec === "lessons") return isD(e.date);
+  if (sec === "exams") return isD(e.date) && has(e.grade) && isFinite(Number(e.grade));
+  return false;
+};
+/* THE ONE VERDICT every colour, count, legend and CSV cell reads */
+WA.rowState = function (sec, e, claimed) {
+  if (WA.slotOwed(sec, e)) return "owed";
+  if (!claimed) return "extra";
+  return WA.rowDone(sec, e) ? "done" : "started";
+};
+
+/* THE FOUR COUNTS OF ONE SCOPE — a track of a log, or a whole section.
+   OWED IS COMPUTED FROM THE CATALOGUE (slots − claimed), never counted off the
+   rows: the student's form carries the placeholders and the CO's record does
+   not, and both must reach the same number. Hours and the debrief lag count
+   the TOUCHED rows only — a slot nobody has flown has flown no hours. */
+WA.stateCounts = function (sec, list, track) {
+  const arr = Array.isArray(list) ? list : [];
+  const c = WA.claims(sec, arr);
+  const out = { done: 0, started: 0, owed: 0, extra: 0, hours: 0, lag: 0, n: 0 };
+  let claimedN = 0;
+  for (let i = 0; i < arr.length; i++) {
+    const e = arr[i];
+    if (track != null && (e.track || "") !== track) continue;
+    const st = WA.rowState(sec, e, c.claimed[i]);
+    if (st === "owed") continue;
+    if (c.claimed[i]) claimedN++;
+    out[st]++;
+    out.n++;
+    const h = Number(e.duration);
+    if (isFinite(h)) out.hours += h;
+    /* THE LAG BELONGS TO THE SECTIONS THAT HAVE A GRADE. A ground lesson is
+       ATTENDED, not scored, so it is never "awaiting" anything — the round-12
+       CSV made exactly this distinction and the counters must agree with it,
+       or every dated lesson in the squadron would read as a chase. */
+    if (sec !== "lessons" && WA.awaitingDebrief(e)) out.lag++;
+  }
+  out.hours = Math.round(out.hours * 10) / 10;
+  out.owed = Math.max(0, WA.slotCount(sec, track == null ? null : track) - claimedN);
+  return out;
+};
+/* ── THE DISPLAY ORDER, AND IT IS ONE FUNCTION ────────────────────────────
+   THE SYLLABUS ORDER IS THE BACKBONE: every slot of the catalogue in the order
+   the printed flow chart (or the printed programme) lays the stage out in,
+   each carrying the row that claims it or nothing at all when it is OWED —
+   then the EXTRAS, which have no place in the chart to sit in, oldest first.
+   That last half is round 12b's date sort, unrevoked and now scoped to the
+   rows it was always the right rule for.
+   The student's form, the CO's drill-down and the printed brief all call this,
+   so the three cannot show the same record in three different orders.
+     → [{ def, e, i, state }]   i = the STORED index, -1 when nothing claims it */
+WA.slotRows = function (sec, list, track) {
+  const arr = Array.isArray(list) ? list : [];
+  const c = WA.claims(sec, arr);
+  const by = {}, extras = [];
+  arr.forEach((e, i) => {
+    if (track !== undefined && track !== null && (e.track || "") !== track) return;
+    if (c.claimed[i]) { by[c.keys[i]] = { e, i }; return; }
+    /* a REDUNDANT placeholder — its slot is already held by a written row — is
+       drawn nowhere: it is not an extra, it is a row nobody ever wrote in */
+    if (WA.slotOwed(sec, e)) return;
+    extras.push({ e, i });
+  });
+  extras.sort((a, b) => {
+    const da = String(a.e.date || "").trim(), db = String(b.e.date || "").trim();
+    if (!da !== !db) return da ? -1 : 1;             /* dateless last */
+    if (da !== db) return da < db ? -1 : 1;
+    const sa = Number(a.e.seq || 1), sb = Number(b.e.seq || 1);
+    if (sa !== sb) return sa - sb;
+    return a.i - b.i;                                 /* stable: stored order */
+  });
+  const out = [];
+  for (const d of WA.slotDefs(sec)) {
+    if (track !== undefined && track !== null && d.track !== track) continue;
+    const hit = by[d.key];
+    out.push({ def: d, e: hit ? hit.e : null, i: hit ? hit.i : -1,
+               state: hit ? WA.rowState(sec, hit.e, true) : "owed" });
+  }
+  for (const x of extras) out.push({ def: null, e: x.e, i: x.i, state: "extra" });
+  return out;
+};
+
+/* "done 4 · started 1 · owed 27 · extra 2 · 6.4 h" — one line, everywhere.
+   The hours belong to the two flight logs and the lag word to the section that
+   is waiting (a debrief for a flight, a result for an exam). */
+WA.stateLine = function (sec, cn) {
+  const bits = ["done " + cn.done, "started " + cn.started, "owed " + cn.owed];
+  if (cn.extra) bits.push("extra " + cn.extra);
+  if ((sec === "flights" || sec === "fs") && cn.hours > 0) bits.push(cn.hours + " h");
+  if (cn.lag) bits.push(cn.lag + (sec === "exams" ? " awaiting a result" : " awaiting a grade"));
+  return bits.join(" · ");
+};
+
+/* the entries of one section that actually happened (slots excluded).
+   ROUND 13 — the four log sections join the rule the two fixed sections have
+   followed since round 5: an OWED slot is not an entry, so it counts for
+   nothing anywhere — not in the CO-entry arithmetic, not in the exports, not
+   in the counters. (A stored record never CONTAINS one; the student's form
+   does, and this is the function that keeps the two saying the same number.) */
 WA.filled = function (sec, list) {
-  return (Array.isArray(list) ? list : []).filter((e) => !WA.slotEmpty(sec, e));
+  const arr = Array.isArray(list) ? list : [];
+  if (!WA.hasSlots(sec)) return arr.filter((e) => !WA.slotEmpty(sec, e));
+  return arr.filter((e) => !WA.slotOwed(sec, e));
 };
 
 WA.migrateRecord = function (rec) {
@@ -1603,16 +1907,25 @@ WA.daysAgo = function (d) {
   const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   return Math.round((today - then) / 86400000);
 };
-/* the chip itself — quiet by default, amber once it has waited */
-WA.debriefChip = function (e) {
+/* the chip itself — quiet by default, amber once it has waited.
+   ROUND 13 residual (found while re-rendering the CO's exam table): the chip is
+   SECTION-AWARE, like WA.debriefWord has been since 12b. A ground exam awaits a
+   RESULT, not a debrief — nobody debriefs a written paper — and the CO's exam
+   table was the one surface still saying the flight word. 12b's own note
+   claimed this surface already agreed; it did not, and now it does. */
+WA.debriefChip = function (e, sec) {
   if (!WA.awaitingDebrief(e)) return "";
   const n = WA.daysAgo(e.date);
   const late = n !== null && n >= WA.DEBRIEF_AMBER_DAYS;
+  const exam = sec === "exams";
+  const word = exam ? "awaiting a result" : "awaiting debrief";
   const tip = late
-    ? "Flown " + n + " days ago and still without a grade — the debrief has not landed yet"
-    : "The flight is recorded; its grade has not been written yet. That is expected — the debrief sometimes takes a while.";
+    ? (exam ? "Sat " + n + " days ago and the result has still not been written"
+            : "Flown " + n + " days ago and still without a grade — the debrief has not landed yet")
+    : (exam ? "The exam is recorded; its result has not been written yet."
+            : "The flight is recorded; its grade has not been written yet. That is expected — the debrief sometimes takes a while.");
   return `<span class="lagchip${late ? " is-late" : ""}" title="${esc(tip)}"
-    aria-label="${esc(tip)}">awaiting debrief${late ? " · " + n + " d" : ""}</span>`;
+    aria-label="${esc(tip)}">${esc(word)}${late ? " · " + n + " d" : ""}</span>`;
 };
 /* the same fact for CSV / plain text. 12b verify finding 3 — a ground EXAM
    awaits a RESULT, not a debrief: every other surface already says so

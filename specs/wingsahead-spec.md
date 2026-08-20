@@ -2114,6 +2114,308 @@ keys they name were re-run against the table form in 12b — see below — and t
    *"the scheduler said incomplete, the debrief said 72"* — that is a second key
    and a deliberate decision, not an accident of this one.
 
+## 4m. Round 13 (2026-08-20) — PRE-SEEDED SYLLABUS SLOTS, AND FOUR COLOURS
+
+### THE REVIEW, VERBATIM (2026-08-20 evening)
+
+> «Οπως ειναι τωρα πρεπει να καταχωρησει καθε πτηση ο μαθητης. Εγω θελω να εχουμε
+> ηδη ετοιμες τις πτησεις. Οταν ειναι complete και ολα τα στοιχεια συμπληρωμενα
+> θα γινεται χρωμα πρασινο. Οτι εχει ξεκινισει να γραφει ο μαθητης αντιστοιχο
+> ανοιχτο πρασινο. Οτι χρωσταει καποια αποχρωση οπως γκρι. Οτι ειναι εξτρα θα
+> εχει ενα μουσταρδι χρωμα ας πουμε. Ομοιως για ολες τις κατηγοριες. Και ετοιμα
+> τα ground lessons.»
+
+### THE SENTENCE ROUND 12 WROTE, AND WHY IT IS REVERSED
+
+Round 12 put it in the generated catalogue itself, in capitals:
+
+> *«NOTHING IS PRE-SEEDED FROM THIS. It is the closed list a sortie is CHOSEN
+> from, never a skeleton of rows … so `wa.slot_empty` needs no branch for these
+> sections.»*
+
+That was the right engineering and the wrong product. A student who has to type
+the flow chart back in before they can report against it is being asked to do the
+syllabus's own work, and the one question the log is for — **what is still
+owed** — could not be asked of a table that only contains what happened. The
+review reverses the sentence and keeps every reason behind it: **the skeleton is
+a RENDER, and an untouched slot is still stored nowhere.**
+
+### THE PATTERN IS THE SOLO-SLOTS PATTERN, SCALED
+
+`solo_flights` has drawn eight fixed rows since round 5 and stored only the ones
+that were flown. Round 13 applies the same idea to the four log sections:
+
+| section | slots | where they come from |
+|---|---|---|
+| `flights` | **77** — contact 32 · instrument 12 · formation 21 · nav 12 | `WA_LOG_SORTIES.flights`, **minus the eight checkrides** |
+| `fs` | **48** — contact 18 · instrument 18 · formation 5 · nav 7 | `WA_LOG_SORTIES.fs` |
+| `lessons` | **47** | the 12 theory groups × their courses, join key **(group, course)** |
+| `exams` | **8** | `WA_EXAMS` |
+
+The checkrides are excluded on purpose and it is the round-12 rule unchanged: a
+checkride is recorded in **Evaluations**, where the syllabus order and the
+pass-attempt rule apply to it, and two rows for one flight would be two grades
+that can disagree.
+
+### THE THREE FUNCTIONS (app.js — one vocabulary, every surface)
+
+- **`WA.slotKey(sec, e)`** — *which* slot a row could occupy, `null` = an extra
+  by nature. A flight qualifies only as the syllabus's **one planned pass**:
+  `kind:'syllabus'`, `seq 1`, and a code its track's flow-chart list knows.
+- **`WA.claims(sec, list)`** — *who* occupies it, in **two passes**:
+  1. a row somebody has **written in** takes the slot — first in stored order,
+     so a second written row naming the same sortie is an **extra**;
+  2. only then may an untouched **placeholder** take a slot still free, and
+     there the **last** one wins — picking `FO190` on a row the student just
+     added must move *that* row into the FO190 slot, not make it vanish behind
+     the seeded one. (Same doctrine as *«an imported evaluation that is finally
+     identified goes HOME»* in the evaluations section.)
+  A placeholder that ends up claiming nothing is **redundant**: drawn nowhere,
+  stored nowhere.
+- **`WA.rowState(sec, e, claimed)`** → `done · started · owed · extra`.
+
+Plus `WA.slotRows(sec, list, track)` — the **one display order** (below) that
+the student's form, the CO's drill-down and the printed brief all call, and
+`WA.stateCounts(sec, list, track)`, which computes **owed from the CATALOGUE**
+(`slots − claimed`) rather than by counting rows: the student's form carries the
+placeholders and the CO's record does not, and both must reach the same number.
+They do — verified live, `done 2 · started 0 · owed 75 · extra 2 · 4 h` on both
+sides of the same record.
+
+### THE COLOUR CONTRACT
+
+| state | user's word | token | means |
+|---|---|---|---|
+| `done` | πράσινο | `--st-done` = `--good` @ .18/.15 | everything filled in **and** the mission completed |
+| `started` | ανοιχτό πράσινο | `--st-started` = `--good` @ .075/.06 | written in, not finished |
+| `owed` | γκρι | `--st-owed` (neutral wash) | the syllabus prescribes it, nothing recorded |
+| `extra` | μουστάρδι | `--st-extra` = **`--mustard-rgb`** @ .20/.15 | beyond the planned pass |
+
+**Done is two conditions, not one.** A flight is done on `date + instructor +
+duration` **and** `WA.rowMission(e) === 'complete'` — i.e. a grade ≥ 60 or a
+mission the squadron hand-set as complete. A flight graded 48 and re-flown is
+**started**, not done: the green belongs to the pass. **NG is the named
+exception** — a flight nobody could score is done on date + instructor +
+duration, because there is no grade to wait for. A lesson is done on its **date**
+(it is attended, not scored); an exam on **date + result**.
+
+**Mustard is its own token and deliberately not `--bad`** — an FCF, a CEF or a
+re-fly is a real flight the squadron flew, not a failure — **and not `--warn`**,
+which already means *fix this* on that screen. Defined once per mode beside the
+`--cat-*` track colours, so a state keeps its colour across all eight palettes.
+
+**The colour is painted on the `<tr>`, never on its cells**, because `.ftbl td`
+carries the hover wash and a state on the cells would swallow it. **A row is
+never colour alone**: its last cell carries the state as a **word** (`.stchip`),
+so a monochrome print, a colour-blind reader and a screen reader get the same
+answer as the eye. A **legend** line names the four in the user's own terms under
+each section header (one per section, not per block — ten legends would be
+noise), and each block header counts them: `done X · started Y · owed Z · extra
+N · h · awaiting`.
+
+*Contrast, measured live in all eight palettes:* every state chip and legend chip
+holds **≥ 4.66:1**. Two findings were fixed by the measurement rather than by
+eye: the dark mustard `201,162,39` measured **3.99** on Tidal, so the dark token
+is the brighter, more olive **`212,190,70`**; and the state chip is
+**transparent**, because painting its own wash over the row's identical wash
+doubled it (0.15 over 0.15 = 0.28) and pushed `done`/`started` to 4.30 / 4.22 in
+Slate and Ridgeline. **Recorded, not hidden:** in **Mesa** `--warn` is itself a
+dark mustard (109,90,0) and the light `--mustard` (107,84,0) is nearly the same
+colour. They never share a column — `--warn` is a cell chip beside a value,
+`--mustard` a row wash and the end-of-row chip — and each carries its own word. A
+one-line override in the mesa block is the fix if it ever bothers anybody.
+
+### THE ORDERING CHANGE — **FLAG FOR THE USER**
+
+**The syllabus order is now the backbone.** Slot rows render first, in
+flow-chart (and, for the ground blocks, printed-programme) order, and **a slot
+does not move when its date is filled in** — its place is its place in the
+syllabus. **Round 12b's date sort is not revoked; it now governs the EXTRAS**,
+which have no place in the chart to sit in and render after the slots, oldest
+first, dateless last, then `seq`, then stored order.
+
+> **A mid-stage student will see their rows in a different order than
+> yesterday — by syllabus, not by date.** That is the intended reading order for
+> "how far through the stage am I", and it is the one thing in this round a
+> reasonable person could want the other way. If the date order is wanted back
+> for the slots too, it is one comparator in `WA.slotRows`.
+
+### THE SPARSE RULE — WHERE IT LIVES, AND WHAT IT BUYS
+
+One line in `buildPayload`, three times:
+
+```js
+const owedRow = (k, e) => WA.slotOwed(k, e);      //  slotKey && nothing else
+… d[k].forEach((e, i) => { if (owedRow(k, e)) return; … });
+```
+
+`WA.slotOwed` deliberately does **not** ask whether the row claims its slot: the
+answer is the same either way — the row stores nothing, counts nothing, is
+stamped by nobody. `legacy` and `entered_by` are **disqualifiers** inside
+`WA.slotUntouched`, so a row an older form left incomplete, or one the CO
+entered, can never be mistaken for a placeholder and silently dropped.
+
+What it buys, all four verified live:
+
+1. **The record stays exactly as sparse as it was.** 182 rows on screen → **5
+   stored**; 48 F/S rows → 1; 47 lessons → 2; 8 exams → 2. A student who touches
+   nothing and presses Save stores `"flights": []`, `"fs": []`, `"lessons": []`,
+   `"exams": []`.
+2. **No server change at all.** `wa.slot_empty` needs no new branch because the
+   server never receives an untouched slot. `db/schema.sql` is **untouched by
+   this round** — see the deployment note below.
+3. **The CO-entry arithmetic is undiluted.** *«1 of 23 entries was entered by the
+   squadron CO»* — not *1 of 203*.
+4. **The payload caps are where they were** (`wa.section_cap` 400/200, the
+   400 000-byte ceiling): what travels is what happened.
+
+**It works in reverse too.** A slot row cannot be *deleted* — the flow chart
+prescribes it whether or not it has been flown — so the ✕ is replaced on a slot
+row by a **⌫ that clears it back to owed** (the round-5 `soloEmptyReset` idiom,
+given a button). Verified: cleared → grey, stays in its syllabus position, and
+the next save takes it **out** of storage (`flights` 5 → 4).
+
+### WHAT ELSE CHANGED
+
+- **Slot rows print their identity, they do not offer it.** The sortie / group ·
+  course / exam is the row's identity, not one of its answers, so it is a label
+  with the whole syllabus line in its tooltip (name, Training Section, prescribed
+  hours, night, solo candidate). **Kind is fixed to `Syllabus`** on a slot row —
+  a slot of the flow chart *is* the planned pass by definition; a repeat, an FCF
+  or a CEF is an EXTRA row, reached by **↻ same-day re-fly** or **+ Add an extra
+  flight**.
+- **Duration is not prefilled into a slot** (that would make it touched); the
+  syllabus hours show as the box's **placeholder** instead, which is the better
+  behaviour anyway.
+- **A block opens** when it holds anything touched; if the whole section is
+  untouched, the **first track** opens, so a fresh student meets their syllabus
+  rather than four closed boxes.
+- **CO drill-down**: the owed rows are drawn from the same catalogue through the
+  same `WA.slotRows`, so the CO's table **is** the student's table — same order,
+  same colours, same counts, plus a **State** column and the legend. The one
+  question the CO actually asks — what is this student still owed — is answered
+  without opening the student's link.
+- **Brief + instructor card**: `· 74 of 77 owed`, `0 of 47 lessons · 0 of 8
+  exams`, and an empty log now says *nothing flown yet — all 77 sorties of the
+  flow chart owed* instead of rendering nothing.
+- **Printed brief**: the four states are **words** — the count in each section
+  heading and a `State` column on every printed row. **The owed rows are not
+  printed one by one**: a photocopied brief of 180 empty lines is not a brief.
+- **Entries CSV** gains **State**. Only three of the four words can ever appear
+  there and that is not an oversight: it is one row per **entry**, and an owed
+  slot is not an entry. **Where the fourth word lives:** the **summary CSV**
+  gains four columns per slot section (`done · started · owed · extra`) plus its
+  denominator — 20 new columns, which is what makes *"how far through the stage
+  is this class"* answerable in a spreadsheet.
+
+### TWO RESIDUALS FOUND IN PASSING (both fixed, both recorded)
+
+1. **`WA.debriefChip` was not section-aware.** 12b's own note claimed *«every
+   other surface already says "awaiting a result"»*; the CO's exam table did not
+   — it said *awaiting debrief* about a written paper. Now `WA.debriefChip(e,
+   sec)` mirrors `WA.debriefWord`.
+2. **The CO could not delete his own entry.** The round-8 "the CO's entries must
+   all still be there" check compared against a baseline taken at load and ran
+   for **both** sides. It exists because nothing in the *student's* UI can drop a
+   locked CO row; on the CO's own form nothing is locked, he may delete his own
+   entry — and, since this round, **clear a slot row he filled in**. Refusing his
+   save with a sentence telling him to ask himself was nonsense. The check is now
+   `for (const sec of (asCO ? [] : SECTIONS))`.
+
+### DEPLOYMENT NOTE — **NO SCHEMA GATE THIS ROUND**
+
+`db/schema.sql` is **not touched**. The slots are a render; the server sees
+exactly the payload it saw in round 12b, and `wa.validate_record`,
+`wa.migrate_record`, `wa.slot_empty`, `wa.entry_count*` and the caps all apply
+unchanged to the rows that *are* stored. **The app can ship on its own**: bump
+the buster (this round: `?v=20260820d → ?v=20260821a`, seven assets) and push.
+The §4l gate still stands for anyone who has not yet applied the round-12
+schema — that is the schema this app needs, and nothing more.
+
+### SELF-VERIFICATION — ROUND 13 (live, local stack, the real form and the real RPCs)
+
+1. **A FRESH student opens with every slot grey.** `owed` = **77 flights · 48
+   F/S · 47 lessons · 8 exams**, `notOwed = 0`, per track **32 / 12 / 21 / 12**
+   aircraft and **18 / 18 / 5 / 7** simulator, and the form reads **clean**
+   (`dirty:false`, the floating Save hidden) — 180 seeded rows do not fabricate
+   an edit.
+2. **The four transitions, on real `input` events**: `owed → started` on the
+   date keystroke (counters flip **owed 32 → 31 · started 1** in the block and
+   the section at once); instructor and duration keep it started; **grade 48
+   leaves it STARTED**; **grade 85 makes it DONE**; **NG on date + instructor +
+   duration makes it DONE**; **⌫ returns it to OWED** and the fingerprint returns
+   to **clean** — typing and undoing lands back where it started.
+3. **NG on an OWED slot is an answer about a flight that has not happened** —
+   the round-9 solo ruling, applied here by leaving `ng` out of
+   `WA.slotUntouched` rather than by a second flag. Tapping NG on a grey row
+   shows the **NG** badge, leaves the row **owed** (counts unchanged, nothing
+   stored, no save refusal about a date the student never meant to give), and
+   the answer is carried into the record by the first real keystroke: date +
+   instructor + duration took the row straight to **done**, `ng:true` and all.
+4. **Extras are mustard and they render after the slots.** ↻ same-day re-fly →
+   `C4101 #2` at the table's end; an `fcf` row with free-text sortie and **no**
+   off-catalogue flag; a lessons extra with an **off-catalogue** course flag; an
+   exams re-sit. A second extra with an earlier date **sorts above** the first,
+   while a slot given a 31/12 date **does not move**.
+5. **Sparse storage proven in `psql`.** 79 form rows → **5** stored, 48 → 1,
+   47 → 2, 8 → 2, exact keys and nothing else; an all-untouched save stores four
+   **empty** arrays; a cleared row **leaves** storage (5 → 4).
+6. **Reload re-renders the states from storage** and the counts are identical to
+   before the save.
+7. **A stored R12b record lands in its slots**: `C4301`(88) **done** in the C4301
+   slot, `C4302`(no grade) **started** in its own, `I4101 kind:repeat` an
+   **extra** at the end of the Instrument table with the `I4101` slot still owed
+   above it, `IN190` **done** among the eight exams — **zero duplicate slot rows**
+   (contact 32 rows, instrument 12 + 1 extra), and the form opens **clean**.
+8. **A hand-added row takes its free slot.** Adding an exams row and picking
+   `FO190` moves *that* row into the FO190 position (8 rows, no stray extra, no
+   duplicate); the seeded placeholder is drawn nowhere and reaches the server
+   nowhere (3 exam rows stored).
+9. **CO on-behalf**: the CO filled the `C4303` slot → stored with
+   `entered_by:'admin'`, and on the owner's own form it renders **in its slot**,
+   green, **locked** (all 7 controls disabled, 🔒 CO) — with *«1 of 23 entries»*,
+   the undiluted arithmetic. The owner then saved and **the CO row survived**.
+10. **CO surfaces**: drill-down headers `done 2 · started 0 · owed 75 · extra 2 ·
+   4 h` — **identical to the student's form**; State column and legend on all
+   four tables; brief lines and instructor card carry the denominator; the
+   printed brief carries the counts and the State word; **entries CSV** State
+   column (`done`/`started`/`extra`) and **summary CSV** 20 new columns
+   (`2;0;75;2;77 · 1;0;47;0;48 · 2;0;45;0;47 · 1;1;6;0;8`).
+11. **Layout and colour**: at **375 px** the page does **not** scroll sideways,
+    rows stay **37 px — one line**, the table scrolls inside its own wrapper; all
+    eight palettes resolve the four washes, and every state/legend chip measures
+    **≥ 4.66:1**.
+12. **`node --check` clean** on all six JS files. **Zero application console
+    errors** across the student form, the CO form, Overview / Student analysis /
+    Brief / People, the printed brief and the instructor view. `db/schema.sql`
+    untouched, so no schema re-run was required.
+13. **Hygiene**: demo data snapshotted before the round and **byte-restored**
+    after — the two dumps differ only in `pg_dump`'s own random `\restrict`
+    nonce; two fixture students created and **deleted**; 42 people, 3 records,
+    9 proposals; the three record digests match the pre-round ones exactly.
+
+### OPEN ITEMS RAISED BY THIS ROUND
+
+1. **The ordering change is the one to rule on** — see the flag above.
+2. **A `started` ground lesson cannot be saved.** A lesson has only `date` and
+   `end_date`, so the only partial state is *an end date with no start date* —
+   and round 12b's rule (unchanged) refuses that row by name. The colour is
+   therefore honest but transient there. The same is not true of flights or
+   exams, where *started* saves happily (*awaiting debrief* / *awaiting a
+   result*). If the squadron wants a lesson to be markable as *booked* before it
+   has a start date, that is a key, not a colour.
+3. **`JP190` is seeded for everybody.** It is `cond: true` — *foreign SPs only* —
+   and a HAF student does not owe it, yet it counts in the 8 and shows as owed
+   with its *foreign SPs* badge. FDMS's own `SchedReady` never reads that flag
+   either (§4l). Two right answers exist (drop conditional slots from the
+   denominator per student, or keep the syllabus whole and let the badge say
+   it); this round keeps the syllabus whole. Same question for the two `[suppl.]`
+   courses among the 47.
+4. **180 rows is a lot of DOM on a phone.** It measures fine (37 px rows, no
+   page-level sideways scroll, blocks closed until touched), but if a student on
+   an old handset finds it heavy, the answer is a per-block *"show owed"* toggle,
+   not a smaller syllabus.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -2121,15 +2423,25 @@ keys they name were re-run against the table form in 12b — see below — and t
    **Round 12 / 12b (§4l): the LOG TABLES at the end** — 4 × Flights ⟨track⟩ +
    4 × F/S ⟨track⟩ as collapsible blocks, then Ground lessons and Ground exams.
    Each block is a **real table, one row per flight, edited in the cells**
-   (FLIGHT · DATE · INSTRUCTOR · DUR · GRADE · MISSION · KIND · ✕), **sorted by
-   date** — a render order, with every row carrying the address of its stored
-   one. **The grade may be left empty for ever**: the row says *awaiting
-   debrief* and is complete without it. The same form, bound to somebody else,
-   is what the CO fills in on a student's behalf.
+   (FLIGHT · DATE · INSTRUCTOR · DUR · GRADE · MISSION · KIND · ✕/⌫).
+   **The grade may be left empty for ever**: the row says *awaiting debrief* and
+   is complete without it.
+   **Round 13 (§4m): the syllabus is ALREADY THERE** — 77 aircraft sorties, 48
+   simulator sorties, 47 ground courses and 8 ground exams are rows **from the
+   first day**, in flow-chart / printed-programme order, in **four colours**:
+   **done** (green — everything filled in and the mission completed) · **started**
+   (light green) · **owed** (grey — prescribed, nothing recorded) · **extra**
+   (mustard — beyond the syllabus's one planned pass), with a legend line and
+   `done X · started Y · owed Z · extra N` on every block header. **An untouched
+   slot is stored NOWHERE**; a slot row is cleared (⌫) rather than deleted, and
+   the extras — repeats, FCF, CEF, same-day re-flies, off-catalogue rows — render
+   after the slots in date order. The same form, bound to somebody else, is what
+   the CO fills in on a student's behalf.
 2. **Instructor form**: student list; per student a **compact card of their
    self-reported data** (counters, evaluations, solos, **and the round-12 flight
-   log as one line per band — per-track counts, hours, and how many sorties are
-   still awaiting a grade**) beside **ONE radio group
+   log as one line per band — per-track counts, hours, how many sorties are
+   still awaiting a grade, and (round 13) how many of the flow chart are still
+   OWED**) beside **ONE radio group
    of the five assessment levels for fighters** (round 10, §4j — scale order,
    weights shown, **thin rule before the fifth**, click-the-selected-one to
    clear) + comment + flew-with checkbox. Save/edit any time; the card's own
@@ -2189,6 +2501,14 @@ keys they name were re-run against the table form in 12b — see below — and t
         paper is monochrome, and where a row whose mission the squadron *did*
         record reads *"no percentage recorded"* rather than *"awaiting
         debrief"* — nobody is chasing that flight.
+        **Round 13 (§4m): the CO's tables are the STUDENT'S tables.** The owed
+        rows are drawn from the same catalogue through the same `WA.slotRows`,
+        so the order, the four colours and the four counts are identical on both
+        sides of one record; each table gains a **State** column and the legend,
+        and the headers read `done X · started Y · owed Z · extra N`. On paper
+        the four states are **words** — the count in each section heading and a
+        State column per printed row — and the owed rows are **not** printed one
+        by one, because a brief of 180 empty lines is not a brief.
       - **Assessment panel (round 10, §4j)** — ONE box where three branch boxes
         used to be, because there is one question now. It shows the **weighted
         mean** in large type, **the arithmetic that produced it**

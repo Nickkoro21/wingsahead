@@ -181,6 +181,62 @@ WA.renderStudent = async function (view, me, opts) {
     });
     evs.forEach((e) => { delete e._k; });
     S.data.evaluations = evs;
+    ensureLogSlots();
+  }
+  /* ── ROUND 13 — THE PRE-SEEDED SYLLABUS SLOTS ─────────────────────────────
+     «Εγω θελω να εχουμε ηδη ετοιμες τις πτησεις … Και ετοιμα τα ground
+     lessons.» One row per sortie of the printed flow chart, per (group,
+     course) pair of the theory programme and per ground exam — drawn from the
+     first day, exactly as the eight solos and the eight checkrides have been
+     since round 5.
+     A stored row CLAIMS its slot (WA.claims), so nothing is ever drawn twice:
+     a student mid-Contact sees their flown C4101 in the C4101 row and not
+     beside it. What is missing is what is seeded, and an untouched seed is
+     NEVER STORED — buildPayload drops it, so the record stays exactly as
+     sparse as it was and the server needs no new branch. */
+  function slotBlank(sec, d) {
+    if (sec === "flights" || sec === "fs") {
+      return { date: "", track: d.track, sortie: d.code, seq: 1, kind: "syllabus",
+               instructor: "", duration: null, grade: null, ng: false, mission: null };
+    }
+    if (sec === "lessons") return { date: "", end_date: "", group: d.group, course: d.course };
+    return { date: "", exam: d.exam, grade: null };
+  }
+  function ensureLogSlots() {
+    for (const sec of WA.SLOT_SECTIONS) {
+      const list = Array.isArray(S.data[sec]) ? S.data[sec] : (S.data[sec] = []);
+      const c = WA.claims(sec, list);
+      for (const d of WA.slotDefs(sec)) {
+        if (!c.taken[d.key]) list.push(slotBlank(sec, d));
+      }
+      claimsDirty(sec);
+    }
+  }
+  /* WHO OCCUPIES WHICH SLOT, cached per section — recomputed the moment the
+     list changes shape or a row changes the fields its slot identity is made
+     of. Every render path asks for it by name, so the colour of a row, the
+     count in its block header and the decision to drop it from the payload
+     are all one answer. */
+  const CLAIM = {};
+  function claimsDirty(secId) {
+    if (secId) delete CLAIM[secId]; else for (const k of Object.keys(CLAIM)) delete CLAIM[k];
+  }
+  function claimsOf(secId) {
+    if (!CLAIM[secId]) CLAIM[secId] = WA.claims(secId, S.data[secId] || []);
+    return CLAIM[secId];
+  }
+  /* one row's slot verdict: does it occupy a syllabus slot, which one, and
+     what state is it in (done · started · owed · extra) */
+  function rowMeta(secId, i) {
+    const e = (S.data[secId] || [])[i] || {};
+    if (!WA.hasSlots(secId)) return { claimed: false, slot: null, state: null };
+    const c = claimsOf(secId);
+    const claimed = !!c.claimed[i];
+    return {
+      claimed,
+      slot: claimed ? (WA.slotIndex(secId)[c.keys[i]] || null) : null,
+      state: WA.rowState(secId, e, claimed),
+    };
   }
   ensureSlots();
 
@@ -871,6 +927,23 @@ WA.renderStudent = async function (view, me, opts) {
   const rmCell = (sec, i) =>
     `<button type="button" class="rm cbtn" data-rm="${esc(sec)}" data-idx="${i}"
        title="Remove this row" aria-label="Remove this row">&#10005;</button>`;
+  /* ROUND 13 — A SYLLABUS SLOT IS NOT REMOVED, IT IS CLEARED. The flow chart
+     prescribes the sortie whether or not it has been flown, so the ✕ that
+     would delete the row is replaced on a slot row by a ⌫ that empties it back
+     to OWED — the round-5 solo idiom (soloEmptyReset), given a button. It
+     appears only once there is something to clear. */
+  const clearCell = (sec, i) =>
+    `<button type="button" class="cbtn" data-clear="${esc(sec)}:${i}"
+       title="Clear this row back to an owed syllabus slot. The sortie itself stays — the flow chart prescribes it — and nothing is stored for it again until it is filled in."
+       aria-label="Clear this row back to an owed slot">&#9003;</button>`;
+  /* the state of a row, as a chip the eye can read without the colour — the
+     colour is the answer, this is the word beside it (and paper, a colour-blind
+     reader and a screen reader all get the same fact) */
+  function stateChip(st) {
+    if (!st) return "";
+    const d = WA.rowStateDef(st);
+    return `<span class="stchip st-${esc(st)}" title="${esc(d.tip)}">${esc(d.label)}</span>`;
+  }
 
   /* ── ONE FLIGHT, ONE ROW ──────────────────────────────────────────────────
      The columns are the directive's own, in its own order, plus the two the
@@ -886,32 +959,59 @@ WA.renderStudent = async function (view, me, opts) {
     { t: "Kind", c: "c-kd", tip: "Syllabus · Repeat · FCF · CEF · Other — an FCF or a CEF is its own row in the log, not a variant of a syllabus sortie" },
     { t: "", c: "c-ac" },
   ];
-  function logRow(sec, i, e) {
+  /* THE FLIGHT CELL OF A SLOT ROW — the sortie is the row's IDENTITY, not one
+     of its answers: the flow chart put it there and nothing on the form can
+     move it. So it is printed, not offered, and the whole syllabus line (name,
+     Training Section, prescribed hours, night, solo candidate) rides in the
+     tooltip. An EXTRA row keeps the picker it has always had. */
+  function slotFlightCell(sec, e, slot) {
+    const s = slot.sortie || {};
+    const bits = [WA.logSortieLabel(sec, slot.track, slot.code, "syllabus")];
+    if (s.g) bits.push("Training Section " + s.g);
+    if (s.h) bits.push("syllabus " + s.h + " h");
+    if (s.nt) bits.push("night");
+    if (s.f1) bits.push("the 1st SOLO");
+    else if (s.sc) bits.push("a solo candidate of its section");
+    return `<span class="slotc" title="${esc(bits.join(" · "))}"><b>${esc(slot.code)}</b>${
+      s.nt ? ` <span class="k">night</span>` : ""}</span>`;
+  }
+  /* the acts at the end of a log row — the same cell for both shapes, so it can
+     be replaced on its own when a slot stops being owed */
+  function logActs(sec, i, e, m) {
+    const slot = m && m.slot;
+    const owed = m && m.state === "owed";
+    return `${rowFlags(sec, i, e)}${seqBadge(e)}${stateChip(m ? m.state : null)}
+        <button type="button" class="cbtn" data-refly2="${esc(sec)}:${i}"
+          title="A second turn on the same sortie on the SAME DAY. It is a real thing and it is not a duplicate, so it is a deliberate act: the new row opens with the same flight and date and the next sequence number — and it is an EXTRA, because the slot is the syllabus's one planned pass."
+          aria-label="Add a same-day re-fly of this sortie">&#8635;</button>
+        ${slot ? (owed ? "" : clearCell(sec, i)) : rmCell(sec, i)}`;
+  }
+  function logRow(sec, i, e, m) {
+    const meta = m || rowMeta(sec, i);
+    const slot = meta.slot;
     const track = e.track || "";
     const list = track ? WA.logPickList(sec, track) : [];
     const off = WA.kindOffCatalogue(e.kind);
     return `
-      <td class="c-fl">${cellPick(sec, i, e, "sortie",
+      <td class="c-fl">${slot ? slotFlightCell(sec, e, slot) : cellPick(sec, i, e, "sortie",
           list.map((s) => ({ v: s.c, t: s.c + " — " + s.n + (s.nt ? " (night)" : ""),
             tip: "Training Section " + s.g + (s.h ? " · syllabus " + s.h + " h" : "") })),
           { free: true, aria: "Flight",
             ph: off ? "— type it —" : "— which sortie? —",
             otherLabel: "Other… (type the code)",
-            freePh: off ? "e.g. FCF profile 2" : "e.g. C4302" })}${logSortieFlag(sec, e)}</td>
+            freePh: off ? "e.g. FCF profile 2" : "e.g. C4302" }) + logSortieFlag(sec, e)}</td>
       <td class="c-dt">${cellDate(sec, i, "date", e.date, "Date")}</td>
       <td class="c-in">${cellText(sec, i, "instructor", e.instructor, "Instructor",
           INS.length ? "choose or type" : "surname", "dl-ins")}</td>
       <td class="c-du">${durCell(sec, i, e)}</td>
       <td class="c-gr">${gradeCell(sec, i, e)}</td>
       <td class="c-ms">${missionCell(sec, i, e)}</td>
-      <td class="c-kd">${cellPick(sec, i, e, "kind",
+      <td class="c-kd">${slot
+          ? `<span class="slotc k" title="${esc("A slot of the printed flow chart is a SYLLABUS sortie by definition — that is what makes it the planned pass. A repeat, an FCF, a CEF or anything else is an EXTRA row: use ↻ for a same-day re-fly, or “+ Add an extra flight” below the table.")}">Syllabus</span>`
+          : cellPick(sec, i, e, "kind",
           WA.FLIGHT_KINDS.map((x) => ({ v: x.id, t: x.label, tip: x.tip })),
           { aria: "Kind", noEmpty: true })}</td>
-      <td class="c-ac">${rowFlags(sec, i, e)}${seqBadge(e)}
-        <button type="button" class="cbtn" data-refly2="${esc(sec)}:${i}"
-          title="A second turn on the same sortie on the SAME DAY. It is a real thing and it is not a duplicate, so it is a deliberate act: the new row opens with the same flight and date and the next sequence number."
-          aria-label="Add a same-day re-fly of this sortie">&#8635;</button>
-        ${rmCell(sec, i)}</td>`;
+      <td class="c-ac">${logActs(sec, i, e, meta)}</td>`;
   }
 
   /* ── GROUND LESSONS — GROUP · COURSE · START · END ────────────────────────
@@ -939,24 +1039,44 @@ WA.renderStudent = async function (view, me, opts) {
     return cflag("off-catalogue",
       "Not in the generated syllabus catalogue for this group — it is saved as typed and shown marked");
   }
-  function lessonRow(i, e) {
+  function lessonRow(i, e, m) {
+    const meta = m || rowMeta("lessons", i);
+    const slot = meta.slot;
     const list = e.group ? WA.lessonCourses(e.group) : [];
+    const g = slot ? slot.grp : null, c0 = slot ? slot.crs : null;
     return `
-      <td class="c-gp">${cellPick("lessons", i, e, "group",
-          WA.groundGroups().map((g) => ({ v: g.g, t: g.g + " — " + g.name,
-            tip: g.name + " · " + (g.p === null ? "?" : g.p) + " periods · " +
-                 g.courses.length + " course" + (g.courses.length === 1 ? "" : "s") })),
+      <td class="c-gp">${slot
+          ? `<span class="slotc" title="${esc(g.g + " — " + g.name + " · " +
+               (g.p === null ? "?" : g.p) + " periods · " + g.courses.length +
+               " course" + (g.courses.length === 1 ? "" : "s"))}"><b>${esc(g.g)}</b></span>`
+          : cellPick("lessons", i, e, "group",
+          WA.groundGroups().map((gg) => ({ v: gg.g, t: gg.g + " — " + gg.name,
+            tip: gg.name + " · " + (gg.p === null ? "?" : gg.p) + " periods · " +
+                 gg.courses.length + " course" + (gg.courses.length === 1 ? "" : "s") })),
           { aria: "Theory group", ph: "— which group? —" })}</td>
-      <td class="c-cs">${cellPick("lessons", i, e, "course",
+      <td class="c-cs">${slot
+          ? `<span class="slotc" title="${esc(c0.c + " — " + c0.n + " · " + c0.p +
+               " period" + (c0.p === 1 ? "" : "s") + " · of group " + g.g +
+               (c0.cond ? " · supplementary: only for SPs who did not cover it at their Academy" : ""))}"
+             ><b>${esc(c0.c)}</b> <span class="k">${esc(c0.n)}</span></span>${
+             c0.cond ? ` <span class="badge badge-acc" title="Supplementary — only for SPs who did not cover it at their Air Force Academy">foreign SPs</span>` : ""}`
+          : cellPick("lessons", i, e, "course",
           list.map((c) => ({ v: c.c, t: c.c + " — " + c.n + (c.cond ? " (foreign SPs)" : ""),
             tip: c.n + " · " + c.p + " period" + (c.p === 1 ? "" : "s") +
                  (c.cond ? " · supplementary: only for SPs who did not cover it at their Academy" : "") })),
           { free: true, disabled: !e.group, aria: "Course",
             ph: e.group ? "— which course? —" : "— group first —",
-            otherLabel: "Other… (type the code)", freePh: "e.g. IN 201-210" })}${courseFlag(e)}</td>
+            otherLabel: "Other… (type the code)", freePh: "e.g. IN 201-210" }) + courseFlag(e)}</td>
       <td class="c-dt">${cellDate("lessons", i, "date", e.date, "Start date")}</td>
       <td class="c-dt">${cellDate("lessons", i, "end_date", e.end_date, "End date")}</td>
-      <td class="c-ac">${rowFlags("lessons", i, e)}${rmCell("lessons", i)}</td>`;
+      <td class="c-ac">${groundActs("lessons", i, e, meta)}</td>`;
+  }
+  /* the acts at the end of a ground row — one cell, both shapes (see logActs) */
+  function groundActs(sec, i, e, m) {
+    const slot = m && m.slot;
+    const owed = m && m.state === "owed";
+    return `${rowFlags(sec, i, e)}${stateChip(m ? m.state : null)}${
+      slot ? (owed ? "" : clearCell(sec, i)) : rmCell(sec, i)}`;
   }
 
   /* ── GROUND EXAMS — EXAM · DATE · GRADE ──────────────────────────────────
@@ -968,12 +1088,19 @@ WA.renderStudent = async function (view, me, opts) {
     { t: "Grade", c: "c-gr", tip: "0-100, whole. Empty means the result is not in yet" },
     { t: "", c: "c-ac" },
   ];
-  function examRow(i, e) {
+  function examRow(i, e, m) {
+    const meta = m || rowMeta("exams", i);
+    const slot = meta.slot;
     const x = WA.exam(e.exam);
     const fx = fixnoteHTML("exams", i, "grade", e.grade);
     const late = WA.awaitingDebrief(e) ? WA.daysAgo(e.date) : null;
     return `
-      <td class="c-ex">${cellPick("exams", i, e, "exam",
+      <td class="c-ex">${slot
+          ? `<span class="slotc" title="${esc(slot.def.id + " — " + slot.def.name + " · " +
+               (slot.def.p === null ? "?" : slot.def.p) + " period" + (slot.def.p === 1 ? "" : "s") +
+               (slot.def.cond ? " · foreign SPs only — a HAF student does not owe it" : ""))}"
+             ><b>${esc(slot.def.id)}</b> <span class="k">${esc(slot.def.name)}</span></span>`
+          : cellPick("exams", i, e, "exam",
           WA.examList().map((v) => ({ v: v.id, t: v.id + " — " + v.name,
             tip: v.name + " · " + (v.p === null ? "?" : v.p) + " period" + (v.p === 1 ? "" : "s") +
                  (v.cond ? " · foreign SPs only — a HAF student does not owe it" : "") })),
@@ -992,7 +1119,7 @@ WA.renderStudent = async function (view, me, opts) {
         late !== null && late >= WA.DEBRIEF_AMBER_DAYS
           ? ` <span class="lagchip is-late" title="${esc("Sat " + late +
               " days ago and still without a result")}">${esc(late)} d</span>` : ""}</td>
-      <td class="c-ac">${rowFlags("exams", i, e)}${rmCell("exams", i)}</td>`;
+      <td class="c-ac">${groundActs("exams", i, e, meta)}</td>`;
   }
 
   function failRow(sec, i, e) {
@@ -1224,28 +1351,33 @@ WA.renderStudent = async function (view, me, opts) {
 
     /* ── ROUND 12 — THE LOG TABLES, AT THE END («στο τελος») ────────────────
        Two sections drawn as 4+4 blocks (the track is on the row), then the two
-       ground blocks. Nothing here is a fixed slot: an unflown sortie is not an
-       entry, so the syllabus list is what a row is CHOSEN from and never a
-       skeleton of 133 placeholders.
-       ROUND 12b — every one of the ten blocks is a REAL TABLE, date-sorted. */
+       ground blocks; every one of the ten blocks is a REAL TABLE (12b).
+       ROUND 13 REVERSED THE ONE SENTENCE THAT USED TO STAND HERE. Round 12
+       wrote «NOTHING IS PRE-SEEDED … never a skeleton of 133 placeholders»;
+       the user's review of it asks for exactly that skeleton — «Εγω θελω να
+       εχουμε ηδη ετοιμες τις πτησεις» — and it is the right shape: a student
+       who must type the syllabus back in before they can report against it is
+       being asked to do the flow chart's work. The engineering that made the
+       old sentence true is what makes the new one safe: the skeleton is a
+       RENDER, and an untouched slot is still stored nowhere. */
     { id: "flights", log: true, cols: LOG_COLS,
-      hint: "Every sortie flown in the AIRCRAFT, one row per flight — the flight, the date, the instructor, how long it lasted, the grade and whether the mission was completed. THE GRADE MAY BE LEFT EMPTY: a debrief sometimes takes a while, and the row simply says it is waiting instead of pretending the flight did not happen. Rows are shown in DATE ORDER. Four tables, one per track, and the dropdown of each is that track's flow-chart list. The eight checkrides are not here: they are recorded in the Evaluations section, where the syllabus order and the pass rule apply to them.",
-      row: (e, i) => logRow("flights", i, e),
+      hint: "Every sortie of the printed flow chart is ALREADY HERE, one row each, from the first day — grey while it is owed, light green once you start writing in it, green when the row is complete and the mission was completed. THE GRADE MAY BE LEFT EMPTY: a debrief sometimes takes a while, and the row simply says it is waiting instead of pretending the flight did not happen. Four tables, one per track, in flow-chart order; anything beyond the syllabus's one planned pass — a repeat, an FCF, a CEF, a same-day re-fly — is an EXTRA row in mustard, after the slots and in date order. The eight checkrides are not here: they are recorded in the Evaluations section, where the syllabus order and the pass rule apply to them.",
+      row: (e, i, m) => logRow("flights", i, e, m),
       blank: (track) => logBlank(track) },
 
     { id: "fs", log: true, cols: LOG_COLS,
-      hint: "The same log for the SIMULATOR. Sim hours and flight hours are counted separately by the squadron everywhere, which is why these are two logs and not one.",
-      row: (e, i) => logRow("fs", i, e),
+      hint: "The same log for the SIMULATOR, and its own flow-chart sorties are pre-seeded in the same four tables. Sim hours and flight hours are counted separately by the squadron everywhere, which is why these are two logs and not one.",
+      row: (e, i, m) => logRow("fs", i, e, m),
       blank: (track) => logBlank(track) },
 
     { id: "lessons", table: true, cols: LESSON_COLS,
-      hint: "The ground academics — the twelve theory groups of the programme and the courses inside them. One row per lesson, in date order. A lesson is a BLOCK, so a course taught over several days is one row with an end date. There is no grade here (a lesson is attended, not scored) and no instructor: «Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο».",
-      row: (e, i) => lessonRow(i, e),
+      hint: "The ground academics — the twelve theory groups of the programme and the 47 courses inside them, ALL OF THEM ALREADY HERE, grouped by their theory group and in the order the programme prints them. Fill in the start date (and the end date, because a lesson is a BLOCK and a course taught over several days is one row). There is no grade here (a lesson is attended, not scored) and no instructor: «Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο». A course the catalogue does not know goes in as an extra at the end.",
+      row: (e, i, m) => lessonRow(i, e, m),
       blank: () => ({ date: "", end_date: "", group: "", course: "" }) },
 
     { id: "exams", table: true, cols: EXAM_COLS,
-      hint: "The eight ground-exam groups of the syllabus, one row each, in date order. Leave the grade empty until the result is in. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and go under Ground lessons: that is where the squadron's scheduler counts them.)",
-      row: (e, i) => examRow(i, e),
+      hint: "The eight ground-exam groups of the syllabus, one row each and all of them present from the first day: grey until the exam is sat, light green on the date alone, green once the result is in. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and go under Ground lessons: that is where the squadron's scheduler counts them.)",
+      row: (e, i, m) => examRow(i, e, m),
       blank: () => ({ date: "", exam: "", grade: null }) },
   ];
   /* one blank flight row of a given table. `seq` and `kind` are AUTHORED from
@@ -1285,6 +1417,7 @@ WA.renderStudent = async function (view, me, opts) {
 
   function rowsHTML(sec) {
     const list = S.data[sec.id] || [];
+    if (WA.hasSlots(sec.id)) claimsDirty(sec.id);
     if (sec.fixed) return fixedRowsHTML(sec, list);
     if (sec.log) return logTablesHTML(sec, list);
     if (sec.table) return groundTableHTML(sec, list);
@@ -1304,28 +1437,40 @@ WA.renderStudent = async function (view, me, opts) {
      sister application, applied before it could bite here.)
      A row with no date yet sinks to the END — it is being typed, and the top
      of a log is where the oldest flight is. Same date: the seq of a same-day
-     re-fly, then the order they were entered in. */
-  function sortedRows(list, track) {
-    const rows = [];
-    (Array.isArray(list) ? list : []).forEach((e, i) => {
-      if (track === undefined || track === null || (e.track || "") === track) rows.push({ e, i });
-    });
-    rows.sort((a, b) => {
-      const da = String(a.e.date || "").trim(), db = String(b.e.date || "").trim();
-      if (!da !== !db) return da ? -1 : 1;          /* dateless last */
-      if (da !== db) return da < db ? -1 : 1;
-      const sa = Number(a.e.seq || 1), sb = Number(b.e.seq || 1);
-      if (sa !== sb) return sa - sb;
-      return a.i - b.i;                              /* stable: stored order */
-    });
-    return rows;
+     re-fly, then the order they were entered in.
+
+     ROUND 13 — THE ORDERING CHANGES, AND IT IS A CHANGE WORTH NAMING.
+     THE SYLLABUS ORDER IS NOW THE BACKBONE: the slot rows come first, in the
+     order of the printed flow chart (and, for the ground blocks, of the
+     printed programme), because that is the order the stage is flown in and
+     the order the squadron reads a student's progress in. A slot does not move
+     when its date is filled in — its place is its place in the syllabus.
+     THE R12b DATE SORT IS NOT REVOKED; IT NOW GOVERNS THE EXTRAS. A repeat, an
+     FCF, a CEF, a same-day re-fly or an off-catalogue row has no place in the
+     flow chart to sit in, so those render AFTER the slots, oldest first,
+     exactly as every row did in 12b. FLAG FOR THE USER: a mid-stage student
+     will see their rows in a different order than yesterday — by syllabus, not
+     by date. If the date order is wanted back for the slots too, it is one
+     comparator.
+     THE ORDER ITSELF LIVES IN WA.slotRows, not here: the CO's drill-down and
+     the printed brief order the same record with the same function, so three
+     surfaces cannot disagree about where a row goes. On THIS side every slot
+     is claimed (ensureLogSlots seeded whatever nothing else claims), so the
+     mapping back to a stored index is total and `i < 0` cannot occur. */
+  function sortedRows(secId, list, track) {
+    return WA.slotRows(secId, list, track)
+      .filter((r) => r.i >= 0)
+      .map((r) => ({ e: r.e, i: r.i }));
   }
   /* one <tr>. The classes are the row states the card form wore as a border:
-     a leftover, a CO entry, a CO entry the owner may not touch. */
+     a leftover, a CO entry, a CO entry the owner may not touch — and, since
+     round 13, THE COLOUR: done · started · owed · extra. */
   function trHTML(sec, e, i) {
-    return `<tr class="frow${stillLegacy(sec.id, e) ? " is-legacy" : ""}${
+    const m = rowMeta(sec.id, i);
+    return `<tr class="frow${m.state ? " st-" + esc(m.state) : ""}${
+      stillLegacy(sec.id, e) ? " is-legacy" : ""}${
       WA.isCO(e) ? " is-co" : ""}${coLocked(e) ? " is-colock" : ""}"
-      data-row="${esc(sec.id)}:${i}">${sec.row(e, i)}</tr>`;
+      data-row="${esc(sec.id)}:${i}">${sec.row(e, i, m)}</tr>`;
   }
   /* the table itself. It scrolls INSIDE its own wrapper on a narrow screen, so
      the page never scrolls sideways — the row stays one line tall and the
@@ -1348,33 +1493,57 @@ WA.renderStudent = async function (view, me, opts) {
      itself when it holds something, so a student mid-Contact does not have to
      unfold three empty tables to reach theirs. */
   function logTablesHTML(sec, list) {
-    return WA.TRACKS.map((t) => {
-      const ord = sortedRows(list, t);
+    /* a block opens when it holds anything the student has touched; if the
+       whole section is untouched the FIRST track opens, so a fresh student
+       meets their syllabus instead of four closed boxes */
+    const whole = WA.stateCounts(sec.id, list);
+    const untouched = (whole.done + whole.started + whole.extra) === 0;
+    return stateLegendHTML(sec.id) + WA.TRACKS.map((t, ti) => {
+      const ord = sortedRows(sec.id, list, t);
       const rows = ord.map(({ e, i }) => trHTML(sec, e, i));
-      const lag = ord.filter(({ e }) => WA.awaitingDebrief(e)).length;
-      const hrs = ord.reduce((a, { e }) => a + (isFinite(Number(e.duration)) ? Number(e.duration) : 0), 0);
-      const nCat = WA.logPickList(sec.id, t).length;
+      const cn = WA.stateCounts(sec.id, list, t);
+      const nCat = WA.slotCount(sec.id, t);
       return `
-        <details class="logtbl" ${rows.length ? "open" : ""} data-logtbl="${esc(sec.id)}:${esc(t)}">
+        <details class="logtbl" ${(cn.done + cn.started + cn.extra) > 0 ||
+            (untouched && ti === 0) ? "open" : ""} data-logtbl="${esc(sec.id)}:${esc(t)}">
           <summary><b>${esc(WA.secLabel(sec.id))} &mdash; ${esc(WA.itemCatLabel(t))}</b>
-            <span class="cnt">${rows.length} ${rows.length === 1 ? "flight" : "flights"}${
-              hrs > 0 ? " · " + (Math.round(hrs * 10) / 10) + " h" : ""}${
-              lag ? " · " + lag + " awaiting a grade" : ""}</span>
-            <span class="k" title="${esc("This table CHOOSES from " + nCat + " " +
-              (sec.id === "fs" ? "simulator" : "aircraft") + " sorties of the printed flow chart — and none of them is a row until it is flown. (The track's checkrides are not among them: they are recorded in the Evaluations section.)")}">${esc(nCat)} in the list</span>
+            <span class="cnt">${esc(WA.stateLine(sec.id, cn))}</span>
+            <span class="k" title="${esc("The printed flow chart prescribes " + nCat + " " +
+              (sec.id === "fs" ? "simulator" : "aircraft") + " sorties in this track, and every one of them is a row here from the first day. (The track's checkrides are not among them: they are recorded in the Evaluations section, where the syllabus order and the pass rule apply to them.)")}">${esc(nCat)} in the syllabus</span>
           </summary>
           ${tblHTML(sec, sec.id + ":" + t, rows,
-            "Nothing recorded in this track yet &mdash; use &ldquo;+ Add a flight&rdquo;.")}
+            "Nothing recorded in this track yet &mdash; use &ldquo;+ Add an extra flight&rdquo;.")}
           <div class="addrow"><button type="button" class="btn btn-sm btn-add"
-            data-add="${esc(sec.id)}" data-track="${esc(t)}">+ Add a flight</button></div>
+            data-add="${esc(sec.id)}" data-track="${esc(t)}"
+            title="Adds an EXTRA row — the syllabus sorties are already in the table above. Use it for anything outside the printed flow chart: an FCF, a CEF, a repeat, or a code the catalogue does not know."
+            >+ Add an extra flight</button></div>
         </details>`;
     }).join("");
   }
 
   /* the two ground blocks — one table each, the same sort, the same row map */
   function groundTableHTML(sec, list) {
-    const rows = sortedRows(list).map(({ e, i }) => trHTML(sec, e, i));
-    return tblHTML(sec, sec.id, rows, "No entries &mdash; use &ldquo;+ Add&rdquo;.");
+    const rows = sortedRows(sec.id, list).map(({ e, i }) => trHTML(sec, e, i));
+    return stateLegendHTML(sec.id) +
+      tblHTML(sec, sec.id, rows, "No entries &mdash; use &ldquo;+ Add&rdquo;.");
+  }
+
+  /* ── THE LEGEND (round 13) ────────────────────────────────────────────────
+     Four colours are four facts, and a colour nobody explained is decoration.
+     One line per section, in the user's own four words, with the whole rule in
+     each chip's tooltip — and every row also carries its state as a WORD in
+     its last cell, so the fact survives a monochrome print, a colour-blind
+     reader and a screen reader alike. */
+  function stateLegendHTML(secId) {
+    const what = {
+      flights: ["flown and complete", "started", "the flow chart prescribes it, nothing recorded yet", "beyond the planned pass"],
+      fs: ["flown and complete", "started", "the flow chart prescribes it, nothing recorded yet", "beyond the planned pass"],
+      lessons: ["dated", "partly filled in", "in the programme, nothing recorded yet", "off-catalogue addition"],
+      exams: ["sat and marked", "sat, result not in", "in the syllabus, not sat yet", "a re-sit or an off-catalogue exam"],
+    }[secId] || ["complete", "started", "owed", "extra"];
+    return `<p class="legend">${WA.ROW_STATES.map((s, k) =>
+      `<span class="lgchip st-${esc(s.id)}" title="${esc(s.tip)}">${esc(s.label)}</span>
+       <span class="k">${esc(what[k])}</span>`).join(`<span class="lgsep">·</span>`)}</p>`;
   }
 
   /* THE FIXED SECTIONS (round 5): the syllabus rows first, in syllabus order,
@@ -1492,20 +1661,12 @@ WA.renderStudent = async function (view, me, opts) {
       return `${Math.min(done, slots)} of ${slots} flown` +
         (extra > 0 ? ` · ${extra} extra` : "");
     }
-    /* ROUND 12 — a log section counts its rows, its hours and its LAG. The
-       third number is the one the directive asked to be able to see: how many
-       flights are still waiting for a debrief. */
-    if (sec && sec.log) {
-      const hrs = list.reduce((a, e) => a + (isFinite(Number(e.duration)) ? Number(e.duration) : 0), 0);
-      const lag = list.filter(WA.awaitingDebrief).length;
-      return `${n} ${n === 1 ? "flight" : "flights"}` +
-        (hrs > 0 ? ` · ${Math.round(hrs * 10) / 10} h` : "") +
-        (lag ? ` · ${lag} awaiting a grade` : "");
-    }
-    if (id === "exams" || id === "lessons") {
-      const lag = id === "exams" ? list.filter(WA.awaitingDebrief).length : 0;
-      return `${n} ${n === 1 ? "entry" : "entries"}` +
-        (lag ? ` · ${lag} awaiting a result` : "");
+    /* ROUND 12 counted rows, hours and the debrief LAG. ROUND 13 counts the
+       FOUR STATES instead — «done X · started Y · owed Z · extra N» — because
+       the question the pre-seeded slots answer is what is still owed, and a
+       bare row count could never say it. The hours and the lag ride along. */
+    if (sec && (sec.log || WA.hasSlots(id))) {
+      return WA.stateLine(id, WA.stateCounts(id, list));
     }
     return `${n} ${n === 1 ? "entry" : "entries"}`;
   }
@@ -1761,12 +1922,54 @@ WA.renderStudent = async function (view, me, opts) {
     const t = String(det.dataset.logtbl || "").split(":")[1];
     const sum = det.querySelector("summary .cnt");
     if (!sum || !t) return;
-    const list = (S.data[secId] || []).filter((e) => (e.track || "") === t);
-    const hrs = list.reduce((a, e) => a + (isFinite(Number(e.duration)) ? Number(e.duration) : 0), 0);
-    const lag = list.filter(WA.awaitingDebrief).length;
-    sum.textContent = list.length + " " + (list.length === 1 ? "flight" : "flights") +
-      (hrs > 0 ? " · " + (Math.round(hrs * 10) / 10) + " h" : "") +
-      (lag ? " · " + lag + " awaiting a grade" : "");
+    sum.textContent = WA.stateLine(secId, WA.stateCounts(secId, S.data[secId] || [], t));
+  }
+  /* ── THE COLOUR FOLLOWS THE KEYSTROKE (round 13) ──────────────────────────
+     The round-5b rule applied to the row itself: typing a date must turn the
+     row light green NOW, not after the next save or the next redraw. The
+     <tr>'s state class and its last cell (which carries the state word and the
+     clear button) are replaced on their own — the box the student is typing
+     into keeps the focus and the caret. */
+  function refreshRowState(secId, i) {
+    if (!WA.hasSlots(secId)) return;
+    const tr = form.querySelector(`[data-row="${secId}:${i}"]`);
+    if (!tr) return;
+    const m = rowMeta(secId, i);
+    for (const s of WA.ROW_STATES) tr.classList.toggle("st-" + s.id, s.id === m.state);
+    const cell = tr.querySelector("td.c-ac");
+    if (cell) {
+      const e = S.data[secId][i];
+      cell.innerHTML = (secId === "flights" || secId === "fs")
+        ? logActs(secId, i, e, m) : groundActs(secId, i, e, m);
+      applyLocks();
+    }
+  }
+  /* ── WHEN A SLOT CHANGES HANDS (round 13) ─────────────────────────────────
+     Most keystrokes only repaint their own row. Some MOVE A SLOT: picking
+     FO190 on a row the student added takes the FO190 slot off the seeded
+     placeholder, and that placeholder must then stop being drawn — a
+     row-level refresh cannot express that, because the row it has to remove is
+     somebody else's. So the claim map is compared before and after, and the
+     SECTION is redrawn only when it actually moved. The box the student is
+     typing in keeps its focus either way (the round-6 idiom). */
+  function syncSlots(secId, i, wasSig) {
+    if (!WA.hasSlots(secId)) return;
+    const before = wasSig !== undefined ? wasSig
+      : (CLAIM[secId] ? CLAIM[secId].claimed.join("") : null);
+    claimsDirty(secId);
+    if (before !== null && claimsOf(secId).claimed.join("") !== before) {
+      const at = document.activeElement;
+      const back = at && at.dataset ? at.dataset.field : null;
+      redraw(secId);
+      if (back) {
+        const el2 = form.querySelector(`[data-row="${secId}:${i}"] [data-field="${back}"]`);
+        if (el2) el2.focus();
+      }
+      return;
+    }
+    refreshRowState(secId, i);
+    $("cnt-" + secId).textContent = cntHTML(secId);
+    refreshTblCount(secId, i);
   }
 
   /* ── THE SORT, APPLIED WITHOUT REDRAWING ANYTHING ─────────────────────────
@@ -1790,7 +1993,7 @@ WA.renderStudent = async function (view, me, opts) {
     for (const tb of root.querySelectorAll("tbody[data-tbody]")) {
       const key = String(tb.dataset.tbody || "");
       const track = key.indexOf(":") >= 0 ? key.split(":")[1] : undefined;
-      const want = sortedRows(S.data[secId] || [], track).map(({ i }) => secId + ":" + i);
+      const want = sortedRows(secId, S.data[secId] || [], track).map(({ i }) => secId + ":" + i);
       const have = Array.from(tb.children).map((tr) => String(tr.dataset.row || ""));
       if (want.join("|") === have.join("|")) continue;
       moved = true;
@@ -1990,6 +2193,7 @@ WA.renderStudent = async function (view, me, opts) {
          the row and never inferred afterwards from a code that may not exist */
       S.data[id].push(def.blank(add.dataset.track));
       const at = S.data[id].length - 1;
+      claimsDirty(id);
       redraw(id);
       markDirty();
       /* the ADDRESS, not the position: a new row has no date yet, so the sort
@@ -2024,11 +2228,41 @@ WA.renderStudent = async function (view, me, opts) {
       row.seq = Math.min(next, 20);
       S.data[sec].push(row);
       const at = S.data[sec].length - 1;
+      claimsDirty(sec);
       redraw(sec);
       markDirty();
       const box = form.querySelector(`[data-row="${sec}:${at}"] [data-field="instructor"]`);
       if (box) box.focus();
-      toast("Same-day re-fly #" + row.seq + " — the flight and the date are carried over");
+      toast("Same-day re-fly #" + row.seq + " — the flight and the date are carried over, and the row is an EXTRA");
+      return;
+    }
+    /* ── ROUND 13 — CLEAR A SLOT BACK TO OWED ───────────────────────────────
+       A syllabus slot cannot be DELETED — the flow chart prescribes it whether
+       or not it has been flown — so the row that would have been removed is
+       emptied instead, and goes back to grey. Nothing is then stored for it at
+       all: the sparse rule takes it out of the payload on the next save. */
+    const clr = ev.target.closest("[data-clear]");
+    if (clr) {
+      const [sec, ix] = clr.dataset.clear.split(":");
+      const e = S.data[sec][Number(ix)];
+      if (!e) return;
+      if (sec === "flights" || sec === "fs") {
+        e.date = ""; e.instructor = ""; e.duration = null;
+        e.grade = null; e.ng = false; e.mission = null;
+        delete e.instructor_oid;
+      } else if (sec === "lessons") { e.date = ""; e.end_date = ""; }
+      else if (sec === "exams") { e.date = ""; e.grade = null; }
+      /* a cleared slot is not a leftover and not anybody's report any more */
+      delete e.legacy; delete e.entered_by;
+      delete e._ngset; delete e._ngwant;
+      /* the whole section, not the row: an emptied row can hand its slot to a
+         placeholder, and it leaves the payload altogether */
+      claimsDirty(sec);
+      redraw(sec);
+      showLegacyNote();
+      showCoNote();
+      markDirty();
+      toast("Row cleared — the slot is owed again and nothing is stored for it");
       return;
     }
     /* 1:20 → 1.3, and 1.25 → 1.3 — offered, never performed silently */
@@ -2069,6 +2303,11 @@ WA.renderStudent = async function (view, me, opts) {
     if (rm) {
       const id = rm.dataset.rm;
       S.data[id].splice(Number(rm.dataset.idx), 1);
+      /* ROUND 13 — a removed row may have been holding a syllabus slot (an
+         extra that was the only row naming that sortie is impossible, but a
+         hand-built record can arrive that way): re-seed, so the slot comes
+         back as OWED instead of vanishing from the table until the next load */
+      if (WA.hasSlots(id)) { ensureLogSlots(); claimsDirty(id); }
       redraw(id);
       showLegacyNote();
       markDirty();
@@ -2120,6 +2359,9 @@ WA.renderStudent = async function (view, me, opts) {
          date the student never meant to give, with no field left to clear). */
       soloEmptyReset(sec, e);
       redrawRow(sec, Number(i));
+      /* ROUND 13 — NG is part of what makes a log row TOUCHED, so turning it
+         off on a row that holds nothing else can hand the slot back */
+      syncSlots(sec, Number(i));
       showLegacyNote();
       markDirty();
       return;
@@ -2238,6 +2480,16 @@ WA.renderStudent = async function (view, me, opts) {
        "Other…" only ever fills the same field by hand. */
     if (f[0] === "@" || f[0] === "~") {
       const key = f.slice(1);
+      /* ROUND 13 — the picker fields are the ones a row's SLOT IDENTITY is
+         made of (the sortie, the kind, the group, the course, the exam), so
+         the claim map is stale the moment one of them is touched. It is
+         dropped BEFORE any redraw below, or the row would be repainted with
+         yesterday's verdict — and its SHAPE is remembered, because a change of
+         identity can move a slot from one row to another (picking FO190 on a
+         row you added takes the slot off the seeded placeholder, which must
+         then stop being drawn). That is a SECTION-level change, not a row one. */
+      const claimWas = WA.hasSlots(sec) ? claimsOf(sec).claimed.join("") : null;
+      if (WA.hasSlots(sec)) claimsDirty(sec);
       if (f[0] === "@") {
         if (el.value === PICK_OTHER) {
           entry["_o_" + key] = true;
@@ -2300,6 +2552,9 @@ WA.renderStudent = async function (view, me, opts) {
       const wasL = !!entry.legacy;
       dropLegacy(sec, entry);
       if (wasL !== !!entry.legacy) { redrawRow(sec, i); showLegacyNote(); }
+      /* the colour, the state word and the four counts follow the choice —
+         and where the SLOTS THEMSELVES moved, the whole section is redrawn */
+      syncSlots(sec, i, claimWas);
       markDirty();
       return;
     }
@@ -2459,6 +2714,13 @@ WA.renderStudent = async function (view, me, opts) {
     if (isTbl) {
       const tr = form.querySelector(`[data-row="${sec}:${i}"]`);
       if (tr) tr.classList.toggle("is-legacy", stillLegacy(sec, entry));
+      /* ROUND 13 — and its COLOUR, on the same keystroke. Every branch above
+         lands here, so this is the one place the four states are repainted
+         from: grey → light green on the first character, light green → green
+         on the one that completes the row. Clearing the last value of a row
+         can also hand its slot back to a placeholder, which is why this goes
+         through syncSlots and not straight to the row. */
+      syncSlots(sec, i);
     }
     markDirty();
   });
@@ -2708,8 +2970,19 @@ WA.renderStudent = async function (view, me, opts) {
        καποιες φορες αργει το debriefing» — a row without a grade is complete,
        saves, and says on screen that it is waiting. Everything the server
        refuses is refused here first, in the same words. */
+    /* ══ ROUND 13 — THE SPARSE RULE, WHICH IS WHERE IT LIVES ═════════════════
+       The form draws 125 flight slots, 47 course slots and 8 exam slots; the
+       record stores none of them until somebody writes in one. THIS is the
+       line that keeps that true — an OWED row (a slot the form seeded and
+       nobody has touched) never enters the payload, so it is never stored,
+       never counted, never stamped and never exported. The server therefore
+       sees exactly what it saw in round 12 and needed no change at all.
+       An EXTRA row that is still blank is NOT dropped by this: it is a row the
+       student added on purpose, and it is refused by name below, as before. */
+    const owedRow = (k, e) => WA.slotOwed(k, e);
     for (const k of ["flights", "fs"]) {
       d[k].forEach((e, i) => {
+        if (owedRow(k, e)) return;
         const code = WA.normCode(e.sortie);
         if (!e.track) { need(k, i, "choose which track's table this flight belongs in"); return; }
         if (!isDate(e.date) && !e.legacy) { need(k, i, "the date is required"); return; }
@@ -2797,6 +3070,7 @@ WA.renderStudent = async function (view, me, opts) {
       });
     }
     d.lessons.forEach((e, i) => {
+      if (owedRow("lessons", e)) return;
       if (!isDate(e.date) && !e.legacy) { need("lessons", i, "the date is required"); return; }
       if (!WA.groundGroup(e.group)) {
         need("lessons", i, e.group
@@ -2830,6 +3104,7 @@ WA.renderStudent = async function (view, me, opts) {
       }, e);
     });
     d.exams.forEach((e, i) => {
+      if (owedRow("exams", e)) return;
       if (!isDate(e.date) && !e.legacy) { need("exams", i, "the date is required"); return; }
       if (!WA.exam(e.exam)) {
         need("exams", i, e.exam
@@ -2851,7 +3126,14 @@ WA.renderStudent = async function (view, me, opts) {
        locked row, so the message sends them to the CO instead of to the box,
        and it goes FIRST: the specific complaint underneath it is not
        something they can act on. */
-    for (const sec of SECTIONS) {
+    /* ROUND 13 — the check is the OWNER's, and only the owner's. It exists
+       because nothing in the student's UI can drop a CO entry (they are
+       locked), so a section that comes out short can only mean a locked row
+       was refused on its way in. On the CO'S OWN FORM nothing is locked: he
+       may delete his own entry, and since round 13 he may CLEAR a slot row he
+       filled in — both are legitimate acts, and refusing his save with a
+       sentence telling him to ask himself would be nonsense. */
+    for (const sec of (asCO ? [] : SECTIONS)) {
       const kept = (rows[sec.id] || []).filter(WA.isCO).length;
       const miss = (CO_BASE[sec.id] || 0) - kept;
       if (miss > 0) {

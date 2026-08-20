@@ -798,17 +798,36 @@ WA.renderAdmin = async function (view, me) {
       : def.tip || "")}">${esc(def.label || m)}${
       derived ? ` <span class="k">read from the grade</span>` : ""}</span></td>`;
   }
+  /* ROUND 13 — THE FOUR STATES, ON THE CO'S SIDE TOO. The record the CO reads
+     is SPARSE — an owed slot is stored nowhere — so the owed rows are drawn
+     from the same catalogue the student's form draws them from, through the
+     same WA.slotRows. The result is that the CO's table and the student's form
+     are THE SAME TABLE: same order, same colours, same four counts, and the
+     one question the CO actually asks — what is this student still owed — is
+     answered without opening the student's own link. */
+  const stateCell = (st) => {
+    const d = WA.rowStateDef(st);
+    return `<td><span class="stchip st-${esc(st)}" title="${esc(d.tip)}">${esc(d.label)}</span></td>`;
+  };
   function logRows(s, band, track) {
-    const list = (Array.isArray(s.record[band]) ? s.record[band] : [])
-      .filter((e) => (e.track || "") === track)
-      .slice()
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)) ||
-                      (Number(a.seq || 1) - Number(b.seq || 1)));
-    return list.map((e) => {
+    return WA.slotRows(band, s.record[band], track).map((r) => {
+      const e = r.e;
+      if (!e) {
+        const d = r.def, sd = d.sortie || {};
+        return `<tr class="st-owed">
+          <td><span title="${esc(WA.logSortieLabel(band, track, d.code, "syllabus") +
+              (sd.g ? " · Training Section " + sd.g : "") +
+              (sd.h ? " · syllabus " + sd.h + " h" : "") + (sd.nt ? " · night" : ""))}"
+            ><b>${esc(d.code)}</b></span></td>
+          <td class="k">&mdash;</td><td class="k">&mdash;</td>
+          <td class="num k">${sd.h ? esc(sd.h) : "&mdash;"}</td>
+          <td class="k">&mdash;</td><td class="k">&mdash;</td>
+          ${stateCell("owed")}<td class="k">&mdash;</td></tr>`;
+      }
       const kind = WA.flightKind(e.kind);
       const seq = Number(e.seq || 1);
       const known = WA.logSortieKnown(band, track, e.sortie);
-      return `<tr>
+      return `<tr class="st-${esc(r.state)}">
         <td><span title="${esc(WA.logSortieLabel(band, track, e.sortie, e.kind))}"><b>${esc(e.sortie || "—")}</b></span>${
           known || WA.kindOffCatalogue(e.kind) ? ""
             : `<span class="offcat" title="Not in the syllabus catalogue — typed as free text">*</span>`}${
@@ -822,66 +841,85 @@ WA.renderAdmin = async function (view, me) {
           ? `<span class="k">—</span>` : esc(e.duration)}</td>
         ${logGradeCell(e)}
         ${logMissionCell(e)}
+        ${stateCell(r.state)}
         ${srcCell(e)}</tr>`;
     });
   }
   function logBandBlock(s, band) {
     const all = Array.isArray(s.record[band]) ? s.record[band] : [];
-    const head = ["Flight", "Date", "Instructor", "Hours", "Grade", "Mission", "Source"];
+    const head = ["Flight", "Date", "Instructor", "Hours", "Grade", "Mission", "State", "Source"];
     const body = WA.TRACKS.map((t) => {
       const rows = logRows(s, band, t);
-      const list = all.filter((e) => (e.track || "") === t);
-      const hrs = list.reduce((a, e) => a + (isFinite(Number(e.duration)) ? Number(e.duration) : 0), 0);
-      const lag = list.filter(WA.awaitingDebrief).length;
+      const cn = WA.stateCounts(band, all, t);
       return `
         <h3 style="margin-top:10px">${esc(WA.secLabel(band))} &mdash; ${esc(WA.itemCatLabel(t))}
-          <span class="cnt">${rows.length} ${rows.length === 1 ? "flight" : "flights"}${
-            hrs > 0 ? " · " + (Math.round(hrs * 10) / 10) + " h" : ""}${
-            lag ? " · " + lag + " awaiting a grade" : ""}</span></h3>
+          <span class="cnt">${esc(WA.stateLine(band, cn))}</span></h3>
         ${rows.length ? evTable(head, rows)
           : `<p class="hint">Nothing recorded in this track yet.</p>`}`;
     }).join("");
-    const hrs = all.reduce((a, e) => a + (isFinite(Number(e.duration)) ? Number(e.duration) : 0), 0);
     return `<h2>${esc(WA.secLabel(band))} ${WA.tipDot(band)}
-        <span class="cnt">${all.length} ${all.length === 1 ? "flight" : "flights"}${
-          hrs > 0 ? " · " + (Math.round(hrs * 10) / 10) + " h" : ""}</span></h2>
+        <span class="cnt">${esc(WA.stateLine(band, WA.stateCounts(band, all)))}</span></h2>
+      ${stateLegend()}
       ${body}`;
+  }
+  /* the same legend the student's form carries — four colours are four facts */
+  function stateLegend() {
+    return `<p class="legend">${WA.ROW_STATES.map((st) =>
+      `<span class="lgchip st-${esc(st.id)}" title="${esc(st.tip)}">${esc(st.label)}</span>`)
+      .join(`<span class="lgsep">·</span>`)}
+      <span class="k">&mdash; the syllabus is pre-seeded: an OWED row is prescribed by the printed
+      programme and stored nowhere until it is filled in</span></p>`;
   }
   /* ROUND 12b — GROUP · COURSE · DATES, and nothing else: «Μη βαλεις
      εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο», and the same
      review removed the note field and with it the periods and attendance
      boxes. What the CO reads is what the student's own table holds. */
   function lessonsTable(s) {
-    const list = (Array.isArray(s.record.lessons) ? s.record.lessons : []).slice()
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    if (!list.length) return `<p class="hint">No ground lessons recorded.</p>`;
-    return evTable(["Group", "Course", "Dates", "Source"],
-      list.map((e) => {
-        const c = WA.lessonCourse(e.group, e.course);
-        return `<tr>
-          <td title="${esc(WA.groundGroupLabel(e.group))}"><b>${esc(e.group || "—")}</b></td>
-          <td>${esc(e.course || "—")}${c ? "" :
-            (e.course ? `<span class="offcat" title="Not in the generated syllabus catalogue for this group">*</span>` : "")}</td>
-          <td>${esc(fmtD(e.date))}${e.end_date && e.end_date !== e.date ? " &ndash; " + esc(fmtD(e.end_date)) : ""}</td>
-          ${srcCell(e)}</tr>`;
-      }));
+    const rows = WA.slotRows("lessons", s.record.lessons).map((r) => {
+      const e = r.e;
+      if (!e) {
+        const d = r.def;
+        return `<tr class="st-owed">
+          <td title="${esc(WA.groundGroupLabel(d.group))}"><b>${esc(d.group)}</b></td>
+          <td title="${esc(d.crs.n + " · " + d.crs.p + " period" + (d.crs.p === 1 ? "" : "s"))}">${
+            esc(d.course)}${d.crs.cond
+              ? ` <span class="badge badge-acc" title="Supplementary — only for SPs who did not cover it at their Air Force Academy">foreign SPs</span>` : ""}</td>
+          <td class="k">&mdash;</td>${stateCell("owed")}<td class="k">&mdash;</td></tr>`;
+      }
+      const c = WA.lessonCourse(e.group, e.course);
+      return `<tr class="st-${esc(r.state)}">
+        <td title="${esc(WA.groundGroupLabel(e.group))}"><b>${esc(e.group || "—")}</b></td>
+        <td>${esc(e.course || "—")}${c ? "" :
+          (e.course ? `<span class="offcat" title="Not in the generated syllabus catalogue for this group">*</span>` : "")}</td>
+        <td>${esc(fmtD(e.date))}${e.end_date && e.end_date !== e.date ? " &ndash; " + esc(fmtD(e.end_date)) : ""}</td>
+        ${stateCell(r.state)}
+        ${srcCell(e)}</tr>`;
+    });
+    return evTable(["Group", "Course", "Dates", "State", "Source"], rows);
   }
   function examsTable(s) {
-    const list = (Array.isArray(s.record.exams) ? s.record.exams : []).slice()
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    if (!list.length) return `<p class="hint">No ground exams recorded.</p>`;
-    return evTable(["Exam", "Date", "Grade", "Source"],
-      list.map((e) => {
-        const x = WA.exam(e.exam);
-        const has = e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade));
-        return `<tr>
-          <td title="${esc(WA.examLabel(e.exam))}"><b>${esc(e.exam || "—")}</b>${
-            x && x.cond ? ` <span class="badge badge-acc" title="Foreign SPs only — a HAF student does not owe this exam">foreign SPs only</span>` : ""}</td>
-          <td>${esc(fmtD(e.date))}</td>
-          ${has ? `<td class="num">${WA.pct(e.grade)}</td>`
-                : `<td class="lag">${WA.debriefChip(e) || "&mdash;"}</td>`}
-          ${srcCell(e)}</tr>`;
-      }));
+    const rows = WA.slotRows("exams", s.record.exams).map((r) => {
+      const e = r.e;
+      if (!e) {
+        const d = r.def.def;
+        return `<tr class="st-owed">
+          <td title="${esc(WA.examLabel(d.id))}"><b>${esc(d.id)}</b>${
+            d.cond ? ` <span class="badge badge-acc" title="Foreign SPs only — a HAF student does not owe this exam">foreign SPs only</span>` : ""}</td>
+          <td class="k">&mdash;</td><td class="k">&mdash;</td>
+          ${stateCell("owed")}<td class="k">&mdash;</td></tr>`;
+      }
+      const x = WA.exam(e.exam);
+      const has = e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade));
+      return `<tr class="st-${esc(r.state)}">
+        <td title="${esc(WA.examLabel(e.exam))}"><b>${esc(e.exam || "—")}</b>${
+          x && x.cond ? ` <span class="badge badge-acc" title="Foreign SPs only — a HAF student does not owe this exam">foreign SPs only</span>` : ""}</td>
+        <td>${esc(fmtD(e.date))}</td>
+        ${has ? `<td class="num">${WA.pct(e.grade)}</td>`
+              : `<td class="lag">${WA.debriefChip(e, "exams") || "&mdash;"}</td>`}
+        ${stateCell(r.state)}
+        ${srcCell(e)}</tr>`;
+    });
+    return evTable(["Exam", "Date", "Grade", "State", "Source"], rows);
   }
 
   /* "3 of 8 syllabus solos flown · 1 additional" — the honest solo counter */
@@ -1145,12 +1183,13 @@ WA.renderAdmin = async function (view, me) {
       </div>
       <div class="card">
         <h2>${esc(WA.secLabel("lessons"))} ${WA.tipDot("lessons")}
-          <span class="cnt">${(s.record.lessons || []).length} ${
-            (s.record.lessons || []).length === 1 ? "entry" : "entries"}</span></h2>
+          <span class="cnt">${esc(WA.stateLine("lessons",
+            WA.stateCounts("lessons", s.record.lessons)))}</span></h2>
+        ${stateLegend()}
         ${lessonsTable(s)}
         <h2 style="margin-top:14px">${esc(WA.secLabel("exams"))} ${WA.tipDot("exams")}
-          <span class="cnt">${(s.record.exams || []).length} ${
-            (s.record.exams || []).length === 1 ? "entry" : "entries"}</span></h2>
+          <span class="cnt">${esc(WA.stateLine("exams",
+            WA.stateCounts("exams", s.record.exams)))}</span></h2>
         ${examsTable(s)}
       </div>
       <div class="card">
@@ -1218,6 +1257,10 @@ WA.renderAdmin = async function (view, me) {
             const list = Array.isArray(s.record[k]) ? s.record[k] : [];
             const lag = list.filter(WA.awaitingDebrief).length;
             const hrs = list.reduce((a, e) => a + (isFinite(Number(e.duration)) ? Number(e.duration) : 0), 0);
+            /* ROUND 13 — and how much of the syllabus is STILL OWED. A brief
+               that said only what was flown could never answer the question the
+               CO actually asks of it: how far through the stage is this one. */
+            const cn = WA.stateCounts(k, list);
             return `<div class="kline"><span class="k">${esc(WA.secLabel(k))}</span>
               ${list.length
                 ? WA.TRACKS.map((t) => {
@@ -1225,6 +1268,11 @@ WA.renderAdmin = async function (view, me) {
                     return n ? `<b>${esc(WA.itemCatLabel(t))}</b> ${esc(n)}` : "";
                   }).filter(Boolean).join(" · ") +
                   (hrs > 0 ? ` <span class="k">· ${esc(Math.round(hrs * 10) / 10)} h</span>` : "") +
+                  ` <span class="k" title="${esc("The printed flow chart prescribes " +
+                    WA.slotCount(k) + " sorties here; " + cn.done + " are complete, " + cn.started +
+                    " started and " + cn.owed + " have nothing recorded against them yet" +
+                    (cn.extra ? " (" + cn.extra + " extra beyond the planned pass)" : ""))
+                    }">· ${esc(cn.owed)} of ${esc(WA.slotCount(k))} owed</span>` +
                   (lag ? ` <span class="k" title="Flown, and the debrief has not landed yet — the grade is genuinely not known, not missing">· ${esc(lag)} awaiting a grade</span>` : "") +
                   /* ROUND 12b — a mission the squadron recorded as INCOMPLETE
                      is the one thing in this log a brief must not swallow */
@@ -1232,15 +1280,20 @@ WA.renderAdmin = async function (view, me) {
                     const bad = list.filter((e) => WA.rowMission(e) === "incomplete").length;
                     return bad ? ` <span class="k" title="Flights whose mission was not completed — read from the grade where there is one, said by the squadron where there is not">· ${esc(bad)} incomplete</span>` : "";
                   })())
-                : "<span class='k'>none recorded</span>"}</div>`;
+                : `<span class="k">none recorded &mdash; all ${esc(WA.slotCount(k))} of the syllabus owed</span>`}</div>`;
           }).join("")}
+          ${/* ROUND 13 — the ground programme has a denominator too: 47 courses
+                and 8 exams, all of them owed on day one */ ""}
           <div class="kline"><span class="k">Ground</span>
-            ${(s.record.lessons || []).length || (s.record.exams || []).length
-              ? `<b>${esc((s.record.lessons || []).length)}</b> lesson${(s.record.lessons || []).length === 1 ? "" : "s"}` +
-                ` · <b>${esc((s.record.exams || []).length)}</b> exam${(s.record.exams || []).length === 1 ? "" : "s"}` +
-                ((s.record.exams || []).filter(WA.awaitingDebrief).length
-                  ? ` <span class="k">· ${esc((s.record.exams || []).filter(WA.awaitingDebrief).length)} awaiting a result</span>` : "")
-              : "<span class='k'>none recorded</span>"}</div>
+            ${(() => {
+              const cl = WA.stateCounts("lessons", s.record.lessons);
+              const cx = WA.stateCounts("exams", s.record.exams);
+              return `<b>${esc(cl.done)}</b> of ${esc(WA.slotCount("lessons"))} lessons` +
+                (cl.started ? ` <span class="k">(+${esc(cl.started)} started)</span>` : "") +
+                ` · <b>${esc(cx.done)}</b> of ${esc(WA.slotCount("exams"))} exams` +
+                (cx.lag ? ` <span class="k">· ${esc(cx.lag)} awaiting a result</span>` : "") +
+                (cl.extra + cx.extra ? ` <span class="k">· ${esc(cl.extra + cx.extra)} extra</span>` : "");
+            })()}</div>
           ${["fail", "almost_good"].map((k) => {
             const list = s.record[k] || [];
             /* one sub-line per entry: the items inside an entry are already
@@ -1422,14 +1475,18 @@ WA.renderAdmin = async function (view, me) {
         return esc(WA.missionLabel(m)) +
           (WA.missionDerived(e) ? ` <span class="pr-n">(read from the grade)</span>` : "");
       };
+      /* ROUND 13 ON PAPER — the four states are WORDS here, and the OWED rows
+         are not printed one by one. A photocopied brief of 180 empty lines is
+         not a brief; what paper needs is the arithmetic — "9 done · 2 started ·
+         66 owed · 1 extra" in the section heading — and the state word on each
+         row that exists. The screen carries the colour; the paper carries the
+         count and the word, and they are the same four words. */
       const logPrint = ["flights", "fs"].map((k) => WA.TRACKS.map((t) => {
-        const list = (Array.isArray(s.record[k]) ? s.record[k] : [])
-          .filter((e) => (e.track || "") === t)
-          .slice().sort((a, b) => String(a.date).localeCompare(String(b.date)) ||
-                                  (Number(a.seq || 1) - Number(b.seq || 1)));
+        const all = Array.isArray(s.record[k]) ? s.record[k] : [];
+        const list = WA.slotRows(k, all, t).filter((r) => r.e);
         if (!list.length) return "";
-        const hrs = list.reduce((a, e) => a + (isFinite(Number(e.duration)) ? Number(e.duration) : 0), 0);
-        const rws = list.map((e) => `<tr>
+        const cn = WA.stateCounts(k, all, t);
+        const rws = list.map((r) => { const e = r.e; return `<tr>
           <td>${esc(e.sortie || "—")}${WA.coTag(e)}${
             e.kind && e.kind !== "syllabus" ? ` <span class="pr-n">(${esc(WA.flightKindLabel(e.kind))})</span>` : ""}${
             Number(e.seq || 1) > 1 ? ` <span class="pr-n">(same-day re-fly #${esc(Number(e.seq))})</span>` : ""}</td>
@@ -1437,26 +1494,30 @@ WA.renderAdmin = async function (view, me) {
           <td>${esc(e.instructor || "—")}</td>
           <td>${e.duration === null || e.duration === undefined || e.duration === "" ? "—" : esc(e.duration)}</td>
           <td>${logGradeWord(e)}</td>
-          <td>${logMissionWord(e)}</td></tr>`);
+          <td>${logMissionWord(e)}</td>
+          <td>${esc(WA.rowStateDef(r.state).label)}</td></tr>`; });
         return `<div class="pr-sec">${esc(WA.secLabel(k))} — ${esc(WA.itemCatLabel(t))}
-            (${list.length} flown${hrs > 0 ? ", " + (Math.round(hrs * 10) / 10) + " h" : ""})</div>
-          ${prT(["Flight", "Date", "Instructor", "Hours", "Grade", "Mission"], rws)}`;
+            (${esc(WA.stateLine(k, cn))})</div>
+          ${prT(["Flight", "Date", "Instructor", "Hours", "Grade", "Mission", "State"], rws)}`;
       }).join("")).join("");
-      const lessonRows = (s.record.lessons || []).slice()
-        .sort((a, b) => String(a.date).localeCompare(String(b.date))).map((e) => {
-          const c = WA.lessonCourse(e.group, e.course);
-          return `<tr><td>${esc(e.group || "—")}${WA.coTag(e)}</td>
-            <td>${esc(e.course || "—")}${c ? "" : (e.course ? ` <span class="pr-n">(off-catalogue)</span>` : "")}</td>
-            <td>${esc(fmtD(e.date))}${e.end_date && e.end_date !== e.date ? " – " + esc(fmtD(e.end_date)) : ""}</td></tr>`;
-        });
-      const examRows = (s.record.exams || []).slice()
-        .sort((a, b) => String(a.date).localeCompare(String(b.date))).map((e) => {
-          const has = e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade));
-          return `<tr><td>${esc(e.exam || "—")}${WA.coTag(e)}${
-              (WA.exam(e.exam) || {}).cond ? ` <span class="pr-n">(foreign SPs only)</span>` : ""}</td>
-            <td>${esc(fmtD(e.date))}</td>
-            <td>${has ? WA.pct(e.grade) : `<span class="pr-n">awaiting the result</span>`}</td></tr>`;
-        });
+      const lessonCn = WA.stateCounts("lessons", s.record.lessons);
+      const lessonRows = WA.slotRows("lessons", s.record.lessons).filter((r) => r.e).map((r) => {
+        const e = r.e, c = WA.lessonCourse(e.group, e.course);
+        return `<tr><td>${esc(e.group || "—")}${WA.coTag(e)}</td>
+          <td>${esc(e.course || "—")}${c ? "" : (e.course ? ` <span class="pr-n">(off-catalogue)</span>` : "")}</td>
+          <td>${esc(fmtD(e.date))}${e.end_date && e.end_date !== e.date ? " – " + esc(fmtD(e.end_date)) : ""}</td>
+          <td>${esc(WA.rowStateDef(r.state).label)}</td></tr>`;
+      });
+      const examCn = WA.stateCounts("exams", s.record.exams);
+      const examRows = WA.slotRows("exams", s.record.exams).filter((r) => r.e).map((r) => {
+        const e = r.e;
+        const has = e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade));
+        return `<tr><td>${esc(e.exam || "—")}${WA.coTag(e)}${
+            (WA.exam(e.exam) || {}).cond ? ` <span class="pr-n">(foreign SPs only)</span>` : ""}</td>
+          <td>${esc(fmtD(e.date))}</td>
+          <td>${has ? WA.pct(e.grade) : `<span class="pr-n">awaiting the result</span>`}</td>
+          <td>${esc(WA.rowStateDef(r.state).label)}</td></tr>`;
+      });
       return `
         <div class="pr-page">
           <div class="pr-brand"><img src="assets/364mea-240.png" alt=""><span>Wings Ahead</span>
@@ -1501,10 +1562,13 @@ WA.renderAdmin = async function (view, me) {
                show — and where the mission is read from the grade, the cell
                says so, because paper cannot hover. */ ""}
           ${logPrint}
-          ${lessonRows.length ? `<div class="pr-sec">Ground lessons — the theory groups and their courses</div>
-            ${prT(["Group", "Course", "Dates"], lessonRows)}` : ""}
-          ${examRows.length ? `<div class="pr-sec">Ground exams</div>
-            ${prT(["Exam", "Date", "Grade"], examRows)}` : ""}
+          <div class="pr-sec">Ground lessons — the theory groups and their courses
+            (${esc(WA.stateLine("lessons", lessonCn))})</div>
+          ${lessonRows.length ? prT(["Group", "Course", "Dates", "State"], lessonRows)
+            : `<div class="pr-n">Nothing recorded yet — all ${esc(WA.slotCount("lessons"))} courses of the programme are owed.</div>`}
+          <div class="pr-sec">Ground exams (${esc(WA.stateLine("exams", examCn))})</div>
+          ${examRows.length ? prT(["Exam", "Date", "Grade", "State"], examRows)
+            : `<div class="pr-n">Nothing recorded yet — all ${esc(WA.slotCount("exams"))} ground exams are owed.</div>`}
           <div class="pr-sec">Assessment for fighters — weighted mean ${
             ass.n ? esc(WA.levelFormula(ass.counts, ass.n) + " = " + WA.meanText(ass.mean))
                   : "no assessment submitted yet"}</div>
@@ -1804,6 +1868,16 @@ WA.renderAdmin = async function (view, me) {
          re-weight the scale entirely, without going back to the database. */
       .concat(["Mean (fighters)", "Weight sum", "Assessments in", "Instructors total"])
       .concat(WA.LEVELS.map((l) => l.label))
+      /* ROUND 13 — WHERE THE FOURTH WORD LIVES. The entries CSV is one row per
+         entry and an OWED slot is not an entry, so "owed" could never appear
+         there. It appears HERE, as arithmetic: four columns per slot section,
+         done / started / owed / extra against the printed syllabus. That is
+         what makes the export answer "how far through the stage is this class"
+         in a spreadsheet, which is the question the pre-seeded slots exist for. */
+      .concat(WA.SLOT_SECTIONS.reduce((a, k) => a.concat(
+        [WA.secLabel(k) + " done", WA.secLabel(k) + " started",
+         WA.secLabel(k) + " owed", WA.secLabel(k) + " extra",
+         WA.secLabel(k) + " in syllabus"]), []))
       .concat(["Self-report updated"])];
     for (const s of visible()) {
       const st = s._stats;
@@ -1820,6 +1894,10 @@ WA.renderAdmin = async function (view, me) {
         .concat([a.n ? WA.meanText(a.mean) : "", a.n ? a.sum : "",
           a.n, s.completion.instructors_total])
         .concat(WA.LEVELS.map((l) => (a.counts || {})[l.id] || 0))
+        .concat(WA.SLOT_SECTIONS.reduce((acc, k) => {
+          const cn = WA.stateCounts(k, s.record[k]);
+          return acc.concat([cn.done, cn.started, cn.owed, cn.extra, WA.slotCount(k)]);
+        }, []))
         .concat([s.completion.has_record ? fmtDT(s.last_update) : "not submitted"]));
     }
     download("wings-ahead-summary" + classSuffix() + "-" + stamp() + ".csv",
@@ -1838,14 +1916,29 @@ WA.renderAdmin = async function (view, me) {
        incomplete, marked when it is READ FROM THE GRADE rather than said. A
        spreadsheet that read a blank Grade as a zero would be reading a failure
        that never happened, so both facts are stated in columns of their own. */
+    /* ROUND 13 — "State" carries the four words of the colour scheme. THREE of
+       them can ever appear here and that is not an oversight: this export is
+       one row per ENTRY, and an OWED slot is not an entry — nothing is stored
+       for it, by design. Where a student stands against the syllabus is a
+       COUNT, so it travels in the summary CSV (four columns), in the drill-down
+       and on the printed brief. Every other section leaves the cell empty
+       rather than inventing a state it does not have. */
     const rows = [["Student", "Class", "Section", "Date", "Detail", "Flight code",
       "Items", "Item count", "With whom / authorised by", "Grade", "To correct", "Entered by", "Counts",
-      "Hours", "Awaiting", "Mission"]];
+      "Hours", "Awaiting", "Mission", "State"]];
+    /* the claim map per student per section — computed ONCE per section rather
+       than per row, and by the same function every surface uses */
+    let CL = {};
+    const stateOf = (sec, e, ix) => {
+      if (!WA.hasSlots(sec)) return "";
+      const c = CL[sec];
+      return WA.rowStateDef(WA.rowState(sec, e, !!(c && c.claimed[ix]))).label;
+    };
     /* "Counts" — round 11 residual (verify item 10): a re-flown checkride
        exports BOTH attempts; this column says which one the numbers use,
        decided by the same helper as every other surface. Non-evaluation rows
        leave it empty. */
-    const add = (s, sec, e, detail, code, items, who, grade, date, counts, hours) =>
+    const add = (s, sec, e, detail, code, items, who, grade, date, counts, hours, state) =>
       rows.push([WA.personName(s.person, true), s.person.class, WA.secLabel(sec),
         fmtD(date === undefined ? e.date : date), detail, code || "",
         items || "", WA.itemsN(e) || "", who || "",
@@ -1865,9 +1958,12 @@ WA.renderAdmin = async function (view, me) {
                       ? WA.missionLabel(WA.rowMission(e)) +
                         (WA.missionDerived(e) ? " (read from the grade)" : " (no percentage recorded)")
                       : ""))
-          : ""]);
+          : "",
+        state || ""]);
     for (const s of visible()) {
       const r = s.record;
+      CL = {};
+      for (const k of WA.SLOT_SECTIONS) CL[k] = WA.claims(k, r[k] || []);
       (r.nfs || []).forEach((e) => add(s, "nfs", e,
         WA.nfsReasonLabel(e) + (e.note && e.reason !== "other" ? " — " + e.note : ""),
         "", "", "", null));
@@ -1913,24 +2009,24 @@ WA.renderAdmin = async function (view, me) {
          in a Grade column beside a mission the squadron called INCOMPLETE is
          exactly the disagreement the key exists to prevent. */
       for (const k of ["flights", "fs"]) {
-        (r[k] || []).forEach((e) => {
+        (r[k] || []).forEach((e, ix) => {
           const bits = [WA.itemCatLabel(e.track)];
           if (e.kind && e.kind !== "syllabus") bits.push(WA.flightKindLabel(e.kind));
           if (Number(e.seq || 1) > 1) bits.push("same-day re-fly #" + Number(e.seq));
           if (e.ng) bits.push("NG (non-graded)");
           add(s, k, e, bits.join(" — "), e.sortie, "", e.instructor, e.grade,
-              undefined, "", e.duration);
+              undefined, "", e.duration, stateOf(k, e, ix));
         });
       }
-      (r.lessons || []).forEach((e) => add(s, "lessons", e,
+      (r.lessons || []).forEach((e, ix) => add(s, "lessons", e,
         [WA.groundGroupLabel(e.group),
          e.end_date && e.end_date !== e.date ? "to " + fmtD(e.end_date) : ""
         ].filter(Boolean).join(" — "),
-        e.course, "", "", null));
-      (r.exams || []).forEach((e) => add(s, "exams", e,
+        e.course, "", "", null, undefined, "", undefined, stateOf("lessons", e, ix)));
+      (r.exams || []).forEach((e, ix) => add(s, "exams", e,
         [WA.examLabel(e.exam), (WA.exam(e.exam) || {}).cond ? "foreign SPs only" : ""
         ].filter(Boolean).join(" — "),
-        e.exam, "", "", e.grade));
+        e.exam, "", "", e.grade, undefined, "", undefined, stateOf("exams", e, ix)));
     }
     download("wings-ahead-entries" + classSuffix() + "-" + stamp() + ".csv",
              "text/csv;charset=utf-8", csv(rows));
