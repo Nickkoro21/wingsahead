@@ -2411,7 +2411,11 @@ WA.renderStudent = async function (view, me, opts) {
          waiting for a grade — follow the keystroke that changes them */
       $("cnt-" + sec).textContent = cntHTML(sec);
       refreshTblCount(sec, i);
-      if (isLog && f === "date") refreshMissionCell(sec, i);
+      /* 12b verify finding 1 — "grade" too: a two-digit grade arrives digit by
+         digit, and only the PRESENCE toggle above redrew the mission chip, so
+         typing 9 then 0 left "Mission incomplete" reading off the 9. The chip
+         follows EVERY grade keystroke now. */
+      if (isLog && (f === "date" || f === "grade")) refreshMissionCell(sec, i);
     } else if (f === "note" && sec === "nfs") {
       /* the note IS the cause when the reason is "Other" — the row's own
          completeness note has to follow what is typed into it */
@@ -2480,6 +2484,7 @@ WA.renderStudent = async function (view, me, opts) {
   /* ── collect + client-side validation (the server re-validates all of it) ── */
   function buildPayload() {
     const d = S.data, problems = [], leftovers = [];
+    let problemAt = null;   /* "sec:storedIndex" of the FIRST problem row */
     const clean = {};
     /* the form row each payload entry was built from, in payload order — the
        server answers with its stamping verdict per entry (round 4b), and this
@@ -2494,8 +2499,27 @@ WA.renderStudent = async function (view, me, opts) {
       (rows[sec] = rows[sec] || []).push(e);
       if (legacyOf(sec, e)) leftovers.push(WA.secLabel(sec));
     };
-    const need = (sec, i, what) =>
-      problems.push(WA.secLabel(sec) + " #" + (i + 1) + ": " + what);
+    /* 12b verify finding 2 — "#4" was the STORED index, which the date-sorted,
+       track-split tables show NOWHERE. A problem row is named by what the user
+       can SEE (its code and date), and the first one is remembered so save()
+       can scroll to and mark the actual row. */
+    const rowName = (sec, i) => {
+      const e = (d[sec] || [])[i] || {};
+      const bits = [];
+      if (e.sortie) bits.push(String(e.sortie).toUpperCase());
+      else if (e.exam) bits.push(String(e.exam));
+      else if (e.group) bits.push(String(e.group) + (e.course ? " · " + e.course : ""));
+      else if (e.slot) bits.push(String(e.slot));
+      else if (e.evaluation) bits.push(String(e.evaluation));
+      if (e.track) bits.push(WA.itemCatLabel ? WA.itemCatLabel(e.track) : e.track);
+      const dt = e.date || e.entrance_date;
+      if (dt) bits.push(fmtD(dt));
+      return bits.length ? " (" + bits.join(" · ") + ")" : " #" + (i + 1);
+    };
+    const need = (sec, i, what) => {
+      problems.push(WA.secLabel(sec) + rowName(sec, i) + ": " + what);
+      if (!problemAt) problemAt = sec + ":" + i;
+    };
     /* GRADES ARE WHOLE NUMBERS (round 5) — the server refuses 62.5, so the
        form says so first, on the row, and offers the rounding as a button
        rather than performing it silently. */
@@ -2836,7 +2860,7 @@ WA.renderStudent = async function (view, me, opts) {
           " set by the squadron CO and only the CO can change them — ask him to correct it; your save cannot go through without them");
       }
     }
-    return { clean, rows, problems, leftovers };
+    return { clean, rows, problems, leftovers, problemAt };
   }
 
   /* ── THE ONE SAVE (round 9) ───────────────────────────────────────────────
@@ -2846,11 +2870,21 @@ WA.renderStudent = async function (view, me, opts) {
      flight — a double-tap on a phone must not send the record twice. */
   async function save() {
     const st = $("stu-status");
-    const { clean, rows, problems, leftovers } = buildPayload();
+    const { clean, rows, problems, leftovers, problemAt } = buildPayload();
     if (problems.length) {
       st.className = "st err";
       st.textContent = problems[0] + (problems.length > 1 ? " (+" + (problems.length - 1) + " more)" : "");
       toast(problems[0], true);
+      /* 12b verify finding 2 — take the user TO the row the sentence names:
+         both the table rows (tr) and the card rows carry data-row="sec:idx" */
+      if (problemAt) {
+        const row = form.querySelector(`[data-row="${problemAt}"]`);
+        if (row) {
+          row.scrollIntoView({ block: "center" });
+          row.classList.add("is-problem");
+          setTimeout(() => row.classList.remove("is-problem"), 4000);
+        }
+      }
       return;
     }
     const btns = [$("stu-save"), document.getElementById("stu-float-save")].filter(Boolean);

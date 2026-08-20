@@ -1856,7 +1856,7 @@ WA.renderAdmin = async function (view, me) {
            lesson is attended, not scored, so it is never "awaiting" anything —
            and a column that said it was would put a chase on every lesson in
            the squadron (found by this round's own CSV read-back). */
-        (sec === "flights" || sec === "fs" || sec === "exams") ? WA.debriefWord(e) : "",
+        (sec === "flights" || sec === "fs" || sec === "exams") ? WA.debriefWord(e, sec) : "",
         /* round 12b — only the two flight logs have a mission; everything
            else leaves the cell empty rather than inventing one */
         (sec === "flights" || sec === "fs")

@@ -1614,11 +1614,14 @@ WA.debriefChip = function (e) {
   return `<span class="lagchip${late ? " is-late" : ""}" title="${esc(tip)}"
     aria-label="${esc(tip)}">awaiting debrief${late ? " · " + n + " d" : ""}</span>`;
 };
-/* the same fact for CSV / plain text */
-WA.debriefWord = function (e) {
+/* the same fact for CSV / plain text. 12b verify finding 3 — a ground EXAM
+   awaits a RESULT, not a debrief: every other surface already says so
+   (admin.js "awaiting a result", the exam row chip); the CSV must agree. */
+WA.debriefWord = function (e, sec) {
   if (!WA.awaitingDebrief(e)) return "";
   const n = WA.daysAgo(e.date);
-  return "awaiting debrief" + (n === null ? "" : " (" + n + " d)");
+  const word = sec === "exams" ? "awaiting a result" : "awaiting debrief";
+  return word + (n === null ? "" : " (" + n + " d)");
 };
 
 /* ── THE LOG CATALOGUES (generated into app/items-catalog.js) ─────────────── */

@@ -1069,3 +1069,13 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 /* R8 verify finding: the long Greek verbatim under the SMS reason box must stay
    mixed-case as printed — the .f > span uppercase rule is for FIELD LABELS only */
 .f > span.fnote { text-transform: none; }
+
+/* 12b verify finding 2 — the row a save refusal names, marked for 4 s so the
+   eye lands where the sentence points (tokens only; no motion beyond a fade
+   for prefers-reduced-motion users — it is a background, not an animation). */
+tr.is-problem, .rrow.is-problem {
+  background: rgba(var(--bad-rgb), 0.14);
+  outline: 2px solid rgba(var(--bad-rgb), 0.55);
+  outline-offset: -2px;
+  transition: background 0.6s ease, outline-color 0.6s ease;
+}
