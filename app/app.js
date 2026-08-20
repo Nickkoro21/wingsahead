@@ -681,6 +681,12 @@ WA.SECTIONS_META = {
      with no date has not been flown, and a result still awaited is a grade not
      written yet — neither needs a flag to say so. */
   cef:          { label: "CEF", tip: "CEF = Εξέταση Καταλληλότητας (evaluation with a Squadron Evaluator) — flown after failures, so fewer is better. Each entry names the stage flight that triggered it and the evaluator who conducted it." },
+  /* ROUND 12 — THE LOG TABLES. Four sections, ten blocks on screen: the band
+     is the section, the track is on the row, and the pair is one table. */
+  flights:      { label: "Flights", tip: "The flight log — every sortie flown in the AIRCRAFT, one row each: the flight, the date, the instructor, how long it lasted and the grade. The grade may be left empty: a debrief sometimes takes a while, and the row says «awaiting debrief» rather than pretending the flight did not happen. Split into the four tracks of the syllabus; the eight checkrides are recorded in the Evaluations section, where the syllabus order applies to them." },
+  fs:           { label: "F/S", tip: "The same log for the SIMULATOR — every F/S sortie, in the same four tracks. Sim hours and flight hours are counted separately by the squadron, which is why they are two logs and not one." },
+  lessons:      { label: "Ground lessons", tip: "The ground academics — the twelve theory groups of the programme and the courses inside them. A lesson is a BLOCK, so it can carry an end date; the periods box left empty means the FULL course, and «absent» is how a class the student missed is recorded from their own side. A lesson is attended, not scored, so there is no grade here." },
+  exams:        { label: "Ground exams", tip: "The eight ground-exam groups of the syllabus. The grade may be left empty until the result is in. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and belong under Ground lessons: that is where the squadron's scheduler counts them.)" },
 };
 WA.secLabel = function (k) { return (WA.SECTIONS_META[k] || {}).label || k; };
 WA.secTip = function (k) { return (WA.SECTIONS_META[k] || {}).tip || ""; };
@@ -995,6 +1001,21 @@ WA.ENTRY_KEYS = {
   solo_flights: ["slot", "sortie", "date", "ng", "grade", "instructor", "legacy", "entered_by"],
   fpc:          ["date", "flight_code", "evaluator", "result", "grade", "legacy", "entered_by"],
   cef:          ["date", "flight_code", "evaluator", "result", "grade", "legacy", "entered_by"],
+  /* ROUND 12 — THE LOG TABLES. flights and fs share ONE shape: the same
+     flight, flown in the aircraft or in the simulator, is the same set of
+     facts. `track` says which of the four tables the row belongs to — it is
+     NOT derived from the code, because kind fcf/cef/other have no syllabus
+     code at all. `seq` is AUTHORED (1, and 2 for a deliberate same-day
+     re-fly), never derived from an array index: an index is a position and
+     this is a fact. `instructor_oid` is never drawn as a box. */
+  flights:      ["date", "track", "sortie", "seq", "kind", "instructor", "instructor_oid",
+                 "duration", "grade", "ng", "verdict", "note", "legacy", "entered_by"],
+  fs:           ["date", "track", "sortie", "seq", "kind", "instructor", "instructor_oid",
+                 "duration", "grade", "ng", "verdict", "note", "legacy", "entered_by"],
+  lessons:      ["date", "end_date", "group", "course", "periods", "absent",
+                 "instructor", "instructor_oid", "note", "legacy", "entered_by"],
+  exams:        ["date", "exam", "grade", "instructor", "instructor_oid",
+                 "note", "legacy", "entered_by"],
 };
 
 /* ── AN EMPTY FIXED SLOT (round 5) ─────────────────────────────────────────
@@ -1175,6 +1196,56 @@ WA.migrateRecord = function (rec) {
     });
   }
 
+  /* ── ROUND 12 — THE LOG TABLES: THE PASS-THROUGH, WHICH IS THE POINT ──────
+     `out` is built key by key and the final pass below iterates over IT, so a
+     section this function does not NAME never enters the record the form is
+     handed — a student's whole flight log would evaporate on the first read.
+     Named here, named in WA.ENTRY_KEYS, and the four travel with their own
+     repairs. MIRROR: db/schema.sql → wa.migrate_record (round 12 block). */
+  for (const k of ["flights", "fs"]) {
+    out[k] = (arr(src[k]) || []).map((e) => {
+      const o = { ...e };
+      /* the authored defaults, so a row written by an older client reads as
+         what it always was: one flight of that sortie, in its syllabus place */
+      if (typeof o.seq !== "number") o.seq = 1;
+      if (!WA.flightKind(o.kind)) o.kind = "syllabus";
+      if (typeof o.ng !== "boolean") o.ng = false;
+      if (o.ng) o.grade = null;
+      /* the track rides in a syllabus code's own letter, so reading it off
+         there destroys nothing and invents nothing */
+      if (!o.track && WA.codeTrack(o.sortie)) o.track = WA.codeTrack(o.sortie);
+      /* A VERDICT BESIDE A GRADE IS DROPPED, not flagged — the one place this
+         round removes a stored value, and it is lossless: where a grade exists
+         the verdict is DERIVED from it. Flagging instead would leave a row
+         nobody could save, because the form draws no verdict box on a graded
+         row — a trap, not a question. */
+      if (o.grade !== null && o.grade !== undefined && o.grade !== "" &&
+          isFinite(Number(o.grade)) && o.verdict) o.verdict = null;
+      if (o.ng && o.verdict) o.verdict = null;
+      if (o.verdict && !WA.verdict(o.verdict)) { o.verdict = null; o.legacy = true; }
+      if (!isDate(o.date) || !String(o.sortie || "").trim() ||
+          !String(o.instructor || "").trim() || !o.track) o.legacy = true;
+      return o;
+    });
+  }
+  /* THE CATALOGUE-NARROWING REPAIR (the wa.nfs_reason_fix model): a group or
+     an exam the syllabus no longer contains is nulled and the row flagged —
+     never dropped, never guessed at — so a revision cannot make a stored
+     record permanently unsaveable. */
+  out.lessons = (arr(src.lessons) || []).map((e) => {
+    const o = { ...e };
+    if (o.group && !WA.groundGroup(o.group)) { o.group = null; o.legacy = true; }
+    if (typeof o.absent !== "boolean") o.absent = false;
+    if (!isDate(o.date) || !o.group) o.legacy = true;
+    return o;
+  });
+  out.exams = (arr(src.exams) || []).map((e) => {
+    const o = { ...e };
+    if (o.exam && !WA.exam(o.exam)) { o.exam = null; o.legacy = true; }
+    if (!isDate(o.date) || !o.exam) o.legacy = true;
+    return o;
+  });
+
   /* FINAL PASS — per-section key whitelist (mirror of wa.strip_entry): a key
      the form cannot show and the validator no longer accepts is dropped on
      READ, so a record written before this rule stops carrying it. */
@@ -1197,8 +1268,14 @@ WA.migrateRecord = function (rec) {
    information instead. recStats therefore has no `evals` key at all — the
    number cannot be resurrected by copying a line. Every count below is
    DERIVED from the entries, never typed. */
+/* ROUND 12 — the four log sections join the arithmetic, honestly. The
+   consequence is named rather than hidden: a mid-stage student goes from ~18
+   entries to ~80, so "3 of 8 entered by the CO" becomes "3 of 80". That is
+   what the record now contains, and a denominator that pretended otherwise
+   would be the untruth. */
 WA.COUNTED = ["nfs", "sms", "fail", "almost_good", "airsickness",
-              "evaluations", "solo_flights", "fpc", "cef"];
+              "evaluations", "solo_flights", "fpc", "cef",
+              "flights", "fs", "lessons", "exams"];
 
 /* ── IS THIS RECORD DIFFERENT FROM THAT ONE? (round 9) ──────────────────────
    One string per record, so "has anything actually changed since the last
@@ -1416,6 +1493,204 @@ WA.gradePassed = function (g) {
 WA.gradeBandText = function (g) {
   const b = WA.gradeBand(g);
   return b ? b.label + " («" + b.code + "» " + b.el + ")" : "no grade recorded";
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 12 — THE LOG TABLES: the four sections' vocabulary.
+   ──────────────────────────────────────────────────────────────────────────
+   MIRROR: db/schema.sql → wa.flight_kinds() / wa.verdicts() /
+   wa.grade_verdict(). Change one, change the other.
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.LOG_BANDS = [
+  { id: "flights", label: "Flights", short: "Flights", device: "T-6A",
+    tip: "The sorties flown in the aircraft" },
+  { id: "fs", label: "F/S", short: "F/S", device: "simulator",
+    tip: "The sorties flown in the simulator" },
+];
+WA.logBand = function (id) { return WA.LOG_BANDS.find((b) => b.id === id) || null; };
+
+/* «να αφησουμε placeholder για τυχον fcf, cef, repeat» — the user's own list.
+   `off` marks the kinds that are OFF-CATALOGUE BY NATURE: for them the sortie
+   box is free text and carries no "not in the syllabus catalogue" warning,
+   because the catalogue was never the right list to look in. */
+WA.FLIGHT_KINDS = [
+  { id: "syllabus", label: "Syllabus", tip: "A sortie of the printed flow chart, flown in its place" },
+  { id: "repeat", label: "Repeat", tip: "The SAME syllabus sortie flown again — the squadron's scheduler records a re-fly as a second event on the same node" },
+  { id: "fcf", label: "FCF", off: true, tip: "Functional Check Flight — not a syllabus sortie, so the flight box is free text" },
+  { id: "cef", label: "CEF", off: true, tip: "Εξέταση Καταλληλότητας — recorded here as a flight; the CEF section keeps the evaluation itself" },
+  { id: "other", label: "Other", off: true, tip: "Anything the four above do not cover — the flight box is free text" },
+];
+WA.flightKind = function (id) { return WA.FLIGHT_KINDS.find((k) => k.id === id) || null; };
+WA.flightKindLabel = function (id) {
+  const k = WA.flightKind(id);
+  return k ? k.label : (id ? String(id) : "Syllabus");
+};
+/* does this kind free the flight box from the syllabus catalogue? */
+WA.kindOffCatalogue = function (id) { return !!(WA.flightKind(id) || {}).off; };
+
+/* THE VERDICT WITHOUT A NUMBER. It exists only where the grade is absent: a
+   stored verdict beside a stored grade is a second source of truth that can
+   contradict the first — the defect round 11 removed from the FPC. */
+WA.VERDICTS = [
+  { id: "pass", label: "Pass", el: "ΕΠΙΤΥΧΙΑ", cls: "ok",
+    tip: "The squadron's scheduler recorded this flight as a pass and has no percentage for it" },
+  { id: "lagging", label: "Lagging", el: "ΥΣΤΕΡΗΣΗ", cls: "warn",
+    tip: "Recorded as ΥΣΤΕΡΗΣΗ (50-59 %) with no percentage written down" },
+  { id: "failed", label: "Failed", el: "ΑΠΟΤΥΧΙΑ", cls: "bad",
+    tip: "Recorded as ΑΠΟΤΥΧΙΑ (0-49 %) with no percentage written down" },
+];
+WA.verdict = function (id) { return WA.VERDICTS.find((v) => v.id === id) || null; };
+WA.verdictLabel = function (id) {
+  const v = WA.verdict(id);
+  return v ? v.label : (id ? String(id) : "");
+};
+/* the three-way collapse of the printed five-band scale, at the SAME 60/50
+   thresholds. MIRROR: db/schema.sql → wa.grade_verdict. */
+WA.gradeVerdict = function (g) {
+  const b = WA.gradeBand(g);
+  if (!b) return null;
+  return b.pass ? "pass" : b.id;      /* 'lagging' / 'failed' keep their names */
+};
+/* what a row's verdict IS, whatever it stores: derived from the grade when
+   there is one, read off the row when there is not. One function, so the
+   badge, the CSV and the count cannot disagree. */
+WA.rowVerdict = function (e) {
+  if (!e) return null;
+  if (e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade))) {
+    return WA.gradeVerdict(e.grade);
+  }
+  return WA.verdict(e.verdict) ? e.verdict : null;
+};
+
+/* ── THE DEBRIEF LAG, WHICH IS THE REALITY THE DIRECTIVE NAMES ─────────────
+   «δεκτο το null, γιατι καποιες φορες αργει το debriefing». A flown row with
+   no grade, not NG, and no verdict is a row WAITING FOR ITS DEBRIEF — never an
+   error, never a legacy leftover, never something that blocks a save. It is
+   shown quietly, and it goes amber once it has been waiting a while, because
+   at some point the quiet fact becomes a thing to chase. */
+WA.DEBRIEF_AMBER_DAYS = 7;
+WA.awaitingDebrief = function (e) {
+  if (!e || e.ng) return false;
+  const hasGrade = e.grade !== null && e.grade !== undefined && e.grade !== "" &&
+                   isFinite(Number(e.grade));
+  return !hasGrade && !WA.verdict(e.verdict) && !!String(e.date || "").trim();
+};
+/* how many days ago that flight was — null when the date is unusable */
+WA.daysAgo = function (d) {
+  const s = String(d || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const then = Date.parse(s + "T00:00:00Z");
+  if (!isFinite(then)) return null;
+  const now = new Date();
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((today - then) / 86400000);
+};
+/* the chip itself — quiet by default, amber once it has waited */
+WA.debriefChip = function (e) {
+  if (!WA.awaitingDebrief(e)) return "";
+  const n = WA.daysAgo(e.date);
+  const late = n !== null && n >= WA.DEBRIEF_AMBER_DAYS;
+  const tip = late
+    ? "Flown " + n + " days ago and still without a grade — the debrief has not landed yet"
+    : "The flight is recorded; its grade has not been written yet. That is expected — the debrief sometimes takes a while.";
+  return `<span class="lagchip${late ? " is-late" : ""}" title="${esc(tip)}"
+    aria-label="${esc(tip)}">awaiting debrief${late ? " · " + n + " d" : ""}</span>`;
+};
+/* the same fact for CSV / plain text */
+WA.debriefWord = function (e) {
+  if (!WA.awaitingDebrief(e)) return "";
+  const n = WA.daysAgo(e.date);
+  return "awaiting debrief" + (n === null ? "" : " (" + n + " d)");
+};
+
+/* ── THE LOG CATALOGUES (generated into app/items-catalog.js) ─────────────── */
+/* the sorties of ONE table, in FLOW-CHART ORDER. MIRROR: wa.sortie_codes. */
+WA.logSorties = function (band, track) {
+  const b = (typeof WA_LOG_SORTIES === "object" && WA_LOG_SORTIES) ? WA_LOG_SORTIES[band] : null;
+  const t = b ? b[track] : null;
+  return Array.isArray(t) ? t : [];
+};
+WA.logSortie = function (band, track, code) {
+  const c = WA.normCode(code);
+  return WA.logSorties(band, track).find((s) => s.c === c) || null;
+};
+/* which band a syllabus code belongs to — 'flights' | 'fs' | null.
+   The letter gives the TRACK (WA.codeTrack); only the flow chart gives the
+   band, which is why this is a lookup and not a regex. */
+WA.sortieBand = function (code) {
+  if (!WA._bandIx) {
+    WA._bandIx = {};
+    for (const b of WA.LOG_BANDS) {
+      for (const t of WA.TRACKS) for (const s of WA.logSorties(b.id, t)) WA._bandIx[s.c] = b.id;
+    }
+  }
+  return WA._bandIx[WA.normCode(code)] || null;
+};
+/* the PRESCRIBED hours of a sortie — what the duration box opens with. What
+   is stored is always the ACTUAL time flown; this is a starting point. */
+WA.sortieHours = function (band, track, code) {
+  const s = WA.logSortie(band, track, code);
+  return s && typeof s.h === "number" ? s.h : null;
+};
+/* WHAT THE TABLE'S DROPDOWN OFFERS — the flow-chart list MINUS the eight
+   checkrides. A checkride is recorded in the Evaluations section, where the
+   syllabus order and the pass-attempt rule apply to it; two rows for one
+   flight would be two grades that can disagree. The server refuses such a row
+   by name, so this is the courtesy and not the guard.
+   MIRROR: the wa.eval_ids() refusal in wa.validate_record. */
+WA.logPickList = function (band, track) {
+  return WA.logSorties(band, track).filter((s) => !s.k);
+};
+/* is this code one the table's own list knows? (an unknown one is accepted —
+   the syllabus data can lag reality — and shown marked) */
+WA.logSortieKnown = function (band, track, code) {
+  if (!String(code || "").trim()) return true;
+  return !!WA.logSortie(band, track, code);
+};
+/* "C4302 — Aerobatics" · free text as typed */
+WA.logSortieLabel = function (band, track, code) {
+  if (!String(code || "").trim()) return "—";
+  const s = WA.logSortie(band, track, code);
+  return s ? s.c + " — " + s.n + (s.nt ? " (night)" : "")
+           : String(code) + " (not in the syllabus catalogue)";
+};
+
+/* the 12 theory groups and their 47 courses. THE JOIN KEY IS THE PAIR
+   (group, course) — OJT is a course of four different groups. */
+WA.groundGroups = function () {
+  return (typeof WA_GROUND !== "undefined" && Array.isArray(WA_GROUND)) ? WA_GROUND : [];
+};
+WA.groundGroup = function (id) {
+  return WA.groundGroups().find((g) => g.g === id) || null;
+};
+WA.groundGroupLabel = function (id) {
+  const g = WA.groundGroup(id);
+  return g ? g.g + " — " + g.name : (id ? String(id) : "—");
+};
+WA.lessonCourses = function (group) {
+  const g = WA.groundGroup(group);
+  return g && Array.isArray(g.courses) ? g.courses : [];
+};
+WA.lessonCourse = function (group, code) {
+  return WA.lessonCourses(group).find((c) => c.c === code) || null;
+};
+/* which group a course code belongs to, when exactly one does — the check
+   behind "that course belongs to another group" */
+WA.courseHome = function (code) {
+  const c = String(code || "").trim();
+  if (!c) return null;
+  for (const g of WA.groundGroups()) if (g.courses.some((x) => x.c === c)) return g.g;
+  return null;
+};
+/* the 8 ground-exam groups (and only those — the nested exams[] of four
+   theory groups are COURSES of their group in FDMS, so they live in lessons) */
+WA.examList = function () {
+  return (typeof WA_EXAMS !== "undefined" && Array.isArray(WA_EXAMS)) ? WA_EXAMS : [];
+};
+WA.exam = function (id) { return WA.examList().find((e) => e.id === id) || null; };
+WA.examLabel = function (id) {
+  const e = WA.exam(id);
+  return e ? e.id + " — " + e.name : (id ? String(id) : "—");
 };
 
 /* ── WHICH OF TWO ATTEMPTS CAME LATER (round 9's twin rule, extracted) ──────

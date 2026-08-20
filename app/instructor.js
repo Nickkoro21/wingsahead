@@ -81,6 +81,34 @@ WA.renderInstructor = async function (view, me, opts) {
           (e.ng ? ` — <span class="k">NG</span>` : ` — <b>${WA.pct(e.grade)}</b>`) +
           " " + WA.soloWhoPhrase(e) +
           WA.coTag(e)).join(" · ") : "");
+    /* ROUND 12 — THE FLIGHT LOG, ONE LINE PER BAND. An instructor reads this
+       card before flying with the student, so what it owes them is the shape
+       of the log — how much of each track has been flown, how many hours, and
+       how many sorties are still waiting for a debrief. The rows themselves
+       are the CO's drill-down and the student's own form; a card that printed
+       eighty of them would stop being readable at the moment it matters. */
+    const logLine = ["flights", "fs"].map((k) => {
+      const list = Array.isArray(rec[k]) ? rec[k] : [];
+      if (!list.length) return "";
+      const hrs = list.reduce((a, e) => a + (isFinite(Number(e.duration)) ? Number(e.duration) : 0), 0);
+      const lag = list.filter(WA.awaitingDebrief).length;
+      const per = WA.TRACKS.map((t) => {
+        const n = list.filter((e) => (e.track || "") === t).length;
+        return n ? `<b>${esc(WA.itemCatLabel(t))}</b> ${esc(n)}` : "";
+      }).filter(Boolean).join(" · ");
+      return `<div class="line">${esc(WA.secLabel(k))}: ${per}` +
+        (hrs > 0 ? ` <span class="k">· ${esc(Math.round(hrs * 10) / 10)} h</span>` : "") +
+        (lag ? ` <span class="k" title="Flown, and the debrief has not landed yet — the grade is genuinely not known, not missing">· ${esc(lag)} awaiting a grade</span>` : "") +
+        `</div>`;
+    }).join("") +
+    ((rec.lessons || []).length || (rec.exams || []).length
+      ? `<div class="line">Ground: <b>${esc((rec.lessons || []).length)}</b> lesson${
+          (rec.lessons || []).length === 1 ? "" : "s"} · <b>${esc((rec.exams || []).length)}</b> exam${
+          (rec.exams || []).length === 1 ? "" : "s"}${
+          (rec.lessons || []).filter((e) => e.absent).length
+            ? ` <span class="k" title="The class covered these and the student did not">· ${
+                esc((rec.lessons || []).filter((e) => e.absent).length)} absent</span>` : ""}</div>`
+      : "");
     /* one line per entry — items inside an entry are separated by · , so the
        entries themselves must not be, or a multi-item FAIL reads as three */
     const failLine = ["fail", "almost_good"].map((k) => {
@@ -116,6 +144,7 @@ WA.renderInstructor = async function (view, me, opts) {
         </div>
         <div class="line">Evaluations: ${evLine}</div>
         <div class="line">Solo flights: ${soLine}</div>
+        ${logLine}
         ${failLine}
       </div>`;
   }

@@ -94,6 +94,39 @@ has written yet. See §4f.
 - **CEF** (ex "Aptitude exams"): [{date*, flight_code?, evaluator?, result?,
   grade?}]
 
+**ROUND 12 (2026-08-20) — THE LOG TABLES.** Four more sections, rendered as
+**4+4 tables + lessons + exams** («4+4 πινακες για f/s και flights. ομοιως τα
+μαθηματα και τα exams»). The band is the SECTION, the track is on the ROW, and
+the pair is one table; nothing is pre-seeded, so `wa.slot_empty` needs no branch
+for any of them. See §4l.
+
+- **flights** / **fs** (aircraft / simulator, one shape):
+  [{date*, track* (one of the four), sortie* (the table's own flow-chart list
+  minus the eight checkrides; free text accepted and marked *off-catalogue*),
+  seq* (1, and 2+ only via the row's **+ same-day re-fly** — never derived from
+  an array index, and there is **no `(sortie, date)` uniqueness rule**),
+  kind* (`syllabus` · `repeat` · `fcf` · `cef` · `other`; the last three are
+  off-catalogue **by nature** and carry no warning), instructor* (required on
+  every row — the round-6 solo doctrine on every sortie), instructor_oid?
+  (never drawn as a box), duration? (**decimal hours to one decimal**; stores
+  the ACTUAL time, the box opens with the syllabus value), grade? (**null = the
+  debrief has not landed — «δεκτο το null»**), ng* (non-graded by nature ⇒ no
+  grade), verdict? (`pass|lagging|failed`, **only where the grade is absent**;
+  where a grade exists the verdict is DERIVED by `wa.grade_verdict` and a stored
+  one is refused), note?}]
+  A row whose sortie is one of the eight checkrides is **refused**: a checkride
+  lives in Evaluations, and two rows for one flight are two grades that can
+  disagree.
+- **lessons**: [{date*, end_date? (a lesson is a BLOCK), group* (one of the 12
+  theory groups — closed), course? (off-catalogue accepted and marked; a course
+  of ANOTHER group is refused, because the join key is the PAIR `(group,
+  course)` — `OJT` belongs to four of them), periods? (**null means the FULL
+  course**, FDMS's own semantics), absent*, instructor?, instructor_oid?,
+  note?}] — **no grade: a lesson is attended, not scored.**
+- **exams**: [{date*, exam* (one of the **8 ground-exam groups** and only those
+  — the nested `exams[]` of four theory groups are COURSES of their group),
+  grade? (nullable, same lag), instructor?, instructor_oid?, note?}]
+
 **Legacy (v1) records migrate ON READ** (`wa.migrate_record`, mirrored in
 `WA.migrateRecord`): the NFS counter becomes one entry per counted event, a
 pending SMS keeps the fact as a note, free-text FAIL items become `items[]`
@@ -103,6 +136,14 @@ un-identified, `graded:false` becomes `ng:true`, `progress_tests`/
 carried with `legacy:true`; the form highlights it, says exactly what is
 missing, and still saves the rest. The flag can only be USED UP: a save may
 never contain more legacy rows in a section than the stored record had.
+
+**ROUND 12 adds the CATALOGUE-NARROWING REPAIR to that pass** (§4l): a `group`
+or an `exam` the syllabus **no longer contains** is nulled and the row flagged —
+the `wa.nfs_reason_fix` model — so a future syllabus revision can never make a
+stored record permanently unsaveable. And the round's own MUST-FIX: **a section
+`wa.migrate_record` does not NAME is deleted from every read**, because the
+function builds its output key by key; the four new sections are therefore named
+there *and* in `wa.entry_keys`, or `wa.strip_entry` would empty every row.
 
 **THE ACTIVE INSTRUCTORS' SURNAMES** — `wa.instructor_surnames()` is the one
 function that produces them: a JSON array of strings, sorted, distinct, active
@@ -1460,12 +1501,416 @@ brief compares, not a bug fix. **Ruling wanted:** should the analysis tab's
 comparisons follow the Overview's class filter, or should they be scoped to the
 student's own class always, or stay squadron-wide?
 
+## 4l. Round 12 (2026-08-20) — THE LOG TABLES
+
+### THE DIRECTIVE, VERBATIM (2026-08-19)
+
+> «Για αρχη προσθεσε για καθε μαθητη ανα κατηγορια ενα πινακα στο τελος οπου θα
+> εχει ολες τις πτησεις. contact, ημερομηνια, instructor, duration, grade or non
+> graded (δεκτο το null, γιατι καποιες φορες αργει το debriefing). **4+4 πινακες
+> για f/s και flights. ομοιως τα μαθηματα και τα exams.** Δες απαιτησεις συμφωνα
+> με το progress στο fdms. Να ειναι συμβατα και να υπαρχει αμφιδρομη ενημερωση.»
+
+and, on the placeholder kinds:
+
+> «να αφησουμε placeholder για τυχον **fcf, cef, repeat**»
+
+This round builds the tables — the whole directive **except its last sentence**.
+Nothing of the FDMS bridge (sync, provenance, the reconciler) is built here; the
+architecture for it is written and this round is deliberately shaped to fit it.
+
+### THE FIRST DECISION: FOUR SECTIONS, NOT EIGHT
+
+The 4+4 tables are a **render grouping, not eight storage keys**. Adding a
+section to this app is expensive by design — `wa.sections` · `wa.entry_keys` ·
+the `validate_record` branch · `wa.migrate_record` · `WA.ENTRY_KEYS` ·
+`WA.COUNTED` · `WA.SECTIONS_META` · `student.js SECTIONS` + `COMPLETE` +
+`blocksSave` + `buildPayload` · `instructor.js` · `admin.js` drill-down / print /
+CSV all name every section by hand. Eight would be eight copies of one identical
+rule. So there are **four**, and they take the FDMS `kind` vocabulary verbatim so
+that anyone reading either codebase meets the same four words:
+
+| section | holds | rendered as |
+|---|---|---|
+| `flights` | the aircraft sorties | **4 tables**, one per track |
+| `fs` | the simulator sorties | **4 tables**, one per track |
+| `lessons` | the ground courses of the 12 theory groups | one block |
+| `exams` | the 8 ground-exam groups | one block |
+
+**Why split by band at all, given the tables are per track?** Three reasons, and
+the first is decisive: **the section IS the band.** The track is on the row (and
+the letter of a syllabus code proves it — `wa.code_track`), but *nothing anywhere
+derives flights-from-F/S out of a code*, so the band has to be stored somewhere
+and being the array it sits in costs nothing. Second, the entry cap: 85 flights
+plus their re-flies in one array approaches it, per band it never does. Third,
+sim hours and flight hours are counted separately by the squadron everywhere.
+
+**NOTHING IS PRE-SEEDED.** This is the round's hard call. If all 133 sorties
+existed as fixed rows the way the 8 checkrides and 8 solo slots do, `wa.slot_empty`
+would need a branch for the new sections or every unflown sortie would count as an
+entry and *"1 of 18 entered by the CO"* would collapse into *"1 of 151"*. Instead
+the syllabus list is the **closed list a flight is CHOSEN from** and only flown
+rows are stored. **Consequence: `wa.slot_empty` and `wa.entry_core` are untouched
+by this round** — `slot_empty` returns `false` for any section it does not name,
+which is correct because these sections have no placeholder rows.
+
+### THE FLIGHT ENTRY
+
+```
+wa.entry_keys('flights') = wa.entry_keys('fs') =
+  ['date','track','sortie','seq','kind','instructor','instructor_oid',
+   'duration','grade','ng','verdict','note','legacy','entered_by']
+```
+
+| key | type | rule |
+|---|---|---|
+| `date` | ISO date, **required** | `wa.chk_entry_date`. The flight happened on a day; only the *grade* lags. |
+| `track` | one of the four, **required** | Which of the four tables the row is in. **Not derived from the code**, because kinds `fcf` / `cef` / `other` have no syllabus code to read a track off. Where a syllabus code *is* present its letter must agree (the round-5 `fail`/`almost_good` rule, same refusal shape). |
+| `sortie` | code, **required** | Closed dropdown over `wa.sortie_codes(band, track)` **minus the eight checkrides**; free text accepted and shown marked *off-catalogue* (the `fail`/`almost_good` precedent — the syllabus data may lag reality and a record must never become unstorable). Already in `wa.code_fields()`, so it inherits trim+collapse+UPPER. |
+| `seq` | small int, default 1 | Which flight of that code on that date. **AUTHORED, never derived from an array index** — an index is a position and this is a fact. There is **no `(sortie, date)` uniqueness rule anywhere**: a second turn on one day is a real thing, and a rule that refused it would refuse the truth. A `seq` above 1 can only be produced by the row's own **“+ same-day re-fly”** button. |
+| `kind` | closed list, default `syllabus` | `syllabus · repeat · fcf · cef · other` — the user's own list. `repeat` marks a re-fly of a syllabus node; `fcf` / `cef` / `other` are **off-catalogue by nature** and free the sortie box to free text *without* the off-catalogue warning, because for them the catalogue was never the right list to look in. |
+| `instructor` | text ≤200, **required on every row** | `<datalist>` of the active instructors, free text always accepted. The round-6 solo doctrine applies verbatim to every sortie: *«a student never launches alone on their own authority»*. Required **even on a legacy row** — the flag excuses what an old form never asked for, never a rule of this round. |
+| `instructor_oid` | text ≤64, nullable | The unambiguous identity. **Never drawn as a box.** The form only ever carries it through unchanged; it is written by the CO's form path and, later, by the bridge. |
+| `duration` | numeric, nullable | **Decimal hours to one decimal** (0.1 h = 6 min). `wa.chk_duration`. |
+| `grade` | numeric 0-100 whole, nullable | **null = the debrief has not landed.** |
+| `ng` | boolean | Non-graded *by nature*. `ng:true` ⇒ `grade` must be null — the identical rule and the identical sentence as `solo_flights`. |
+| `verdict` | `pass\|lagging\|failed`, nullable | Present **only when `grade` is null**. |
+| `note` | free text ≤300 | In `wa.free_fields()` already. |
+| `legacy`, `entered_by` | the house keys | unchanged semantics |
+
+**DURATION — store ACTUAL, prefill PRESCRIBED.** `trainingLog` in FDMS has no
+duration field at all and only 15 of the 133 sorties carry an `hours` value of
+their own (the rest inherit from their Training Section), so "duration" is new
+data on both sides. What is *stored* is the time actually flown — that is what a
+pilot means by duration and what a logbook line is. What the box *opens with* is
+the syllabus value for the chosen sortie, applied **only onto a box that is still
+empty** (the round-8 FAIL/ALMOST-GOOD precedent: only a NEW row is prefilled,
+nothing stored is ever overwritten). The box is a **text** input, not a number
+one, so `1:20` can be typed at all — and the offer to convert it to `1.3` appears
+on that keystroke, in the exact idiom the grade box uses for a fractional value.
+Nothing is ever converted silently.
+
+**THE VERDICT, AND WHY IT EXISTS.** The squadron's scheduler knows pass / lag /
+fail and has no percentage for a sortie; this record knows percentages. `verdict`
+is how the first crosses into the second. It lives **only where the grade is
+absent**: a stored verdict beside a stored grade is a second source of truth that
+can contradict the first — the exact defect round 11 removed from the FPC. Where
+a grade exists the verdict is **derived** (`wa.grade_verdict`, the 60/50
+thresholds of ΠΔ 151/13 collapsed to three) and a stored one is refused by name.
+Without the key, a flight the squadron recorded as **ΑΠΟΤΥΧΙΑ** would arrive
+indistinguishable from a flight still waiting for its debrief — a failure
+invisible in the record that exists to show it.
+
+**THREE DELIBERATE OMISSIONS.** No `result` field (a stored pass/fail beside a
+stored grade is the round-11 defect). No FDMS event id / `source_id` /
+`updated_at` (`wa.entry_core` excludes only `entered_by`, so any key that changes
+on a re-push would make every row look *modified* → re-stamped on the CO path and
+**the owner's save refused** on the owner path). No `solo` flag (the solo fact
+lives in `solo_flights` and stays there).
+
+**ONE FACT, ONE ROW.** A `flights` row whose sortie is one of the eight
+checkrides is **refused**, with the reason rather than a typo report: *«C4590 is
+one of the eight checkrides — a checkride is recorded in the Evaluations section,
+where the syllabus order and the pass-attempt rule apply to it. Two rows for one
+flight would be two grades that can disagree.»* The dropdown does not offer them,
+so the refusal only ever meets a typed code.
+
+### LESSONS AND EXAMS
+
+```
+wa.entry_keys('lessons') =
+  ['date','end_date','group','course','periods','absent',
+   'instructor','instructor_oid','note','legacy','entered_by']
+wa.entry_keys('exams') =
+  ['date','exam','grade','instructor','instructor_oid','note','legacy','entered_by']
+```
+
+- `group` — the **closed list** of the twelve theory groups. It is the identity
+  of the row, the way `category` is for a FAIL.
+- `course` — **off-catalogue accepted and marked**, the `sortie` rule: course
+  codes are derived at run time from the printed duration block, so they are the
+  value most likely to lag reality. What *is* refused is the **contradiction** —
+  a course that exists but **in another group**, which would make the join key
+  false. **The join key for a course is the PAIR `(group, course)`, never the
+  code alone: `OJT` is a course of four different groups.**
+- `periods` — integer, nullable. **NULL means the FULL course** — FDMS's own
+  semantics (`covCore`). New helper `wa.chk_int`.
+- `end_date` — a lesson is a **block**: `date` = start, `end_date` = end, null =
+  a single day.
+- `absent` — boolean. This is how *"the class covered it and this student did
+  not"* is said **from the student's side**, and it is the only thing that makes
+  a makeup visible instead of silent.
+- **No grade on a lesson.** A lesson is attended, not scored.
+- `exam` — one of the **8 ground-exam groups**, closed list.
+
+> **⚠ The nested `exams[]` are LESSONS, not exams.** Four theory groups carry a
+> nested `exams[]` array (`FF 190 · PT 190 · AΕ 190 · JX 190 · JX 191 · NA 191`)
+> and a human would naturally file them under "exams". FDMS does not: its parser
+> picks them up as **courses of their group**. WA's `exams` section therefore
+> holds the **8 `ground_exam` groups only**, or the two systems disagree about
+> what a student is owed.
+
+> **⚠ JP190 is conditional.** *«Exams on Flight physiology (foreign SPs only)»* —
+> a HAF student does not owe it. The generated `wa.exam_conditional()` carries the
+> flag and every surface shows *foreign SPs only*. FDMS's own `SchedReady` never
+> reads that flag and leaves JP190 pending for ever; **that pre-existing defect is
+> not mirrored here.**
+
+**THE GROUND-EXAM PASS MARK IS DELIBERATELY NOT DECIDED.** FDMS uses
+`exam_pass_pct` (default **80**); WA uses **60** everywhere (ΠΔ 151/13). The
+reading that they are two different exams and both numbers are right is
+plausible, so this round **stores the grade and derives no characterisation for
+`exams` at all** — no verdict, no pass/fail chip, nothing that would settle the
+question by accident. It stays an open item below.
+
+### THE MUST-FIX: THE PASS-THROUGH IS THE POINT
+
+`wa.migrate_record` builds its output `o` **key by key**, and its final
+whitelist pass iterates over `o`. **A section the function does not NAME never
+enters `o` and is therefore DELETED from every read, silently, for ever.** And
+even reaching the final pass, an entry of a section `wa.entry_keys` does not name
+would be stripped to `{}` row by row by `wa.strip_entry`. A student's whole
+flight log would evaporate on the first read after the schema shipped.
+
+So the four sections are named in **both** places, and they travel through with
+their own repairs:
+
+- **`seq` / `kind` / `ng` defaults** — a row written by an older client (or by a
+  bridge that does not know them yet) reads as what it always was: one flight of
+  that sortie, flown in its syllabus place. *(Implementation note: the branch
+  must be `coalesce(jsonb_typeof(e->'seq'), '-') <> 'number'`, never a bare `<>`.
+  An absent key makes `jsonb_typeof` return SQL NULL, `NULL <> 'number'` is NULL,
+  and the branch is silently skipped — precisely for the row that needs the
+  default. This was found and fixed during the round's own verification.)*
+- **`track` resolved from the code's letter** where it can be — lossless and
+  deterministic, since `wa.code_track` is what the validator judges the pair by.
+- **A verdict beside a grade is DROPPED**, not flagged. This is the one place
+  round 12 removes a stored value, and it is lossless: where a grade exists the
+  verdict is *derived* from it, so what is dropped is a copy, not a fact.
+  Flagging instead would leave a row nobody could ever save, because the form
+  draws no verdict box on a graded row — **a trap, not a question**.
+- **THE CATALOGUE-NARROWING REPAIR PASS** (the `wa.nfs_reason_fix` model): a
+  `group` or an `exam` the syllabus no longer contains is **nulled and the row
+  flagged** — never dropped, never guessed at. This is what stops a future
+  syllabus revision (a renamed theory group, a withdrawn ground exam) from making
+  stored records **permanently unsaveable**: without it the owner would be
+  refused on every save with no box on the form able to fix it.
+
+### THE CATALOGUE PIPELINE
+
+`tools/gen-items-catalog.py` already wrote two artefacts from one run
+(`app/items-catalog.js` and the spliced GENERATED BLOCK of `db/schema.sql`). It
+now writes four more catalogues from the same run:
+
+| JS | SQL mirror |
+|---|---|
+| `WA_LOG_SORTIES[band][track][]` — `{c, n, g, o, h, nt, k, f1, sc}` | `wa.sortie_codes(band, track)` · `wa.sortie_band(code)` |
+| `WA_GROUND[]` — the 12 theory groups, `courses[] {c, n, p, cond}` | `wa.lesson_groups()` · `wa.lesson_courses(group)` |
+| `WA_EXAMS[]` — the 8 ground-exam groups | `wa.exam_ids()` · `wa.exam_conditional(id)` |
+| `WA_SOLO_SLOTS` (unchanged) | `wa.solo_slots()` — **moved into the generated block**, hand-kept until now |
+
+**`WA_LOG_SORTIES` is in FLOW-CHART ORDER, and `WA_SORTIES` deliberately stays
+code-sorted.** The two live side by side on purpose: the round-5 pickers keep the
+order they have always had, and the log tables get the printed one. The
+divergence is real and it is a single pair — in `('flights','instrument')` the
+flow chart runs `… I4602 **I4701 I4603** I4890`, the night sortie *before* I4603,
+and sorting by code reorders the stage silently.
+
+**BUILD TRIPWIRES.** The port of FDMS `parseGroupCourses` is 55 lines of
+JavaScript re-written in Python, and drift there is silent *because the codes
+still look right*. So the generator **asserts and fails the build**:
+
+- **47 courses · 45 required + 2 conditional · 514 required periods · 26
+  supplementary** — the four totals the port must reproduce;
+- the eight per-`(band, track)` sortie counts — **36 / 14 / 22 / 13** flights and
+  **18 / 18 / 5 / 7** F/S, 133 in all;
+- **8** ground-exam groups;
+- no duplicate course code **inside** one group (the `(group, course)` join key
+  would be ambiguous);
+- **`assert_latin` — every emitted code must be pure Latin.** Course codes in the
+  source are mixed-script: `AΕ 101-108` and `AΕ 190` are Latin `A` + **Greek**
+  `Ε` (U+0395), and inside the *same* group `g:GT-INSTR` the code `IN 101-105` is
+  Latin while `ΙΝ 201-210` is Greek `Ι Ν`. Two codes whose printed forms are
+  identical differ in script, and a stored value nobody can retype is a value
+  nobody can ever correct. The Greek→Latin fold table is used **for matching
+  only** (exactly as FDMS's `normTxt` does); the emitted values are never
+  rewritten quietly — the build **stops**, names the code, its offending
+  codepoints and its Latin twin, and leaves the decision to a human. *(Today the
+  assertion never fires, because the label codes win over the table codes and the
+  labels are Latin. It exists for the revision that changes that.)*
+
+### THE FORM
+
+The ten blocks sit at the **end** of the student form («ενα πινακα στο τελος»),
+in the directive's order: **4 × Flights ⟨track⟩ · 4 × F/S ⟨track⟩ · Ground lessons
+· Ground exams**. The flight blocks are collapsible `<details>`, open by
+themselves when they hold something, each with its own **+ Add a flight** — a
+single Add up in the section header could not know which track it was adding to,
+and the track is a *stored fact* written by the act that creates the row, never
+inferred afterwards from a code that may not exist.
+
+Every row wears a **one-line summary** — flight · date · instructor · duration ·
+grade — and **that line is the table row the directive asks for**; the boxes below
+it are how it is edited. On a 375 px phone the columns wrap instead of scrolling,
+which is why this is not a real `<table>` here. The CO's drill-down and the
+printed brief **do** use real tables: there the screen is wide and the reader is
+reading, not typing.
+
+Rows keep their **index in the section** (`data-idx`), never their index in the
+table: every handler addresses `S.data[sec][i]`, and a per-table index would
+silently edit the wrong row the moment two tables held entries.
+
+**COMPLETENESS, WITH THE LAG MADE EXPLICIT — three notions, kept apart:**
+
+| notion | for the new sections |
+|---|---|
+| `COMPLETE[sec]` — *"is this row still a leftover?"* | `date && sortie && instructor && track`. **THE GRADE IS DELIBERATELY NOT PART OF IT.** A row may wait for its grade for ever without being incomplete. This is «δεκτο το null» expressed in the one function that decides. |
+| `blocksSave` — *"does this row refuse the save?"* | **Only a missing instructor.** A missing grade never blocks anything. The two contradictions (`ng` + grade, `verdict` + grade) are unreachable by construction — the verdict box is only drawn where there is no grade, and NG clears both — and are refused by the validator anyway. |
+| `wa.entry_count` / `co_entry_count` | All four join `WA.COUNTED`. **The consequence is named rather than hidden:** a mid-stage student goes from ~18 entries to ~80, so *"3 of 8 entered by the CO"* becomes *"3 of 80"*. That is what the record now contains, and a denominator that pretended otherwise would be the untruth. |
+
+**THE LAG GETS A SURFACE**, because it is the reality the directive names. A row
+with `grade IS NULL AND ng IS false AND verdict IS NULL` renders an **"awaiting
+debrief"** chip — quiet, dashed, in the muted colour: it is neither an error nor a
+legacy leftover. After `WA.DEBRIEF_AMBER_DAYS` (7) it turns amber and carries the
+age (*"awaiting debrief · 21 d"*), because at some point the quiet fact becomes a
+thing to chase. Every section header counts them (*"3 awaiting a grade"*), and on
+**paper** the lag and a verdict-with-no-number are printed **in words** — a
+photocopied brief showing an empty Grade cell for a flight the squadron recorded
+as ΑΠΟΤΥΧΙΑ would hide exactly what it exists to show.
+
+### BLAST RADIUS
+
+**Server:** `wa.sections` · `wa.entry_keys` · `validate_record` (4 branches + the
+checkride refusal + the band/track contradictions) · `wa.migrate_record`
+(pass-through + repairs) · new `wa.section_cap` · `wa.log_bands` ·
+`wa.flight_kinds` · `wa.verdicts` · `wa.grade_verdict` · `wa.chk_int` ·
+`wa.chk_duration` · `wa.entry_count_by` (with `co_entry_count` kept as its
+wrapper) · the six generated lookups + `wa.solo_slots` moved into the block.
+**`wa.slot_empty`, `wa.entry_core`, `wa.stamp_record_diff` and `wa.carry_stamps`:
+untouched** — the new rows are ordinary entries and the CO lock works on them
+because it was never section-specific.
+
+**Client:** `WA.ENTRY_KEYS` · `WA.COUNTED` · `WA.SECTIONS_META` · the log
+vocabulary and catalogue helpers in `app.js` · `WA.migrateRecord` ·
+`student.js` `SECTIONS` + `COMPLETE` + `blocksSave` + `missingOf` + `buildPayload`
++ the 4+4 render · `instructor.js` self-report card · `admin.js` drill-down,
+brief, print and the entries CSV (two new columns: **Hours** and **Awaiting** —
+a spreadsheet that read a blank Grade as a zero would be reading a failure that
+never happened).
+
+**Watch item, not a defect today:** `admin_get_data` ships the **full migrated
+record** per student. Measured on the live stack it is 51 KB for 25 students; a
+class with full flight logs would add roughly 24 KB per student. If that becomes
+uncomfortable the fix is counts-on-the-dashboard and rows-on-drill-down, which is
+a transport change and not a data one.
+
+### DEPLOYMENT NOTE — THE CLOUD SCHEMA GOES FIRST
+
+**The app must not ship before the cloud schema is re-applied.** An old cloud
+schema does not know the four sections, so `wa.validate_record` answers *«unknown
+section»* and **every save from the new app is refused**; worse, an old
+`wa.migrate_record` would **drop** the four keys on read. Exact operator steps:
+
+1. Open the Supabase dashboard for the squadron's project (EU · Frankfurt) →
+   **SQL Editor**.
+2. Paste the **whole** of `db/schema.sql` from this commit and run it. It is
+   idempotent — it has been re-run twice against a populated database in this
+   round's verification, exit 0 both times, with people, records and proposals
+   byte-identical afterwards.
+3. Confirm the new surface exists:
+   `select array_length(wa.sections(),1);` → **13**, and
+   `select array_length(wa.sortie_codes('flights','contact'),1);` → **36**.
+4. **Only then** push the app (the seven assets carry `?v=20260820a`).
+5. If step 2 is skipped, the symptom is a save that fails with *«unknown
+   section»* — re-run the schema and the same save succeeds untouched.
+
+### SELF-VERIFICATION (live, local stack, real RPCs and the real form)
+
+1. **All ten blocks render at the end** of the student form in the directive's
+   order — 4 Flights + 4 F/S collapsibles, then Ground lessons, then Ground
+   exams. Per-table closed lists spot-checked against the catalogue: **32 / 12 /
+   21 / 12** aircraft and **18 / 18 / 5 / 7** simulator — i.e. the flow-chart
+   counts **minus the eight checkrides**, which the dropdown does not offer.
+   Flow-chart order preserved live: `… I4601 I4602 I4701 I4603 I4890`.
+2. **Rows created through the real form**: a graded flight (duration prefilled to
+   the syllabus 1.3 on picking C4302); a **null-grade** row showing *"awaiting
+   debrief"*; an **NG** row with the grade box gone from the DOM; a
+   **verdict-without-grade** row; a **same-day double** via the *+ same-day
+   re-fly* button (`seq` 2, flight and date carried over, header shows `#2`); a
+   **kind `fcf`** row with free sortie text and **no** off-catalogue warning; a
+   lessons row (block dates, periods, the Absent chip) and an exams row.
+3. **psql read-back shows exact keys** — `date · track · sortie · seq · kind ·
+   instructor · duration · grade · ng · verdict · note` and nothing else; no
+   `_o_*` / `_ngset` UI crumbs reached storage.
+4. **Refusals, through the real RPC**: unknown key in a `flights` entry →
+   *"unknown field for a flights entry — accepted fields are …"*; verdict beside a
+   grade → the curated sentence naming the derived verdict; grade `79.5` → the
+   whole-number rule; a checkride in the flights log → the one-fact-one-row
+   sentence. Thirty validator rules exercised in all (ng+grade, verdict+NG,
+   duration `1.25` and `95`, wrong track, wrong band, unknown kind, missing
+   instructor, unknown group, a course of another group, lesson end-before-start,
+   unknown exam, the retired `pending` flag, the 400-row cap).
+5. **Off-catalogue behaviour**: a free-text code on `kind:syllabus` is marked
+   *"not in the syllabus catalogue"*, live on the keystroke; the same code on
+   `kind:fcf`/`other` carries **no** warning. Wrong-track, wrong-band and
+   checkride codes each get their own live note under the box.
+6. **`migrate_record` round-trip**: a fabricated stored record carrying all four
+   sections survives strip/migrate with **nothing lost** (the MUST-FIX proof);
+   `migrate(migrate(x)) = migrate(x)`; the saved record re-read and re-saved
+   through the real form is **byte-stable** (md5 identical). The catalogue-
+   narrowing repair nulls a withdrawn group/exam, flags the row, and the repaired
+   row **validates again**.
+7. **Schema re-applied twice**, `ON_ERROR_STOP=1`, exit 0 both times, with log
+   rows present: **42 people**, 3 records, 9 proposals, record md5 unchanged.
+8. **CO on-behalf** writes a `flights` row and an `fs` row → both stamped
+   `entered_by:'admin'`, both rendered **locked** on the owner's own form (every
+   control disabled, the 🔒 note), and the owner's save refused server-side both
+   when the row is dropped and when its grade is altered — the same sentence
+   every other section gets.
+9. **Regression**: five-level scale intact (10/8/5/3/1, `short === label`), the
+   60/50 bands, the eight checkrides in syllabus order, the round-11 surfaces.
+   `node --check` clean on all six JS files. **Zero console errors** across the
+   student form, the CO form, Overview / Student analysis / Brief, the printed
+   brief and the instructor view.
+10. **Hygiene**: demo data snapshotted before the round and **byte-restored**
+    after (md5 `ae140a99…` before and after), zero residue of the four new
+    sections in any stored record, 42 people and 9 proposals untouched.
+
+### OPEN ITEMS RAISED BY THIS ROUND
+
+1. **The ground-exam pass mark.** FDMS `exam_pass_pct` defaults to **80**; WA
+   uses **60** everywhere. This round stores the grade and characterises nothing
+   for `exams`, so the question is still open: one number, or two different exams
+   with two right numbers?
+2. **`admin_get_data` payload growth** — see the watch item above.
+3. **Duration in FDMS.** `trainingLog` has no duration field, so duration is
+   **WA-only** for now. Making it a real FDMS field is where this work meets the
+   Currency semester counts.
+4. **The bridge itself** — the directive's last sentence («αμφιδρομη
+   ενημερωση») — is designed and unbuilt. The design that this round was shaped
+   to fit is a **reconciler, not a replicator**: its normal output is a report,
+   its writes are confirmed per row by the admin, it joins on OID (never on the
+   mutable FDMS code), it mints deterministic `wa:` event ids so a re-run
+   *updates* instead of appending (a duplicated FAIL row can manufacture a ΠΔ
+   29/2020 referral against a student), and it never pushes an ungraded row —
+   FDMS has no "not yet graded" state, and a blank result there silently
+   *completes* a node.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
    remove), Save any time, shows own last_update. Re-entry always allowed.
+   **Round 12 (§4l): the LOG TABLES at the end** — 4 × Flights ⟨track⟩ + 4 × F/S
+   ⟨track⟩ as collapsible blocks, then Ground lessons and Ground exams. Each
+   flight row wears a one-line summary (flight · date · instructor · duration ·
+   grade) that reads as the table row, with the boxes below it. **The grade may
+   be left empty for ever**: the row says *awaiting debrief* and is complete
+   without it. The same form, bound to somebody else, is what the CO fills in on
+   a student's behalf.
 2. **Instructor form**: student list; per student a **compact card of their
-   self-reported data** (counters, evaluations, solos) beside **ONE radio group
+   self-reported data** (counters, evaluations, solos, **and the round-12 flight
+   log as one line per band — per-track counts, hours, and how many sorties are
+   still awaiting a grade**) beside **ONE radio group
    of the five assessment levels for fighters** (round 10, §4j — scale order,
    weights shown, **thin rule before the fifth**, click-the-selected-one to
    clear) + comment + flew-with checkbox. Save/edit any time; the card's own
@@ -1513,6 +1958,16 @@ student's own class always, or stay squadron-wide?
       - **Dated-entry tables**: FAIL and ALMOST GOOD in full (flight code,
         items, instructor, grade), airsickness **when and with whom**, plus
         NFS · SMS · solos · FPC · CEF. All of it reaches the printed brief.
+      - **Round 12 (§4l): THE LOG TABLES** — at the end, in the form's order:
+        4 × Flights ⟨track⟩ and 4 × F/S ⟨track⟩ (flight · date · instructor ·
+        hours · grade · note · source, with the *kind* and *same-day re-fly*
+        tags), then Ground lessons (group · course · block dates · periods ·
+        instructor · attendance) and Ground exams. Here they are **real
+        tables** — the screen is wide and the CO is reading, not typing. An
+        empty grade cell is **not a gap**: it prints the *awaiting debrief*
+        chip with its age, and a verdict with no percentage is named in words
+        rather than left blank. All of it reaches the printed brief, where the
+        lag and the verdict are spelled out because paper is monochrome.
       - **Assessment panel (round 10, §4j)** — ONE box where three branch boxes
         used to be, because there is one question now. It shows the **weighted
         mean** in large type, **the arithmetic that produced it**

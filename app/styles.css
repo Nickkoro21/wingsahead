@@ -334,6 +334,62 @@ input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent);
 }
 .subhead .hint { text-transform: none; letter-spacing: 0; }
 .addrow { margin-top: 8px; }
+
+/* ── ROUND 12 — THE LOG TABLES ─────────────────────────────────────────────
+   «4+4 πινακες για f/s και flights» — one collapsible per (band, track), and
+   inside it every row wears its own one-line summary: the flight, the date,
+   the instructor, the duration and the grade. THAT LINE IS THE TABLE ROW the
+   directive asks for; the boxes below it are how it is edited. On a phone the
+   columns wrap instead of scrolling, which is the whole reason this is not a
+   real <table> here (the CO's view has one — there the screen is wide). */
+details.logtbl {
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;
+  margin-bottom: 8px; background: var(--panel);
+}
+details.logtbl[open] { background: transparent; }
+details.logtbl > summary {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  cursor: pointer; font-size: 12.5px; list-style: none; padding: 2px 0;
+}
+details.logtbl > summary::-webkit-details-marker { display: none; }
+details.logtbl > summary::before {
+  content: "\25B8"; color: var(--muted); font-size: 11px;
+  transition: transform 0.12s ease; display: inline-block;
+}
+details.logtbl[open] > summary::before { transform: rotate(90deg); }
+details.logtbl > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+details.logtbl > summary .cnt {
+  font-size: 11px; color: var(--muted); border: 1px solid var(--line);
+  border-radius: 999px; padding: 1px 8px; white-space: nowrap;
+}
+details.logtbl > summary .k { margin-left: auto; font-size: 10.5px; cursor: help; }
+details.logtbl > .rrow:first-of-type { margin-top: 8px; }
+/* the row's own summary line — the directive's columns, in order */
+.logline {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding-bottom: 6px; margin-bottom: 8px; border-bottom: 1px dashed var(--line);
+  font-size: 12.5px;
+}
+.logline .lg-c { font-weight: 600; letter-spacing: 0.3px; }
+.logline .lg-d { color: var(--muted); }
+.logline .lg-i { color: var(--muted); font-style: italic; }
+.logline .lg-h { color: var(--muted); font-variant-numeric: tabular-nums; }
+.logline .lg-g { margin-left: auto; font-variant-numeric: tabular-nums; }
+/* «δεκτο το null, γιατι καποιες φορες αργει το debriefing» — the debrief lag,
+   given a surface. QUIET by default: it is not an error and it is not a
+   leftover, it is a flight whose grade has not been written yet. It turns
+   amber only once it has been waiting a while, because at some point the
+   quiet fact becomes a thing to chase. */
+.lagchip {
+  font-size: 10.5px; color: var(--muted); border: 1px dashed var(--line);
+  border-radius: 999px; padding: 1px 8px; white-space: nowrap; cursor: help;
+}
+.lagchip.is-late {
+  color: var(--warn); border-color: rgba(var(--warn-rgb), 0.55);
+  border-style: solid; background: var(--warn-soft);
+}
+/* the CO's log tables — a real table, because there the screen is wide */
+.tbl td.lag { color: var(--muted); font-style: italic; }
 /* a flight code the generated syllabus catalogue does not know */
 .offcat { color: var(--warn); font-weight: 700; cursor: help; margin-left: 1px; }
 /* a grade shown rounded because the stored value is fractional */

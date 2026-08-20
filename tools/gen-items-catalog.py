@@ -10,8 +10,36 @@ SOURCES (read-only, NOT part of this repo):
       → items[] {item_id, item_name, mif_numbers}          → WA_ITEMS
     D:\\FDMS\\data\\flowchart2.json
     → sorties[] {id, track, band, name, checkride}         → WA_SORTIES
+    → sorties[] in FILE ORDER, per (band, track)           → WA_LOG_SORTIES
     → sorties[] in FILE ORDER, checkride == true           → WA_EVAL_ORDER
     → groups[]  {id, sorties_solo, solo_candidate_sorties} → WA_SOLO_SLOTS
+    → groups[]  kind == 'theory', duration_summary parsed  → WA_GROUND
+    → groups[]  kind == 'ground_exam'                      → WA_EXAMS
+
+ROUND 12 — THE LOG TABLES. The four new record sections (flights · fs ·
+lessons · exams) need three catalogues this script did not emit:
+  · the per-track sortie list SPLIT BY BAND and in FLOW-CHART ORDER
+    (WA_LOG_SORTIES). WA_SORTIES is code-sorted (rows.sort below) and that is
+    NOT the syllabus order — in ('flights','instrument') the flow chart runs
+    … I4602 I4701 I4603 I4890, and code-sorting silently reorders it. The two
+    live side by side deliberately: the existing pickers keep the order they
+    have always had, and the log tables get the printed one.
+  · the 12 theory groups decomposed into their 47 COURSES (WA_GROUND), by a
+    PORT of FDMS parseGroupCourses (app/scheduler.js:146-210). One parser
+    written twice is a drift risk, so the port asserts the four totals it must
+    reproduce — 47 courses · 45 required + 2 conditional · 514 required
+    periods · 26 supplementary — and fails the build otherwise.
+  · the 8 ground-exam groups (WA_EXAMS), carrying the `conditional` flag so
+    JP190 (foreign SPs only) is shown as NOT OWED rather than pending for ever.
+
+THE GREEK-HOMOGLYPH TRIPWIRE (round 12). Course codes in flowchart2.json are
+mixed-script: AΕ 101-108 and AΕ 190 are Latin A + GREEK Ε (U+0395), and inside
+g:GT-INSTR the code IN 101-105 is Latin while ΙΝ 201-210 is Greek Ι Ν. Two
+codes whose printed forms are identical differ in script, and a stored value
+nobody can retype is a value nobody can ever correct. The parser folds Greek to
+Latin FOR MATCHING (exactly as FDMS's normTxt does) and then ASSERTS that every
+EMITTED code is pure Latin — the build fails, loudly, naming the code and its
+Latin twin, rather than shipping a code the form can never reproduce.
 
 The generated file is a plain <script> catalogue used by the FAIL /
 ALMOST GOOD rows: category select → multi-select of that category's syllabus
@@ -57,12 +85,196 @@ SQL_BEGIN = "-- ▼▼ GENERATED BLOCK — tools/gen-items-catalog.py — DO NOT
 SQL_END = "-- ▲▲ GENERATED BLOCK ▲▲"
 
 
+BANDS = ["flights", "fs"]
+
+# THE FOUR TOTALS THE COURSE PORT MUST REPRODUCE (round 12), re-derived from
+# flowchart2.json. They are a BUILD ASSERTION and not a comment: a syllabus
+# revision that moves one of them stops the build instead of silently changing
+# what every student is owed.
+GROUND_ASSERT = {"courses": 47, "required": 45, "conditional": 2,
+                 "req_periods": 514, "suppl_periods": 26}
+# per (band, track) sortie counts — the same doctrine, one number per table
+SORTIE_ASSERT = {
+    ("flights", "contact"): 36, ("flights", "instrument"): 14,
+    ("flights", "formation"): 22, ("flights", "vfr_navigation"): 13,
+    ("fs", "contact"): 18, ("fs", "instrument"): 18,
+    ("fs", "formation"): 5, ("fs", "vfr_navigation"): 7,
+}
+
+# ── THE GREEK → LATIN FOLD (round 12) ─────────────────────────────────────
+# The exact table FDMS uses (app/scheduler.js:146). It is used HERE ONLY FOR
+# MATCHING — the label part a course code is adopted from — never to rewrite an
+# emitted value. What guards the emitted values is assert_latin() below.
+GREEK2LAT = {
+    "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H",
+    "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O",
+    "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X",
+}
+GREEK_RE = re.compile("[" + "".join(GREEK2LAT) + "]")
+ANY_GREEK_RE = re.compile("[Ͱ-Ͽἀ-῿]")
+
+
+def fold_greek(s):
+    """Greek capitals that LOOK Latin → their Latin twin. Matching only."""
+    return GREEK_RE.sub(lambda m: GREEK2LAT[m.group(0)], str(s if s is not None else ""))
+
+
+def assert_latin(kind, ident, code):
+    """A code the WA form could never reproduce must never be emitted.
+
+    Nothing is rewritten quietly: the build STOPS and names the code, where it
+    came from and what its Latin twin would be, so the decision is a human's.
+    """
+    if ANY_GREEK_RE.search(str(code)):
+        bad = " ".join("U+%04X" % ord(c) for c in str(code) if ANY_GREEK_RE.match(c))
+        raise SystemExit(
+            "GREEK CODE REFUSED — %s %s emits the code %r, which contains Greek "
+            "letters (%s).\nIts Latin twin would be %r. A mixed-script code is one the "
+            "form's dropdown can offer but nobody can retype, so it must not be stored: "
+            "fix the syllabus source, or extend the fold table and decide DELIBERATELY "
+            "which script the catalogue carries.\n(tools/gen-items-catalog.py — "
+            "assert_latin)" % (kind, ident, code, bad, fold_greek(code)))
+
+
 def sq(s):
     """one SQL string literal, quotes doubled."""
     return "'" + str(s).replace("'", "''") + "'"
 
 
-def sql_block(cats, evals, flow_generated, idx_generated):
+def norm_txt(s):
+    """FDMS normTxt (scheduler.js:147) — fold Greek, collapse space, lower."""
+    return re.sub(r"\s+", " ", fold_greek(s)).strip().lower()
+
+
+def synth_code(name, taken):
+    """FDMS synthCode (scheduler.js:148-155) — a code for a code-less segment."""
+    m = re.match(r"^([A-Z]{2,})\b", str(name or "").strip())
+    if m:
+        base = m.group(1)
+    else:
+        base = re.sub(r"[^A-Z0-9]", "",
+                      "".join(w[:1] for w in str(name or "").split()).upper())[:4] or "CRS"
+    code, i = base, 2
+    while code in taken:
+        code = base + "-" + str(i)
+        i += 1
+    return code
+
+
+def parse_group_courses(g):
+    """PORT of FDMS parseGroupCourses (app/scheduler.js:156-210), line for line.
+
+    Source: duration_summary ("Chapter: Course name | CODE | periods · …"),
+    parsed defensively — segments split on " · ", fields on " | "; segments with
+    no code (OJT, Air Traffic Rules, the General-Briefing subjects) get a
+    synthesised one; "[suppl.]" segments are conditional (foreign SPs) and never
+    block the group. The LABEL codes win over the table codes, matched by
+    prefix / first number / shared distinctive token. A group with no
+    duration_summary (WSGES · CO 109 · CO 110) is ONE course = the group itself.
+    """
+    label = str(g.get("label") or "")
+    parts = [{"raw": p.strip(), "norm": norm_txt(p), "used": False}
+             for p in label.split(" · ")]
+
+    def adopt(code_raw, name_raw):
+        norm = norm_txt(code_raw)
+        hit = None
+        if norm:
+            hit = next((p for p in parts if not p["used"] and p["norm"] == norm), None)
+        toks = [t for t in norm.split(" ") if t]
+        t0 = toks[0] if toks else ""
+        m = re.search(r"\d+", norm)
+        n0 = m.group(0) if m else ""
+
+        def tok_ok(pt0):
+            return pt0 == t0 or (t0 and (pt0.startswith(t0) or t0.startswith(pt0)))
+
+        if not hit and norm and "-" in norm:
+            for p in parts:
+                if p["used"]:
+                    continue
+                pt0 = (p["norm"].split(" ") or [""])[0]
+                pm = re.search(r"\d+", p["norm"])
+                if tok_ok(pt0) and n0 and (pm.group(0) if pm else "") == n0:
+                    hit = p
+                    break
+            if not hit:
+                c = [p for p in parts if not p["used"]
+                     and tok_ok((p["norm"].split(" ") or [""])[0])]
+                if len(c) == 1:
+                    hit = c[0]
+        if not hit and norm:            # shared distinctive token (OPR PL2 → IPR PL2)
+            c = [p for p in parts if not p["used"]
+                 and any(len(t) >= 3 and t in p["norm"].split(" ") for t in toks)]
+            if len(c) == 1:
+                hit = c[0]
+        if not hit and not norm and name_raw:   # a code-less segment that IS a label part
+            nn = norm_txt(name_raw)
+            hit = next((p for p in parts if not p["used"] and p["norm"] == nn), None)
+        if hit:
+            hit["used"] = True
+            return hit["raw"]
+        return ""
+
+    src = str(g.get("duration_summary") or "")
+    out, taken = [], set()
+    for seg in src.split(" · "):
+        fields = [x.strip() for x in seg.split("|")]
+        fields = [x for x in fields if x != ""]
+        if len(fields) < 2:
+            continue
+        raw_name = fields[0]
+        conditional = bool(re.match(r"^\[suppl\.?\]", raw_name, re.I))
+        name = re.sub(r"^\[suppl\.?\]\s*", "", raw_name, flags=re.I)
+        name = re.sub(r"^\d+\.\s*", "", name)
+        ci = name.find(": ")
+        if ci >= 0:
+            name = name[ci + 2:]        # drop the chapter header
+        code_raw, periods = "", None
+        try:
+            if len(fields) >= 3:
+                code_raw, periods = fields[1], int(fields[-1])
+            else:
+                periods = int(fields[1])
+        except ValueError:
+            continue
+        code = adopt(code_raw, "" if code_raw else name) or code_raw or synth_code(name, taken)
+        if code in taken:
+            code = synth_code(code, taken)
+        taken.add(code)
+        out.append({"code": code, "name": name, "periods": periods,
+                    "conditional": conditional})
+    if not out:                          # WSGES · CO 109 · CO 110
+        out.append({"code": label or g["id"], "name": g.get("name") or "",
+                    "periods": 0 if g.get("periods") is None else g["periods"],
+                    "conditional": False})
+    return out
+
+
+def sortie_hours(s, groups_by_id):
+    """The PRESCRIBED hours of one sortie, one decimal, or None.
+
+    Only 15 of the 133 carry an `hours` of their own; the rest inherit from
+    their Training Section (hours_per_sortie, else hours_total ÷ sorties_total).
+    This is what the duration box PREFILLS with — the stored value is always the
+    ACTUAL time flown (A.4), so it is a starting point and never a fact.
+    """
+    g = groups_by_id.get(s.get("group")) or {}
+    h = s.get("hours")
+    if h is None:
+        h = g.get("hours_per_sortie")
+    if h is None and g.get("hours_total") is not None and g.get("sorties_total"):
+        try:
+            h = float(g["hours_total"]) / int(g["sorties_total"])
+        except (TypeError, ValueError, ZeroDivisionError):
+            h = None
+    if h is None:
+        return None
+    return round(float(h) + 1e-9, 1)
+
+
+def sql_block(cats, evals, flow_generated, idx_generated,
+              log_sorties, ground, exams, solo_slot_ids):
     """the wa.eval_ids() + wa.item_names() mirror, as SQL text."""
     L = []
     L.append(SQL_BEGIN)
@@ -107,6 +319,98 @@ def sql_block(cats, evals, flow_generated, idx_generated):
             L.append("      %s%s" % (sq(n), "," if k < len(names) - 1 else ""))
         L.append("    ]::text[]")
     L.append("    else array[]::text[] end")
+    L.append("$$;")
+
+    # ══ ROUND 12 — THE LOG-TABLE CATALOGUES ══════════════════════════════
+    L.append("")
+    L.append("-- ══ ROUND 12 — THE LOG TABLES: THE FOUR CATALOGUES ═══════════════════════")
+    L.append("-- The sorties of ONE table — a (band, track) pair — in FLOW-CHART ORDER, i.e.")
+    L.append("-- the order the printed Training Flow Chart lays the stage out in. NOT the")
+    L.append("-- code order of wa.item_names' neighbour WA_SORTIES: in ('flights',")
+    L.append("-- 'instrument') the chart runs … I4602 I4701 I4603 I4890 and sorting by code")
+    L.append("-- silently reorders it.")
+    L.append("-- THE BAND IS THE SECTION AND THE TRACK IS THE LETTER (wa.code_track), so a")
+    L.append("-- flights/fs row is fully placed by the pair — no new lookup on the hot path.")
+    L.append("-- MIRROR: app/items-catalog.js → WA_LOG_SORTIES.")
+    L.append("create or replace function wa.sortie_codes(p_band text, p_track text) returns text[]")
+    L.append("language sql immutable as $$")
+    L.append("  select case p_band || '/' || p_track")
+    for band in BANDS:
+        for cid, _lab in CATS:
+            rows = log_sorties[band][cid]
+            L.append("    when %s then array[" % sq(band + "/" + cid))
+            for k, r in enumerate(rows):
+                L.append("      %s%s" % (sq(r["c"]), "," if k < len(rows) - 1 else ""))
+            L.append("    ]::text[]")
+    L.append("    else array[]::text[] end")
+    L.append("$$;")
+    L.append("")
+    L.append("-- which BAND a syllabus code belongs to — 'flights' | 'fs' | null (not a")
+    L.append("-- catalogue code). The letter gives the track; only the flow chart gives the")
+    L.append("-- band, which is why this is generated and wa.code_track is not.")
+    L.append("create or replace function wa.sortie_band(p_code text) returns text")
+    L.append("language sql immutable as $$")
+    L.append("  select case")
+    for band in BANDS:
+        codes = [r["c"] for cid, _l in CATS for r in log_sorties[band][cid]]
+        L.append("    when upper(wa.norm_line(p_code)) = any(array[")
+        for k, c in enumerate(codes):
+            L.append("      %s%s" % (sq(c), "," if k < len(codes) - 1 else ""))
+        L.append("    ]::text[]) then %s" % sq(band))
+    L.append("    else null end")
+    L.append("$$;")
+    L.append("")
+    L.append("-- THE 12 THEORY GROUPS and, per group, its COURSES — the codes exactly as the")
+    L.append("-- FDMS parser derives them from the printed duration block. The join key for")
+    L.append("-- a course is the PAIR (group, course), never the code alone: OJT is a course")
+    L.append("-- of four different groups.")
+    L.append("-- MIRROR: app/items-catalog.js → WA_GROUND.")
+    L.append("create or replace function wa.lesson_groups() returns text[]")
+    L.append("language sql immutable as $$")
+    L.append("  select array[%s]::text[]" % ",".join(sq(g["g"]) for g in ground))
+    L.append("$$;")
+    L.append("")
+    L.append("create or replace function wa.lesson_courses(p_group text) returns text[]")
+    L.append("language sql immutable as $$")
+    L.append("  select case p_group")
+    for g in ground:
+        L.append("    when %s then array[" % sq(g["g"]))
+        for k, c in enumerate(g["courses"]):
+            L.append("      %s%s" % (sq(c["c"]), "," if k < len(g["courses"]) - 1 else ""))
+        L.append("    ]::text[]")
+    L.append("    else array[]::text[] end")
+    L.append("$$;")
+    L.append("")
+    L.append("-- THE EIGHT GROUND-EXAM GROUPS. These and ONLY these: four theory groups")
+    L.append("-- carry a nested exams[] (FF 190 · PT 190 · AΕ 190 · JX 190 · JX 191 ·")
+    L.append("-- NA 191) which a human would file under \"exams\", and FDMS does not — its")
+    L.append("-- parser picks them up as COURSES OF THEIR GROUP. Putting them here too")
+    L.append("-- would make the two systems disagree about what a student is owed.")
+    L.append("-- MIRROR: app/items-catalog.js → WA_EXAMS.")
+    L.append("create or replace function wa.exam_ids() returns text[]")
+    L.append("language sql immutable as $$")
+    L.append("  select array[%s]::text[]" % ",".join(sq(e["id"]) for e in exams))
+    L.append("$$;")
+    L.append("")
+    L.append("-- JP190 is «Exams on Flight physiology (foreign SPs only)» — conditional, so")
+    L.append("-- it is NOT OWED by a HAF student. (FDMS's own SchedReady never reads the")
+    L.append("-- flag and leaves JP190 pending for ever; that defect is not mirrored here.)")
+    L.append("create or replace function wa.exam_conditional(p_id text) returns boolean")
+    L.append("language sql immutable as $$")
+    L.append("  select case when p_id = any(array[%s]::text[]) then true else false end"
+             % ",".join(sq(e["id"]) for e in exams if e["cond"]))
+    L.append("$$;")
+    L.append("")
+    L.append("-- ── THE FIXED SOLO SLOTS (round 5, generated since round 12) ─────────────")
+    L.append("-- One slot per solo the stage prescribes — flow-chart Training Sections whose")
+    L.append("-- printed duration block says SOLO SORTIES > 0. F4301-06 prescribes TWO, so it")
+    L.append("-- carries two distinct slots. Hand-kept until round 12 opened the generator;")
+    L.append("-- it mirrored WA_SOLO_SLOTS by discipline alone, which is a drift that costs")
+    L.append("-- nothing to remove.")
+    L.append("-- MIRROR: app/items-catalog.js → WA_SOLO_SLOTS.")
+    L.append("create or replace function wa.solo_slots() returns text[]")
+    L.append("language sql immutable as $$")
+    L.append("  select array[%s]::text[]" % ",".join(sq(s) for s in solo_slot_ids))
     L.append("$$;")
     L.append(SQL_END)
     return "\n".join(L)
@@ -192,6 +496,91 @@ def main():
         sorties[cid] = rows
         n_sorties += len(rows)
 
+    # ══ ROUND 12 — THE LOG-TABLE CATALOGUES ══════════════════════════════════
+    # (a) the sorties of ONE table — (band, track) — in FLOW-CHART ORDER.
+    #     `o` is the 1-based position in that order, so the client never has to
+    #     re-derive it and a re-sort anywhere cannot silently reorder the stage.
+    groups_by_id = {g["id"]: g for g in fc["groups"]}
+    log_sorties = {b: {cid: [] for cid, _ in CATS} for b in BANDS}
+    for s in fc["sorties"]:
+        b, t = s.get("band"), s.get("track")
+        if b not in log_sorties or t not in log_sorties[b]:
+            continue
+        rows = log_sorties[b][t]
+        assert_latin("sortie", s["id"], s["id"])
+        rows.append({
+            "c": s["id"],
+            "n": s.get("name") or "",
+            "g": s.get("group") or "",                 # Training Section
+            "o": len(rows) + 1,                        # flow-chart position
+            "h": sortie_hours(s, groups_by_id),        # prescribed hours (prefill)
+            "nt": bool(s.get("night")),
+            "k": bool(s.get("checkride")),
+            "f1": bool(s.get("first_solo")),
+            "sc": bool(s.get("solo_candidate")),
+        })
+    for (b, t), want in SORTIE_ASSERT.items():
+        got = len(log_sorties[b][t])
+        if got != want:
+            raise SystemExit(
+                "SORTIE COUNT CHANGED — (%s, %s) holds %d sorties, the printed flow chart "
+                "has %d. Either the syllabus was revised (update SORTIE_ASSERT deliberately) "
+                "or the source is wrong. Not shipping a table of the wrong size."
+                % (b, t, got, want))
+
+    # (b) the 12 theory groups, decomposed into their 47 courses
+    ground, n_courses, n_req, n_cond, p_req, p_sup = [], 0, 0, 0, 0, 0
+    for g in fc["groups"]:
+        if g.get("kind") != "theory":
+            continue
+        cs = parse_group_courses(g)
+        seen = set()
+        for c in cs:
+            assert_latin("course of group", g["id"], c["code"])
+            # (group, code) is the join key, so the code must be unique WITHIN
+            # its group — OJT is a course of four different groups, and that is
+            # correct; two OJTs in ONE group would not be.
+            if c["code"] in seen:
+                raise SystemExit("DUPLICATE COURSE CODE %r inside group %s — the join key "
+                                 "(group, course) would be ambiguous" % (c["code"], g["id"]))
+            seen.add(c["code"])
+            n_courses += 1
+            if c["conditional"]:
+                n_cond += 1
+                p_sup += c["periods"]
+            else:
+                n_req += 1
+                p_req += c["periods"]
+        ground.append({
+            "g": g["id"], "name": g.get("name") or "", "track": g.get("track") or "",
+            "p": g.get("periods"),
+            "courses": [{"c": c["code"], "n": c["name"], "p": c["periods"],
+                         "cond": c["conditional"]} for c in cs],
+        })
+    got = {"courses": n_courses, "required": n_req, "conditional": n_cond,
+           "req_periods": p_req, "suppl_periods": p_sup}
+    if got != GROUND_ASSERT:
+        raise SystemExit(
+            "GROUND COURSE TOTALS CHANGED — this port of FDMS parseGroupCourses "
+            "produced %r, the printed syllabus says %r.\nOne parser written twice "
+            "drifts silently and the codes still LOOK right, so the build stops here: "
+            "re-check the port against D:\\FDMS\\app\\scheduler.js:156-210, or update "
+            "GROUND_ASSERT deliberately if the syllabus itself was revised."
+            % (got, GROUND_ASSERT))
+
+    # (c) the 8 ground-exam groups — and ONLY those (see the SQL comment)
+    exams = []
+    for g in fc["groups"]:
+        if g.get("kind") != "ground_exam":
+            continue
+        assert_latin("ground exam", g["id"], g["id"])
+        exams.append({"id": g["id"], "name": g.get("name") or "",
+                      "track": g.get("track") or "", "p": g.get("periods"),
+                      "cond": bool(g.get("conditional"))})
+    if len(exams) != 8:
+        raise SystemExit("GROUND EXAM COUNT CHANGED — %d groups, the syllabus has 8"
+                         % len(exams))
+
     lines = []
     lines.append('"use strict";')
     lines.append("/* " + "\u2550" * 72)
@@ -223,8 +612,30 @@ def main():
     lines.append("             of the printed Training Flow Chart. A later evaluation cannot")
     lines.append("             be filled while an earlier one has not been flown (round 6).")
     lines.append("")
+    lines.append("   ROUND 12 \u2014 THE LOG TABLES")
+    lines.append("   WA_LOG_SORTIES[band][track][]  \u2014 the sorties of ONE log table, in")
+    lines.append("             FLOW-CHART ORDER (not code order: WA_SORTIES above is sorted by")
+    lines.append("             code, and in ('flights','instrument') the chart runs")
+    lines.append("             \u2026 I4602 I4701 I4603 I4890).")
+    lines.append("     c/n   \u2014 code and printed name          g \u2014 Training Section")
+    lines.append("     o     \u2014 flow-chart position, 1-based    h \u2014 prescribed hours or null")
+    lines.append("     nt    \u2014 night     k \u2014 checkride     f1 \u2014 first solo     sc \u2014 solo candidate")
+    lines.append("   WA_GROUND[]  \u2014 the 12 theory groups and their 47 courses. The join key")
+    lines.append("             for a course is the PAIR (g, c) \u2014 OJT is a course of four groups.")
+    lines.append("     g/name/track/p   \u2014 group id, printed name, track, total periods")
+    lines.append("     courses[] {c, n, p, cond}  \u2014 code, name, periods, conditional (foreign SPs)")
+    lines.append("   WA_EXAMS[]   \u2014 the 8 ground-exam groups {id, name, track, p, cond}.")
+    lines.append("             ONLY these: the nested exams[] of four theory groups (FF 190 \u00b7")
+    lines.append("             PT 190 \u00b7 A\u0395 190 \u00b7 JX 190 \u00b7 JX 191 \u00b7 NA 191) are COURSES of their")
+    lines.append("             group in FDMS, and filing them here too would make the two")
+    lines.append("             systems disagree about what a student is owed.")
+    lines.append("")
     lines.append("   %d items, %d sortie codes and %d solo slots across %d categories,"
                  % (total, n_sorties, len(slots), len(out_cats)))
+    lines.append("   %d log sorties in %d (band, track) tables, %d ground courses in %d"
+                 % (sum(len(log_sorties[b][c]) for b in BANDS for c, _ in CATS),
+                    len(BANDS) * len(CATS), n_courses, len(ground)))
+    lines.append("   theory groups and %d ground exams," % len(exams))
     lines.append("   generated from master_index %s / flow chart %s."
                  % (idx.get("generated_at", "?"), fc.get("generated", "?")))
     lines.append("   " + "\u2550" * 72 + " */")
@@ -283,12 +694,87 @@ def main():
                  % ", ".join(json.dumps(c) for c in eval_order))
     lines.append("")
 
+    # \u2550\u2550 ROUND 12 \u2014 THE LOG-TABLE CATALOGUES \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    lines.append("/* ROUND 12 \u2014 THE SORTIES OF ONE LOG TABLE, IN FLOW-CHART ORDER.")
+    lines.append("   Eight lists, one per (band, track): the 4+4 tables the directive asks")
+    lines.append("   for. The order is the FILE ORDER of flowchart2.json \u2014 the order the")
+    lines.append("   printed Training Flow Chart lays the stage out in \u2014 and NOT the code")
+    lines.append("   order WA_SORTIES above carries: in ('flights','instrument') the chart")
+    lines.append("   runs \u2026 I4602 I4701 I4603 I4890, the night sortie BEFORE I4603, and")
+    lines.append("   sorting by code reorders the stage silently. Both lists exist on")
+    lines.append("   purpose: the round-5 pickers keep the order they have always had.")
+    lines.append("   NOTHING IS PRE-SEEDED FROM THIS. It is the closed list a sortie is")
+    lines.append("   CHOSEN from, never a skeleton of rows: an unflown sortie is not an")
+    lines.append("   entry, so wa.slot_empty needs no branch for these sections.")
+    lines.append("   MIRROR: db/schema.sql \u2192 wa.sortie_codes() / wa.sortie_band(). */")
+    lines.append("var WA_LOG_SORTIES = {")
+    for bi, band in enumerate(BANDS):
+        lines.append("  %s: {" % json.dumps(band))
+        for ci, (cid, _lab) in enumerate(CATS):
+            lines.append("    %s: [" % json.dumps(cid))
+            for r in log_sorties[band][cid]:
+                lines.append("      { c: %s, n: %s, g: %s, o: %d%s%s%s%s%s },"
+                             % (json.dumps(r["c"]),
+                                json.dumps(r["n"], ensure_ascii=False),
+                                json.dumps(r["g"]), r["o"],
+                                "" if r["h"] is None else ", h: %s" % json.dumps(r["h"]),
+                                ", nt: true" if r["nt"] else "",
+                                ", k: true" if r["k"] else "",
+                                ", f1: true" if r["f1"] else "",
+                                ", sc: true" if r["sc"] else ""))
+            lines.append("    ]" + ("," if ci < len(CATS) - 1 else ""))
+        lines.append("  }" + ("," if bi < len(BANDS) - 1 else ""))
+    lines.append("};")
+    lines.append("")
+    lines.append("/* THE 12 THEORY GROUPS AND THEIR 47 COURSES (round 12) \u2014 derived by a PORT")
+    lines.append("   of the FDMS parser (app/scheduler.js parseGroupCourses) over the printed")
+    lines.append("   duration block of each group, and asserted against the four totals it")
+    lines.append("   must reproduce: 47 courses \u00b7 45 required + 2 conditional \u00b7 514 required")
+    lines.append("   periods \u00b7 26 supplementary. THE JOIN KEY IS THE PAIR (group, course) \u2014")
+    lines.append("   never the code alone, because OJT is a course of four different groups.")
+    lines.append("   `cond` marks a [suppl.] course (foreign SPs who did not cover it at their")
+    lines.append("   Air Force Academy): it is offered and it never blocks anything.")
+    lines.append("   MIRROR: db/schema.sql \u2192 wa.lesson_groups() / wa.lesson_courses(). */")
+    lines.append("var WA_GROUND = [")
+    for g in ground:
+        lines.append("  { g: %s, track: %s, p: %s," %
+                     (json.dumps(g["g"]), json.dumps(g["track"]), json.dumps(g["p"])))
+        lines.append("    name: %s," % json.dumps(g["name"], ensure_ascii=False))
+        lines.append("    courses: [")
+        for c in g["courses"]:
+            lines.append("      { c: %s, n: %s, p: %s%s },"
+                         % (json.dumps(c["c"], ensure_ascii=False),
+                            json.dumps(c["n"], ensure_ascii=False),
+                            json.dumps(c["p"]),
+                            ", cond: true" if c["cond"] else ""))
+        lines.append("    ] },")
+    lines.append("];")
+    lines.append("")
+    lines.append("/* THE 8 GROUND-EXAM GROUPS (round 12) \u2014 and only these. Four theory groups")
+    lines.append("   carry a nested exams[] (FF 190 \u00b7 PT 190 \u00b7 A\u0395 190 \u00b7 JX 190 \u00b7 JX 191 \u00b7")
+    lines.append("   NA 191) that a human would naturally file under \"exams\"; FDMS does not,")
+    lines.append("   its parser picks them up as COURSES OF THEIR GROUP, and filing them here")
+    lines.append("   as well would make the two systems disagree about what is owed.")
+    lines.append("   `cond` is JP190 \u2014 \u00abExams on Flight physiology (foreign SPs only)\u00bb \u2014 which")
+    lines.append("   a HAF student does not owe. (FDMS's own SchedReady never reads that flag")
+    lines.append("   and leaves JP190 pending for ever; the defect is not mirrored here.)")
+    lines.append("   MIRROR: db/schema.sql \u2192 wa.exam_ids() / wa.exam_conditional(). */")
+    lines.append("var WA_EXAMS = [")
+    for e in exams:
+        lines.append("  { id: %s, track: %s, p: %s%s, name: %s },"
+                     % (json.dumps(e["id"]), json.dumps(e["track"]), json.dumps(e["p"]),
+                        ", cond: true" if e["cond"] else "",
+                        json.dumps(e["name"], ensure_ascii=False)))
+    lines.append("];")
+    lines.append("")
+
     with open(OUT, "w", encoding="utf-8", newline="\n") as fh:
         fh.write("\n".join(lines))
 
     # \u2500\u2500 the SQL mirror, spliced into db/schema.sql between its markers \u2500\u2500\u2500\u2500
     block = sql_block(out_cats, eval_order, fc.get("generated", "?"),
-                      idx.get("generated_at", "?"))
+                      idx.get("generated_at", "?"),
+                      log_sorties, ground, exams, [s["id"] for s in slots])
     with open(OUT_SQL, encoding="utf-8") as fh:
         sql = fh.read()
     if SQL_BEGIN not in sql or SQL_END not in sql:
@@ -304,6 +790,15 @@ def main():
     print("wrote %s \u2014 GENERATED BLOCK: %d checkrides in syllabus order (%s), "
           "%d item names" % (os.path.normpath(OUT_SQL), len(eval_order),
                              " \u2192 ".join(eval_order), total))
+    print("round 12 \u2014 log tables: %s"
+          % " \u00b7 ".join("%s/%s %d" % (b, c, len(log_sorties[b][c]))
+                       for b in BANDS for c, _l in CATS))
+    print("round 12 \u2014 ground: %d courses in %d theory groups "
+          "(%d required + %d conditional, %d + %d periods), %d ground exams (%s conditional)"
+          % (n_courses, len(ground), n_req, n_cond, p_req, p_sup, len(exams),
+             ", ".join(e["id"] for e in exams if e["cond"]) or "none"))
+    print("round 12 \u2014 every emitted code is pure Latin (assert_latin: %d sorties, "
+          "%d courses, %d exams checked)" % (133, n_courses, len(exams)))
 
 
 if __name__ == "__main__":

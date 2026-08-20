@@ -724,6 +724,434 @@ language sql immutable as $$
     ]::text[]
     else array[]::text[] end
 $$;
+
+-- ══ ROUND 12 — THE LOG TABLES: THE FOUR CATALOGUES ═══════════════════════
+-- The sorties of ONE table — a (band, track) pair — in FLOW-CHART ORDER, i.e.
+-- the order the printed Training Flow Chart lays the stage out in. NOT the
+-- code order of wa.item_names' neighbour WA_SORTIES: in ('flights',
+-- 'instrument') the chart runs … I4602 I4701 I4603 I4890 and sorting by code
+-- silently reorders it.
+-- THE BAND IS THE SECTION AND THE TRACK IS THE LETTER (wa.code_track), so a
+-- flights/fs row is fully placed by the pair — no new lookup on the hot path.
+-- MIRROR: app/items-catalog.js → WA_LOG_SORTIES.
+create or replace function wa.sortie_codes(p_band text, p_track text) returns text[]
+language sql immutable as $$
+  select case p_band || '/' || p_track
+    when 'flights/contact' then array[
+      'C4101',
+      'C4201',
+      'C4202',
+      'C4203',
+      'C4301',
+      'C4302',
+      'C4303',
+      'C4401',
+      'C4402',
+      'C4403',
+      'C4590',
+      'C4601',
+      'C4602',
+      'C4790',
+      'C4791',
+      'C4801',
+      'C4802',
+      'C4803',
+      'C4804',
+      'C4901',
+      'C4902',
+      'C4903',
+      'C4904',
+      'C4905',
+      'C5090',
+      'C5101',
+      'C5102',
+      'C5201',
+      'C5202',
+      'C5203',
+      'C5204',
+      'C5301',
+      'C5302',
+      'C5303',
+      'C5304',
+      'C5490'
+    ]::text[]
+    when 'flights/instrument' then array[
+      'I4101',
+      'I4102',
+      'I4201',
+      'I4202',
+      'I4301',
+      'I4302',
+      'I4490',
+      'I4501',
+      'I4502',
+      'I4601',
+      'I4602',
+      'I4701',
+      'I4603',
+      'I4890'
+    ]::text[]
+    when 'flights/formation' then array[
+      'F4101',
+      'F4102',
+      'F4103',
+      'F4104',
+      'F4201',
+      'F4202',
+      'F4203',
+      'F4204',
+      'F4301',
+      'F4302',
+      'F4303',
+      'F4304',
+      'F4305',
+      'F4306',
+      'F4401',
+      'F4402',
+      'F4403',
+      'F4404',
+      'F4501',
+      'F4502',
+      'F4503',
+      'F4690'
+    ]::text[]
+    when 'flights/vfr_navigation' then array[
+      'N4101',
+      'N4102',
+      'N4201',
+      'N4202',
+      'N4301',
+      'N4302',
+      'N4401',
+      'N4402',
+      'N4403',
+      'N4501',
+      'N4502',
+      'N4503',
+      'N4690'
+    ]::text[]
+    when 'fs/contact' then array[
+      'B1001',
+      'B1002',
+      'C1101',
+      'C2101',
+      'C2201',
+      'C2202',
+      'C2301',
+      'C2302',
+      'C2401',
+      'C2402',
+      'C2403',
+      'C2501',
+      'C2502',
+      'C2503',
+      'C2601',
+      'C2602',
+      'C2603',
+      'C2604'
+    ]::text[]
+    when 'fs/instrument' then array[
+      'I3101',
+      'I3102',
+      'I3201',
+      'I3202',
+      'I3203',
+      'I3301',
+      'I3302',
+      'I3303',
+      'I3304',
+      'I3401',
+      'I3402',
+      'I3403',
+      'I3404',
+      'I3501',
+      'I3502',
+      'I3503',
+      'I3504',
+      'I3601'
+    ]::text[]
+    when 'fs/formation' then array[
+      'F3101',
+      'F3102',
+      'F3201',
+      'F3202',
+      'F3203'
+    ]::text[]
+    when 'fs/vfr_navigation' then array[
+      'N2101',
+      'N2201',
+      'N2202',
+      'N2301',
+      'N2302',
+      'N2303',
+      'N2304'
+    ]::text[]
+    else array[]::text[] end
+$$;
+
+-- which BAND a syllabus code belongs to — 'flights' | 'fs' | null (not a
+-- catalogue code). The letter gives the track; only the flow chart gives the
+-- band, which is why this is generated and wa.code_track is not.
+create or replace function wa.sortie_band(p_code text) returns text
+language sql immutable as $$
+  select case
+    when upper(wa.norm_line(p_code)) = any(array[
+      'C4101',
+      'C4201',
+      'C4202',
+      'C4203',
+      'C4301',
+      'C4302',
+      'C4303',
+      'C4401',
+      'C4402',
+      'C4403',
+      'C4590',
+      'C4601',
+      'C4602',
+      'C4790',
+      'C4791',
+      'C4801',
+      'C4802',
+      'C4803',
+      'C4804',
+      'C4901',
+      'C4902',
+      'C4903',
+      'C4904',
+      'C4905',
+      'C5090',
+      'C5101',
+      'C5102',
+      'C5201',
+      'C5202',
+      'C5203',
+      'C5204',
+      'C5301',
+      'C5302',
+      'C5303',
+      'C5304',
+      'C5490',
+      'I4101',
+      'I4102',
+      'I4201',
+      'I4202',
+      'I4301',
+      'I4302',
+      'I4490',
+      'I4501',
+      'I4502',
+      'I4601',
+      'I4602',
+      'I4701',
+      'I4603',
+      'I4890',
+      'F4101',
+      'F4102',
+      'F4103',
+      'F4104',
+      'F4201',
+      'F4202',
+      'F4203',
+      'F4204',
+      'F4301',
+      'F4302',
+      'F4303',
+      'F4304',
+      'F4305',
+      'F4306',
+      'F4401',
+      'F4402',
+      'F4403',
+      'F4404',
+      'F4501',
+      'F4502',
+      'F4503',
+      'F4690',
+      'N4101',
+      'N4102',
+      'N4201',
+      'N4202',
+      'N4301',
+      'N4302',
+      'N4401',
+      'N4402',
+      'N4403',
+      'N4501',
+      'N4502',
+      'N4503',
+      'N4690'
+    ]::text[]) then 'flights'
+    when upper(wa.norm_line(p_code)) = any(array[
+      'B1001',
+      'B1002',
+      'C1101',
+      'C2101',
+      'C2201',
+      'C2202',
+      'C2301',
+      'C2302',
+      'C2401',
+      'C2402',
+      'C2403',
+      'C2501',
+      'C2502',
+      'C2503',
+      'C2601',
+      'C2602',
+      'C2603',
+      'C2604',
+      'I3101',
+      'I3102',
+      'I3201',
+      'I3202',
+      'I3203',
+      'I3301',
+      'I3302',
+      'I3303',
+      'I3304',
+      'I3401',
+      'I3402',
+      'I3403',
+      'I3404',
+      'I3501',
+      'I3502',
+      'I3503',
+      'I3504',
+      'I3601',
+      'F3101',
+      'F3102',
+      'F3201',
+      'F3202',
+      'F3203',
+      'N2101',
+      'N2201',
+      'N2202',
+      'N2301',
+      'N2302',
+      'N2303',
+      'N2304'
+    ]::text[]) then 'fs'
+    else null end
+$$;
+
+-- THE 12 THEORY GROUPS and, per group, its COURSES — the codes exactly as the
+-- FDMS parser derives them from the printed duration block. The join key for
+-- a course is the PAIR (group, course), never the code alone: OJT is a course
+-- of four different groups.
+-- MIRROR: app/items-catalog.js → WA_GROUND.
+create or replace function wa.lesson_groups() returns text[]
+language sql immutable as $$
+  select array['GT-WSGES','GT-INITIAL','GT-FLYPRIN','GT-AERO-CRM','GT-METEO-BA','GT-INSTR','GT-IFRNAV-GPS','GT-CO110','GT-CO109','GT-FORM','GT-VFRNAV','GT-GENBRIEF']::text[]
+$$;
+
+create or replace function wa.lesson_courses(p_group text) returns text[]
+language sql immutable as $$
+  select case p_group
+    when 'GT-WSGES' then array[
+      'A/C Systems (WSGES)'
+    ]::text[]
+    when 'GT-INITIAL' then array[
+      'OP 101-115',
+      'IC 101',
+      'LP 101-108',
+      'PR 101-113',
+      'JP 101-110*'
+    ]::text[]
+    when 'GT-FLYPRIN' then array[
+      'FF 101-108',
+      'FF 190',
+      'CO 101-105',
+      'CO 106-108',
+      'OJT',
+      'PT 101-104',
+      'PT 190',
+      'BB 101-102',
+      'SOPs 101-104',
+      'IFG 101-102'
+    ]::text[]
+    when 'GT-AERO-CRM' then array[
+      'AE 101-108',
+      'AE 190',
+      'OJT',
+      'CR 201-202*'
+    ]::text[]
+    when 'GT-METEO-BA' then array[
+      'JX 101-109',
+      'JX 190',
+      'OJT',
+      'Meteo Briefing',
+      'JX 191',
+      'BA 101-103'
+    ]::text[]
+    when 'GT-INSTR' then array[
+      'IN 101-105',
+      'IN 201-210'
+    ]::text[]
+    when 'GT-IFRNAV-GPS' then array[
+      'NA 101-103',
+      'ATR',
+      'NA 191',
+      'IPR PL2',
+      'OJT',
+      'GPS'
+    ]::text[]
+    when 'GT-CO110' then array[
+      'CO 110'
+    ]::text[]
+    when 'GT-CO109' then array[
+      'CO 109'
+    ]::text[]
+    when 'GT-FORM' then array[
+      'FO 101-104',
+      'FO 201',
+      'TACFOR 501-506',
+      'OJT'
+    ]::text[]
+    when 'GT-VFRNAV' then array[
+      'NA 104-111',
+      'LNAV 701-705'
+    ]::text[]
+    when 'GT-GENBRIEF' then array[
+      'FT',
+      'ABA',
+      'FP',
+      'EP',
+      'FS'
+    ]::text[]
+    else array[]::text[] end
+$$;
+
+-- THE EIGHT GROUND-EXAM GROUPS. These and ONLY these: four theory groups
+-- carry a nested exams[] (FF 190 · PT 190 · AΕ 190 · JX 190 · JX 191 ·
+-- NA 191) which a human would file under "exams", and FDMS does not — its
+-- parser picks them up as COURSES OF THEIR GROUP. Putting them here too
+-- would make the two systems disagree about what a student is owed.
+-- MIRROR: app/items-catalog.js → WA_EXAMS.
+create or replace function wa.exam_ids() returns text[]
+language sql immutable as $$
+  select array['CO190','JP190','IN190','IN290','FO190','TACFOR590','NA190','LNAV790']::text[]
+$$;
+
+-- JP190 is «Exams on Flight physiology (foreign SPs only)» — conditional, so
+-- it is NOT OWED by a HAF student. (FDMS's own SchedReady never reads the
+-- flag and leaves JP190 pending for ever; that defect is not mirrored here.)
+create or replace function wa.exam_conditional(p_id text) returns boolean
+language sql immutable as $$
+  select case when p_id = any(array['JP190']::text[]) then true else false end
+$$;
+
+-- ── THE FIXED SOLO SLOTS (round 5, generated since round 12) ─────────────
+-- One slot per solo the stage prescribes — flow-chart Training Sections whose
+-- printed duration block says SOLO SORTIES > 0. F4301-06 prescribes TWO, so it
+-- carries two distinct slots. Hand-kept until round 12 opened the generator;
+-- it mirrored WA_SOLO_SLOTS by discipline alone, which is a drift that costs
+-- nothing to remove.
+-- MIRROR: app/items-catalog.js → WA_SOLO_SLOTS.
+create or replace function wa.solo_slots() returns text[]
+language sql immutable as $$
+  select array['C4790-91-S1','C4801-04-S1','C4901-05-S1','C5201-04-S1','C5301-04-S1','F4301-06-S1','F4301-06-S2','F4501-03-S1']::text[]
+$$;
 -- ▲▲ GENERATED BLOCK ▲▲
 
 -- ══ ROUND 11 — THE GRADE SCALE, AND WHAT «SUCCESSFUL» MEANS ════════════════
@@ -970,17 +1398,13 @@ language sql immutable as $$
 $$;
 
 -- ── THE FIXED SOLO SLOTS (round 5) ────────────────────────────────────────
--- One slot per solo the stage prescribes — flow-chart Training Sections whose
--- printed duration block says SOLO SORTIES > 0. F4301-06 prescribes TWO, so it
--- carries two distinct slots. Solos are not a free list: the form draws exactly
--- these rows, empty until flown, and nothing can add or remove one. An
--- unforeseen extra solo is a slot-LESS entry (the "additional solo" path).
--- MIRROR: app/items-catalog.js → WA_SOLO_SLOTS (generated from flowchart2.json).
-create or replace function wa.solo_slots() returns text[]
-language sql immutable as $$
-  select array['C4790-91-S1','C4801-04-S1','C4901-05-S1','C5201-04-S1',
-               'C5301-04-S1','F4301-06-S1','F4301-06-S2','F4501-03-S1']::text[]
-$$;
+-- Solos are not a free list: the form draws exactly these rows, empty until
+-- flown, and nothing can add or remove one. An unforeseen extra solo is a
+-- slot-LESS entry (the "additional solo" path).
+-- ROUND 12 — the list itself MOVED INTO THE GENERATED BLOCK above. It was
+-- hand-kept here and mirrored app/items-catalog.js → WA_SOLO_SLOTS by
+-- discipline alone; both now come from one run of tools/gen-items-catalog.py
+-- over flowchart2.json, so they cannot drift. See wa.solo_slots() there.
 
 -- the track a Phase II sortie code belongs to, from its letter — B/C contact,
 -- I instrument, F formation, N navigation (verified against all 133 codes of
@@ -997,13 +1421,146 @@ language sql immutable as $$
     else 'vfr_navigation' end
 $$;
 
--- the nine sections of a v2 record, in form order.
+-- ══ ROUND 12 — THE LOG TABLES ═════════════════════════════════════════════
+-- COMMAND WORDING (2026-08-19), verbatim:
+--   «Για αρχη προσθεσε για καθε μαθητη ανα κατηγορια ενα πινακα στο τελος οπου
+--   θα εχει ολες τις πτησεις. contact, ημερομηνια, instructor, duration, grade
+--   or non graded (δεκτο το null, γιατι καποιες φορες αργει το debriefing).
+--   4+4 πινακες για f/s και flights. ομοιως τα μαθηματα και τα exams.»
+-- and, on the placeholder kinds:
+--   «να αφησουμε placeholder για τυχον fcf, cef, repeat»
+--
+-- THE 4+4 TABLES ARE A RENDER GROUPING, NOT EIGHT STORAGE KEYS. Adding a
+-- section to this app is expensive by design — a dozen lists name every one of
+-- them by hand — so eight sections would be eight copies of one identical rule.
+-- FOUR sections carry them, taking the FDMS `kind` vocabulary verbatim so that
+-- anyone reading either codebase meets the same four words:
+--   flights  the aircraft sorties          → 4 tables, one per track
+--   fs       the simulator sorties         → 4 tables, one per track
+--   lessons  the ground courses            → one block
+--   exams    the 8 ground-exam groups      → one block
+-- WHY SPLIT BY BAND AT ALL, given the tables are per track?
+--   1. THE SECTION IS THE BAND. The track is on the row (and the letter of a
+--      syllabus code proves it — wa.code_track), but NOTHING anywhere derives
+--      flights-from-F/S out of a code, so the band has to be stored somewhere,
+--      and being the array it sits in costs nothing.
+--   2. THE ENTRY CAP. 85 flights plus their re-flies in one array approaches
+--      wa.section_cap; per band it never does.
+--   3. Sim hours and flight hours are counted separately by the squadron
+--      everywhere.
+-- NOTHING IS PRE-SEEDED. The syllabus list is the CLOSED LIST a sortie is
+-- CHOSEN from, never a skeleton of rows: an unflown sortie is not an entry, so
+-- wa.slot_empty needs no branch for these four and the CO-entry arithmetic
+-- ("1 of 18 entered by the CO") is not diluted by 133 placeholders.
+--
+-- the thirteen sections of a v2 record, in form order — the new four LAST,
+-- which is where the directive puts them («ενα πινακα στο τελος»).
 -- MIRROR: app/app.js → WA.COUNTED.
 create or replace function wa.sections() returns text[]
 language sql immutable as $$
   select array['nfs','sms','fail','almost_good','airsickness',
-               'evaluations','solo_flights','fpc','cef']::text[]
+               'evaluations','solo_flights','fpc','cef',
+               'flights','fs','lessons','exams']::text[]
 $$;
+
+-- the two bands, which are also the two log-flight section names
+create or replace function wa.log_bands() returns text[]
+language sql immutable as $$ select array['flights','fs']::text[] $$;
+
+-- HOW MANY ENTRIES ONE SECTION MAY HOLD. 200 was a flat literal until round 12
+-- put the whole syllabus in reach of a record: 47 ground courses over several
+-- blocks each, and 85 flights plus their re-flies, are legitimately more rows
+-- than any earlier section could ever have. Payload size is not the constraint
+-- (a flight row is ~180 bytes against a 400 000-byte ceiling); the cap is only
+-- there to stop a runaway client.
+create or replace function wa.section_cap(p_sec text) returns int
+language sql immutable as $$
+  select case when p_sec in ('flights','fs','lessons') then 400 else 200 end
+$$;
+
+-- ── THE FLIGHT KINDS (round 12) ───────────────────────────────────────────
+-- «να αφησουμε placeholder για τυχον fcf, cef, repeat» — the user's own list,
+-- closed, with 'syllabus' as the default every ordinary row takes:
+--   syllabus  a sortie of the printed flow chart, flown in its place
+--   repeat    the SAME syllabus node flown again (FDMS records a re-fly as a
+--             new event on the same node; here it is a new row that says so)
+--   fcf       Functional Check Flight        cef  Εξέταση Καταλληλότητας
+--   other     anything the four above do not cover
+-- fcf / cef / other are OFF-CATALOGUE BY NATURE: they free the sortie box to
+-- free text WITHOUT the "not in the syllabus catalogue" warning, because for
+-- them the catalogue was never the right list to look in.
+-- MIRROR: app/app.js → WA.FLIGHT_KINDS.
+create or replace function wa.flight_kinds() returns text[]
+language sql immutable as $$
+  select array['syllabus','repeat','fcf','cef','other']::text[]
+$$;
+
+-- ── THE VERDICT WITHOUT A NUMBER (round 12) ───────────────────────────────
+-- The squadron's scheduler knows pass / lag / fail and has NO percentage for a
+-- sortie; this record knows percentages. `verdict` is how the first crosses
+-- into the second, and it exists ONLY WHERE THE GRADE IS ABSENT: a stored
+-- verdict beside a stored grade is a second source of truth that can
+-- contradict the first — the exact defect round 11 removed from the FPC («an
+-- FPC's result is its grade against the printed scale»). Where a grade exists
+-- the verdict is DERIVED (wa.grade_verdict) and a stored one is refused by name.
+-- Without it, a flight the squadron recorded as FAILED would arrive in the
+-- student's record indistinguishable from one still awaiting its debrief — a
+-- failure invisible in the record that exists to show it.
+create or replace function wa.verdicts() returns text[]
+language sql immutable as $$
+  select array['pass','lagging','failed']::text[]
+$$;
+
+-- the three-way collapse of the printed five-band scale, at the SAME
+-- thresholds (ΠΔ 151/13: 60 % separates acceptable from unacceptable, 50-59 %
+-- is ΥΣΤΕΡΗΣΗ / ΣΧΕΔΟΝ ΚΑΛΩΣ): excellent · very_good · good → pass.
+-- MIRROR: app/app.js → WA.gradeVerdict.
+create or replace function wa.grade_verdict(g numeric) returns text
+language sql immutable as $$
+  select case wa.grade_band(g)
+    when 'excellent' then 'pass' when 'very_good' then 'pass' when 'good' then 'pass'
+    when 'lagging'   then 'lagging'
+    when 'failed'    then 'failed'
+    else null end
+$$;
+
+-- a whole number in a range, nullable — the ground-lesson periods box.
+-- NULL IS NOT ZERO here: it means the FULL course, which is FDMS's own
+-- semantics for a lesson event that carries no periods_done (covCore).
+create or replace function wa.chk_int(v jsonb, p_where text, p_min int, p_max int)
+returns void language plpgsql immutable as $$
+declare n numeric;
+begin
+  if v is null or jsonb_typeof(v) = 'null' then return; end if;
+  perform wa.chk(jsonb_typeof(v) = 'number', p_where, 'must be a number');
+  n := (v #>> '{}')::numeric;
+  perform wa.chk(n = trunc(n), p_where, 'must be a whole number');
+  perform wa.chk(n >= p_min and n <= p_max, p_where,
+                 format('out of range %s-%s', p_min, p_max));
+end $$;
+
+-- DURATION — DECIMAL HOURS, ONE DECIMAL (round 12). 0.1 h = 6 minutes, which
+-- is how a logbook line is written and how the squadron reads a flight time.
+-- What is STORED is the time ACTUALLY flown; what the box OPENS with is the
+-- syllabus value for that sortie, so the common case is a confirmation and the
+-- uncommon one a correction. Nullable, because the same debrief lag applies —
+-- a sortie can be dated and flown before the times are in.
+create or replace function wa.chk_duration(v jsonb, p_where text)
+returns void language plpgsql immutable as $$
+declare n numeric;
+begin
+  if v is null or jsonb_typeof(v) = 'null' then return; end if;
+  perform wa.chk(jsonb_typeof(v) = 'number', p_where, 'duration must be a number');
+  n := (v #>> '{}')::numeric;
+  perform wa.chk(n > 0, p_where,
+                 'a flown sortie lasted longer than nothing — leave the box empty while the time is not known yet');
+  perform wa.chk(n <= 24, p_where,
+                 'duration is DECIMAL HOURS, not minutes — 1.3 is one hour and eighteen minutes');
+  perform wa.chk(n = round(n, 1), p_where,
+                 format('duration is recorded to one decimal (6-minute steps) — %s is not (round it, e.g. %s)',
+                        trim(trailing '.' from trim(trailing '0' from n::text)),
+                        trim(trailing '.' from trim(trailing '0' from round(n, 1)::text))));
+end $$;
 
 -- ── PENDING IS GONE (round 8) ─────────────────────────────────────────────
 -- The tick box, the flag, the badges, the columns and the counters are all
@@ -1045,6 +1602,47 @@ language sql immutable as $$
     when 'solo_flights' then array['slot','sortie','date','ng','grade','instructor','legacy','entered_by']
     when 'fpc'          then array['date','flight_code','evaluator','result','grade','legacy','entered_by']
     when 'cef'          then array['date','flight_code','evaluator','result','grade','legacy','entered_by']
+    -- ══ ROUND 12 — THE LOG TABLES ═══════════════════════════════════════════
+    -- flights and fs share ONE shape: the same flight, flown in the aircraft or
+    -- in the simulator, is the same set of facts.
+    --   date            required — the sortie happened on a day; only the GRADE lags
+    --   track           which of the four tables the row belongs to. It is not
+    --                   derived from the code, because kind fcf/cef/other have no
+    --                   syllabus code at all; where a syllabus code IS present its
+    --                   letter must agree with it (the fail/almost_good rule).
+    --   sortie          the flight identity. Closed list per (section, track);
+    --                   free text accepted and shown marked "off-catalogue".
+    --   seq             which flight of that code on that date — 1, and 2 for a
+    --                   deliberate same-day re-fly. AUTHORED, never derived from
+    --                   an array index: an index is a position and this is a fact.
+    --   kind            wa.flight_kinds() — 'syllabus' unless said otherwise
+    --   instructor      required on EVERY row (the round-6 solo doctrine)
+    --   instructor_oid  the unambiguous identity, never drawn as a box
+    --   duration        decimal hours, one decimal, nullable
+    --   grade           0-100 whole, nullable — NULL = the debrief has not landed
+    --   ng              non-graded BY NATURE; ng ⇒ grade must be null
+    --   verdict         only where the grade is absent (wa.verdicts())
+    --   note            ≤300, also the carrier for a lag/fail's maneuvers text
+    when 'flights'      then array['date','track','sortie','seq','kind','instructor',
+                                   'instructor_oid','duration','grade','ng','verdict',
+                                   'note','legacy','entered_by']
+    when 'fs'           then array['date','track','sortie','seq','kind','instructor',
+                                   'instructor_oid','duration','grade','ng','verdict',
+                                   'note','legacy','entered_by']
+    -- A GROUND LESSON IS A BLOCK, not a point: date = start, end_date = end,
+    -- null = a single day. `periods` NULL means the FULL course (FDMS's own
+    -- covCore semantics), and `absent` is how "the class covered it and this
+    -- student did not" is said from the student's side. No grade: a lesson is
+    -- attended, not scored.
+    when 'lessons'      then array['date','end_date','group','course','periods','absent',
+                                   'instructor','instructor_oid','note','legacy','entered_by']
+    -- THE EIGHT GROUND-EXAM GROUPS AND NOTHING ELSE. Four theory groups carry a
+    -- nested exams[] (FF 190 · PT 190 · AΕ 190 · JX 190 · JX 191 · NA 191) which
+    -- FDMS treats as COURSES OF THEIR GROUP — they belong in `lessons`, and
+    -- filing them here as well would make the two systems disagree about what a
+    -- student is owed.
+    when 'exams'        then array['date','exam','grade','instructor','instructor_oid',
+                                   'note','legacy','entered_by']
     else array[]::text[] end
 $$;
 
@@ -1112,7 +1710,9 @@ begin
   foreach k in array allowed loop
     if p ? k then
       perform wa.chk(jsonb_typeof(p->k) = 'array', k, 'must be a list');
-      perform wa.chk(jsonb_array_length(p->k) <= 200, k, 'too many entries');
+      -- ROUND 12: the flat 200 became wa.section_cap — the log tables can hold
+      -- the whole syllabus and its re-flies, which no earlier section could.
+      perform wa.chk(jsonb_array_length(p->k) <= wa.section_cap(k), k, 'too many entries');
       for i in 0 .. coalesce(jsonb_array_length(p->k), 0) - 1 loop
         e := p->k->i;
         w := format('%s[%s]', k, i);
@@ -1353,6 +1953,168 @@ begin
           end if;
           perform wa.chk_text(e->'result', w || '.result', false, 300);
           perform wa.chk_grade(e->'grade', w || '.grade', false);
+
+        -- ══ ROUND 12 — THE LOG TABLES ═════════════════════════════════════
+        elsif k in ('flights', 'fs') then
+          -- THE DATE. The flight happened on a day; only the GRADE lags, which
+          -- is the whole point of «δεκτο το null, γιατι καποιες φορες αργει το
+          -- debriefing». A date is therefore required on every row.
+          perform wa.chk_entry_date(e, w);
+
+          -- WHICH TABLE THIS ROW IS IN. Four per band, and the row says which:
+          -- kind fcf / cef / other have no syllabus code to read a track off,
+          -- so the track cannot be derived and has to be stored.
+          perform wa.chk_text(e->'track', w || '.track', not wa.is_legacy(e), 20);
+          perform wa.chk((e->>'track') is null
+                         or ((e->>'track') = any(wa.item_cats()) and (e->>'track') <> 'other'),
+                         w || '.track',
+                         format('unknown track — the four tables of a band are %s',
+                                array_to_string(array['contact','instrument','formation','vfr_navigation'], ' / ')));
+
+          -- THE FLIGHT IDENTITY. «contact» in the directive is the sortie: the
+          -- table is already per category, so the first column is WHICH FLIGHT.
+          perform wa.chk_text(e->'sortie', w || '.sortie', not wa.is_legacy(e), 40);
+          perform wa.chk(wa.is_legacy(e)
+                         or nullif(trim(coalesce(e->>'sortie', '')), '') is not null,
+                         w || '.sortie',
+                         'every row of a flight log names the flight — choose the sortie from the table''s list, or type it if the syllabus data lags reality');
+          -- TRACK ⇄ CODE, the round-5 rule applied to the same kind of pair. A
+          -- code the catalogue does NOT know is accepted and shown marked
+          -- off-catalogue (the syllabus data may lag reality and a record must
+          -- never become unstorable); a syllabus-SHAPED code whose letter
+          -- contradicts the table it sits in is provably wrong.
+          perform wa.chk(wa.code_track(e->>'sortie') is null or (e->>'track') is null
+                         or wa.code_track(e->>'sortie') = (e->>'track'),
+                         w || '.sortie',
+                         format('%s belongs to the %s track but this row is in the %s table — record it in that table instead',
+                                upper(e->>'sortie'), wa.code_track(e->>'sortie'), e->>'track'));
+          -- BAND ⇄ CODE, the same doctrine one axis over. Nothing derives
+          -- flights-from-F/S out of a code, so the generated catalogue is the
+          -- only authority — and where it knows the code, it is a fact.
+          perform wa.chk(wa.sortie_band(e->>'sortie') is null
+                         or wa.sortie_band(e->>'sortie') = k,
+                         w || '.sortie',
+                         format('%s is %s sortie — it belongs in the %s tables, not the %s ones',
+                                upper(e->>'sortie'),
+                                case when wa.sortie_band(e->>'sortie') = 'fs' then 'a SIMULATOR' else 'an AIRCRAFT' end,
+                                case when wa.sortie_band(e->>'sortie') = 'fs' then 'F/S' else 'Flights' end,
+                                case when k = 'fs' then 'F/S' else 'Flights' end));
+          -- ONE FACT, ONE ROW. The eight checkrides have their own section,
+          -- with the syllabus-order rule and the pass-attempt rule on them. A
+          -- second row here would be a second grade for one flight, and the two
+          -- can disagree — which is the corruption this app exists to prevent.
+          perform wa.chk(not ((e->>'sortie') = any(wa.eval_ids())),
+                         w || '.sortie',
+                         format('%s is one of the eight checkrides — a checkride is recorded in the Evaluations section, where the syllabus order and the pass-attempt rule apply to it. Two rows for one flight would be two grades that can disagree.',
+                                upper(e->>'sortie')));
+
+          -- WHICH FLIGHT OF THAT CODE ON THAT DAY. Deliberate, never derived:
+          -- an array index is a POSITION and this is a FACT, and there is no
+          -- (sortie, date) uniqueness rule here — a second turn on one day is a
+          -- real thing, and a rule that refused it would refuse the truth.
+          perform wa.chk_int(e->'seq', w || '.seq', 1, 20);
+
+          -- THE KIND — closed list, 'syllabus' by default (see wa.flight_kinds)
+          perform wa.chk_text(e->'kind', w || '.kind', false, 20);
+          perform wa.chk((e->>'kind') is null or (e->>'kind') = any(wa.flight_kinds()),
+                         w || '.kind',
+                         format('unknown kind of flight — the list is %s',
+                                array_to_string(wa.flight_kinds(), ' / ')));
+
+          -- THE INSTRUCTOR IS ON EVERY ROW — the round-6 solo doctrine applied
+          -- to every sortie: «a student never launches alone on their own
+          -- authority». On a graded row it is who graded it, on an NG or
+          -- ungraded row it is who flew with or authorised it. Required even on
+          -- a legacy row: the flag excuses what an OLD form never asked for,
+          -- never a rule of this round, or the rule would be optional for
+          -- exactly the rows that break it.
+          perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
+          perform wa.chk(nullif(trim(coalesce(e->>'instructor', '')), '') is not null,
+                         w || '.instructor',
+                         'every flown sortie names the instructor — a student never launches alone on their own authority, and an ungraded row still had somebody in the other seat or somebody who authorised it');
+          -- the unambiguous identity, written by the CO's form path only for
+          -- now. Never drawn as a box, so nothing a student types reaches it.
+          perform wa.chk_text(e->'instructor_oid', w || '.instructor_oid', false, 64);
+
+          perform wa.chk_duration(e->'duration', w || '.duration');
+          perform wa.chk_bool(e->'ng', w || '.ng');
+          is_ng := coalesce(case when jsonb_typeof(e->'ng') = 'boolean'
+                                 then (e->>'ng')::boolean else false end, false);
+          if is_ng then
+            -- the identical rule and the identical sentence as solo_flights
+            perform wa.chk(e->'grade' is null or jsonb_typeof(e->'grade') = 'null',
+                           w || '.grade', 'a non-graded (NG) flight carries no grade');
+          else
+            perform wa.chk_grade(e->'grade', w || '.grade', false);
+          end if;
+
+          -- THE VERDICT, AND WHERE IT MAY LIVE. Only where the grade is absent.
+          perform wa.chk_text(e->'verdict', w || '.verdict', false, 20);
+          perform wa.chk((e->>'verdict') is null or (e->>'verdict') = any(wa.verdicts()),
+                         w || '.verdict',
+                         format('unknown verdict — %s', array_to_string(wa.verdicts(), ' / ')));
+          perform wa.chk((e->>'verdict') is null or jsonb_typeof(e->'grade') <> 'number',
+                         w || '.verdict',
+                         format('this row has a grade, so its verdict is READ from it (%s %% is “%s”) — a stored verdict beside a stored grade is a second source of truth that can contradict the first',
+                                trim(trailing '.' from trim(trailing '0' from (e->>'grade'))),
+                                wa.grade_verdict((e->>'grade')::numeric)));
+          perform wa.chk((e->>'verdict') is null or not is_ng,
+                         w || '.verdict',
+                         'a non-graded (NG) flight is not scorable at all — it carries neither a grade nor a verdict');
+          perform wa.chk_text(e->'note', w || '.note', false, 300);
+
+        elsif k = 'lessons' then
+          perform wa.chk_entry_date(e, w);
+          -- A LESSON IS A BLOCK. date = start, end_date = end, null = one day.
+          perform wa.chk_date(e->'end_date', w || '.end_date', false);
+          perform wa.chk((e->>'end_date') is null or (e->>'date') is null
+                         or (e->>'end_date') >= (e->>'date'),
+                         w || '.end_date', 'a lesson cannot end before it started');
+          -- THE GROUP IS THE CLOSED LIST — it is the identity of the row, and
+          -- one of the twelve theory groups of the printed programme.
+          perform wa.chk_text(e->'group', w || '.group', not wa.is_legacy(e), 40);
+          perform wa.chk((e->>'group') is null or (e->>'group') = any(wa.lesson_groups()),
+                         w || '.group',
+                         'unknown ground group — the list is the twelve theory groups of the syllabus');
+          perform wa.chk(wa.is_legacy(e)
+                         or nullif(trim(coalesce(e->>'group', '')), '') is not null,
+                         w || '.group', 'every ground lesson names the group it belongs to');
+          -- THE COURSE, off-catalogue accepted and marked (the sortie rule):
+          -- course codes are derived at run time from the printed duration
+          -- block, so they are the value most likely to lag reality. What IS
+          -- refused is the CONTRADICTION — a course that exists but in ANOTHER
+          -- group, which would make the (group, course) join key false.
+          perform wa.chk_text(e->'course', w || '.course', false, 60);
+          perform wa.chk((e->>'course') is null or (e->>'group') is null
+                         or (e->>'course') = any(wa.lesson_courses(e->>'group'))
+                         or not exists (select 1 from unnest(wa.lesson_groups()) g
+                                        where (e->>'course') = any(wa.lesson_courses(g))),
+                         w || '.course',
+                         format('“%s” is a course of another group — a course is identified by the PAIR (group, course), never by its code alone (OJT is a course of four different groups)',
+                                e->>'course'));
+          -- NULL PERIODS MEANS THE FULL COURSE — FDMS's own semantics.
+          perform wa.chk_int(e->'periods', w || '.periods', 0, 400);
+          perform wa.chk_bool(e->'absent', w || '.absent');
+          perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
+          perform wa.chk_text(e->'instructor_oid', w || '.instructor_oid', false, 64);
+          perform wa.chk_text(e->'note', w || '.note', false, 300);
+
+        elsif k = 'exams' then
+          perform wa.chk_entry_date(e, w);
+          perform wa.chk_text(e->'exam', w || '.exam', not wa.is_legacy(e), 40);
+          perform wa.chk((e->>'exam') is null or (e->>'exam') = any(wa.exam_ids()),
+                         w || '.exam',
+                         format('unknown ground exam — the list is %s',
+                                array_to_string(wa.exam_ids(), ' / ')));
+          perform wa.chk(wa.is_legacy(e)
+                         or nullif(trim(coalesce(e->>'exam', '')), '') is not null,
+                         w || '.exam', 'every exam row names which of the eight ground exams it was');
+          -- NULLABLE, for the same reason a flight's grade is: the result can
+          -- take longer to arrive than the exam did to sit.
+          perform wa.chk_grade(e->'grade', w || '.grade', false);
+          perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
+          perform wa.chk_text(e->'instructor_oid', w || '.instructor_oid', false, 64);
+          perform wa.chk_text(e->'note', w || '.note', false, 300);
         end if;
 
         -- PENDING IS GONE (round 8) — refused by name, before the generic
@@ -1748,6 +2510,122 @@ begin
     o := o || jsonb_build_object(k, e);
   end loop;
 
+  -- ══ ROUND 12 — THE LOG TABLES: THE PASS-THROUGH, WHICH IS THE POINT ══════
+  -- THIS BLOCK IS NOT OPTIONAL AND IT IS NOT COSMETIC. Everything above builds
+  -- `o` key by key and the final pass below iterates over `o` — so a section
+  -- this function does not NAME never enters `o` and is DELETED from every
+  -- read, silently, for ever. (And even reaching the final pass, an entry of a
+  -- section wa.entry_keys does not name would be stripped to {} row by row.)
+  -- A student's whole flight log would evaporate on the first read after the
+  -- schema shipped. Hence: named here, named there, and the four sections
+  -- travel through with their own repairs.
+  --
+  -- THE REPAIRS, all on the wa.nfs_reason_fix model — a value the CATALOGUE NO
+  -- LONGER KNOWS is nulled and the row is flagged, so the record stays READABLE
+  -- everywhere and the form asks for the missing choice on the next save. That
+  -- is what stops a future syllabus revision (a renamed theory group, a
+  -- withdrawn ground exam) from making stored records permanently unsaveable:
+  -- the alternative is a record whose owner is refused every time they press
+  -- Save with no box on the form able to fix it.
+  foreach k in array array['flights','fs'] loop
+    if jsonb_typeof(p->k) = 'array' then
+      arr := '[]'::jsonb;
+      for i in 0 .. jsonb_array_length(p->k) - 1 loop
+        e := p->k->i;
+        if jsonb_typeof(e) <> 'object' then continue; end if;
+        -- the two authored defaults, so a row written by an older client (or by
+        -- a bridge that does not know them yet) reads as what it always was:
+        -- one flight of that sortie, flown in its syllabus place.
+        -- coalesce(jsonb_typeof(…), '-'), NOT a bare <>: an ABSENT key makes
+        -- jsonb_typeof return SQL NULL, `NULL <> 'number'` is NULL, and the
+        -- branch is silently skipped — which is precisely the row that needs
+        -- the default. (The house idiom, already used by the solo migration.)
+        if coalesce(jsonb_typeof(e->'seq'), '-') <> 'number' then
+          e := (e - 'seq') || jsonb_build_object('seq', 1);
+        end if;
+        if coalesce(e->>'kind', '') = '' or not ((e->>'kind') = any(wa.flight_kinds())) then
+          e := (e - 'kind') || jsonb_build_object('kind', 'syllabus');
+        end if;
+        if coalesce(jsonb_typeof(e->'ng'), '-') <> 'boolean' then
+          e := (e - 'ng') || jsonb_build_object('ng', false);
+        end if;
+        -- NG removes the GRADE and nothing else (the solo_flights rule)
+        if (e->>'ng')::boolean then e := e || jsonb_build_object('grade', null); end if;
+        -- THE TRACK, RESOLVED WHERE IT CAN BE. A row whose sortie is a syllabus
+        -- code carries its track in the code's own letter, so filling it in
+        -- from there destroys nothing and invents nothing (wa.code_track is
+        -- what the validator judges the pair by). Anything else is flagged and
+        -- the form asks which table the row belongs to.
+        if coalesce(e->>'track', '') = '' and wa.code_track(e->>'sortie') is not null then
+          e := (e - 'track') || jsonb_build_object('track', wa.code_track(e->>'sortie'));
+        end if;
+        -- A VERDICT BESIDE A GRADE IS DROPPED, not flagged — and this is the
+        -- ONE place round 12 removes a stored value. It is lossless: where a
+        -- grade exists the verdict is DERIVED from it (wa.grade_verdict), so
+        -- what is dropped is a copy, not a fact. Flagging it instead would
+        -- leave a row nobody could ever save, because the form draws no verdict
+        -- box on a graded row — a trap, not a question.
+        if jsonb_typeof(e->'grade') = 'number' and (e->>'verdict') is not null then
+          e := (e - 'verdict') || jsonb_build_object('verdict', null);
+        end if;
+        if (e->>'ng')::boolean and (e->>'verdict') is not null then
+          e := (e - 'verdict') || jsonb_build_object('verdict', null);
+        end if;
+        if (e->>'verdict') is not null and not ((e->>'verdict') = any(wa.verdicts())) then
+          e := (e - 'verdict') || jsonb_build_object('verdict', null, 'legacy', true);
+        end if;
+        -- what the row must carry to be a flight at all
+        if not wa.is_iso_date(e->>'date')
+           or nullif(trim(coalesce(e->>'sortie', '')), '') is null
+           or nullif(trim(coalesce(e->>'instructor', '')), '') is null
+           or coalesce(e->>'track', '') = '' then
+          e := e || jsonb_build_object('legacy', true);
+        end if;
+        arr := arr || jsonb_build_array(e);
+      end loop;
+      o := o || jsonb_build_object(k, arr);
+    end if;
+  end loop;
+
+  if jsonb_typeof(p->'lessons') = 'array' then
+    arr := '[]'::jsonb;
+    for i in 0 .. jsonb_array_length(p->'lessons') - 1 loop
+      e := p->'lessons'->i;
+      if jsonb_typeof(e) <> 'object' then continue; end if;
+      -- THE CATALOGUE-NARROWING REPAIR. A group the twelve no longer contain
+      -- (a renamed theory group after a syllabus revision) is nulled and the
+      -- row flagged — never dropped, never guessed at.
+      if (e->>'group') is not null and not ((e->>'group') = any(wa.lesson_groups())) then
+        e := (e - 'group') || jsonb_build_object('group', null, 'legacy', true);
+      end if;
+      if coalesce(jsonb_typeof(e->'absent'), '-') <> 'boolean' then
+        e := (e - 'absent') || jsonb_build_object('absent', false);
+      end if;
+      if not wa.is_iso_date(e->>'date') or coalesce(e->>'group', '') = '' then
+        e := e || jsonb_build_object('legacy', true);
+      end if;
+      arr := arr || jsonb_build_array(e);
+    end loop;
+    o := o || jsonb_build_object('lessons', arr);
+  end if;
+
+  if jsonb_typeof(p->'exams') = 'array' then
+    arr := '[]'::jsonb;
+    for i in 0 .. jsonb_array_length(p->'exams') - 1 loop
+      e := p->'exams'->i;
+      if jsonb_typeof(e) <> 'object' then continue; end if;
+      -- the same narrowing repair, one catalogue over
+      if (e->>'exam') is not null and not ((e->>'exam') = any(wa.exam_ids())) then
+        e := (e - 'exam') || jsonb_build_object('exam', null, 'legacy', true);
+      end if;
+      if not wa.is_iso_date(e->>'date') or coalesce(e->>'exam', '') = '' then
+        e := e || jsonb_build_object('legacy', true);
+      end if;
+      arr := arr || jsonb_build_array(e);
+    end loop;
+    o := o || jsonb_build_object('exams', arr);
+  end if;
+
   -- FINAL PASS — per-section key whitelist (round-4 W3a): a key the form
   -- cannot show and the validator no longer accepts is dropped on READ, so a
   -- record that was written before this rule stops carrying it (a smuggled
@@ -1778,17 +2656,30 @@ language sql immutable as $$
     'active', p.active)
 $$;
 
--- how many entries of a record were entered BY THE CO on the owner's behalf
--- (an unflown fixed slot is a placeholder, not an entry — round 5)
-create or replace function wa.co_entry_count(p jsonb) returns int
+-- how many entries of a record carry a given PROVENANCE stamp (round 12).
+-- 'admin' is the CO's; the generalisation is here because the bridge's 'fdms'
+-- stamp is the next value this has to be able to count WITHOUT being counted as
+-- the CO's — a row a machine proposed is not a row the Squadron CO wrote, and
+-- conflating them would be a truth defect in the exact feature that exists to
+-- be honest about provenance.
+-- (An unflown fixed slot is a placeholder, not an entry — round 5.)
+create or replace function wa.entry_count_by(p jsonb, p_source text) returns int
 language sql immutable as $$
   select coalesce((
     select count(*)::int
     from jsonb_each(coalesce(p, '{}'::jsonb)) s(key, val)
     cross join lateral jsonb_array_elements(
       case when jsonb_typeof(val) = 'array' then val else '[]'::jsonb end) e
-    where jsonb_typeof(e) = 'object' and (e->>'entered_by') = 'admin'
+    where jsonb_typeof(e) = 'object' and (e->>'entered_by') = p_source
       and not wa.slot_empty(s.key, e)), 0)
+$$;
+
+-- how many entries of a record were entered BY THE CO on the owner's behalf.
+-- Kept as its own name because a dozen callers say it, and because "the CO's"
+-- is the question every surface actually asks.
+create or replace function wa.co_entry_count(p jsonb) returns int
+language sql immutable as $$
+  select wa.entry_count_by(p, 'admin')
 $$;
 
 -- how many entries the record carries in total — the DENOMINATOR behind
