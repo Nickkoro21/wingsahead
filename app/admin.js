@@ -796,7 +796,7 @@ WA.renderAdmin = async function (view, me) {
       const seq = Number(e.seq || 1);
       const known = WA.logSortieKnown(band, track, e.sortie);
       return `<tr>
-        <td><span title="${esc(WA.logSortieLabel(band, track, e.sortie))}"><b>${esc(e.sortie || "—")}</b></span>${
+        <td><span title="${esc(WA.logSortieLabel(band, track, e.sortie, e.kind))}"><b>${esc(e.sortie || "—")}</b></span>${
           known || WA.kindOffCatalogue(e.kind) ? ""
             : `<span class="offcat" title="Not in the syllabus catalogue — typed as free text">*</span>`}${
           kind && kind.id !== "syllabus"

@@ -1647,12 +1647,15 @@ WA.logSortieKnown = function (band, track, code) {
   if (!String(code || "").trim()) return true;
   return !!WA.logSortie(band, track, code);
 };
-/* "C4302 — Aerobatics" · free text as typed */
-WA.logSortieLabel = function (band, track, code) {
+/* "C4302 — Aerobatics" · free text as typed. Round-12 verify finding 3: the
+   off-catalogue warning is for kind:syllabus rows only — an FCF/CEF/other row
+   is off-catalogue BY NATURE and must not wear it (pass the row's kind). */
+WA.logSortieLabel = function (band, track, code, kind) {
   if (!String(code || "").trim()) return "—";
   const s = WA.logSortie(band, track, code);
-  return s ? s.c + " — " + s.n + (s.nt ? " (night)" : "")
-           : String(code) + " (not in the syllabus catalogue)";
+  if (s) return s.c + " — " + s.n + (s.nt ? " (night)" : "");
+  const k = String(kind || "syllabus");
+  return String(code) + (k === "syllabus" || k === "repeat" ? " (not in the syllabus catalogue)" : "");
 };
 
 /* the 12 theory groups and their 47 courses. THE JOIN KEY IS THE PAIR

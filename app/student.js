@@ -775,7 +775,7 @@ WA.renderStudent = async function (view, me, opts) {
                : WA.debriefChip(e)));
     return `
       <div class="logline">
-        <span class="lg-c" title="${esc(WA.logSortieLabel(sec, e.track, e.sortie))}">${
+        <span class="lg-c" title="${esc(WA.logSortieLabel(sec, e.track, e.sortie, e.kind))}">${
           esc(WA.normCode(e.sortie) || "—")}</span>
         ${kind && kind.id !== "syllabus"
           ? `<span class="badge badge-acc" title="${esc(kind.tip)}">${esc(kind.label)}</span>` : ""}

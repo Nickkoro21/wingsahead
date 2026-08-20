@@ -2056,7 +2056,10 @@ begin
           perform wa.chk((e->>'verdict') is null or jsonb_typeof(e->'grade') <> 'number',
                          w || '.verdict',
                          format('this row has a grade, so its verdict is READ from it (%s %% is “%s”) — a stored verdict beside a stored grade is a second source of truth that can contradict the first',
-                                trim(trailing '.' from trim(trailing '0' from (e->>'grade'))),
+                                -- round-12 verify finding 1: the grade is whole by construction
+                                -- (chk_grade above), so it prints UNCHANGED — the trailing-zero
+                                -- trim borrowed from chk_grade turned 100 into "1 %" here.
+                                (e->>'grade'),
                                 wa.grade_verdict((e->>'grade')::numeric)));
           perform wa.chk((e->>'verdict') is null or not is_ng,
                          w || '.verdict',
@@ -2141,6 +2144,24 @@ begin
                           from jsonb_array_elements(p->k) e2
                           where jsonb_typeof(e2) = 'object' and (e2->>'slot') is not null) t),
                        k, 'each solo slot may appear only once — the solo rows are fixed');
+      end if;
+
+      -- SEQ MUST DISAMBIGUATE (round-12 verify finding 2, the solo precedent
+      -- one section up). Dropping the (sortie,date) uniqueness was the ruling
+      -- — a same-day re-fly is real — but two rows sharing (track,sortie,date)
+      -- AND seq are two grades for one flight that can disagree, exactly the
+      -- corruption the checkride refusal exists to prevent; and a duplicated
+      -- FAIL pair is the mechanism the bridge critique names as able to
+      -- fabricate a ΠΔ 29/2020 referral downstream.
+      if k in ('flights', 'fs') then
+        perform wa.chk((select count(*) = count(distinct t.key) from (
+                          select coalesce(e2->>'track', '-') || '|' || coalesce(e2->>'sortie', '-')
+                                 || '|' || coalesce(e2->>'date', '-') || '|'
+                                 || coalesce(e2->>'seq', '1') as key
+                          from jsonb_array_elements(p->k) e2
+                          where jsonb_typeof(e2) = 'object'
+                            and (e2->>'sortie') is not null and (e2->>'date') is not null) t),
+                       k, 'two rows carry the same sortie, date and seq — a same-day re-fly needs its own seq (the form''s "+ same-day re-fly" mints the next one)');
       end if;
 
       -- ── EVALUATIONS FOLLOW THE SYLLABUS ORDER (round 6) ─────────────────
