@@ -3323,6 +3323,29 @@ that means «behind you».
 * **Server:** `wa.exam_pass_min()` = 80 and `wa.exam_passed(g)` are declared as
   the mirror — and **called by nothing**, on purpose. See below.
 
+### THE 60 IS NOW READ FROM TWO PLACES — A STANDING INVARIANT (recorded round 15b, §4q·3)
+
+Making `gradePassed` read the **number** left the flight's 60 with **two readers
+that are not the same expression**, and round 15b's adversarial read named it.
+It is **deliberate**, and it is **not** unified:
+
+| | reads | why it must keep reading that |
+|---|---|---|
+| `WA.gradePassed(g, sec)` · `wa.grade_passed(g)` | the **number** (`n >= WA.passMin(sec)`) | it has to answer a **second** question — the ground exam's 80 % — and a *band* has no section. |
+| `WA.gradeMission(g)` · `wa.grade_mission(g)` | the printed **band**'s own `pass` flag (`WA.gradeBand` / `wa.grade_band`) | the mission collapse **is** the five-band scale of ΠΔ 151/13 said in two words. It must keep asking *«which side of the printed scale is this?»*, not *«is this ≥ some number?»* — otherwise a future section-aware mark would silently drag the mission with it, which is exactly what this round ruled it must **not** do (a flight has no ground-exam mark). |
+
+> **THE INVARIANT.** For every finite grade `g`:
+> `WA.gradePassed(g) === (WA.gradeMission(g) === "complete")`.
+> It holds **only while `GRADE_BANDS[good].lo === GRADE_PASS_MIN === 60`**.
+> A round that moves one of those two numbers without the other breaks it.
+
+**It is documented, not asserted.** Both definitions now name each other in full
+(`app.js` → `WA.gradePassed` ⇄ `WA.gradeMission`, and the identical split,
+for the identical reason, in `db/schema.sql`), and the parity check lives *here*
+rather than in the code because **this application writes nothing to the console,
+ever** (house rule) — an assertion nobody is allowed to print is not a guard, it
+is noise waiting to happen. It is carried in the open list below.
+
 ### THE SERVER JUDGES NO EXAM GRADE — BEFORE THIS ROUND OR AFTER
 
 Round 12b's shape is unchanged: the exams branch of `wa.validate_record` calls
@@ -3490,6 +3513,192 @@ The two commits ahead of `origin/main` and this one are **not pushed**.
    what it measures and now carries a tooltip saying so — but if the CO's brief
    line is meant to answer *«how many has he PASSED?»*, that is a second counter
    and a deliberate decision.
+4. **OPEN INVARIANT (added round 15b, §4q·3) — the two readers of the 60.**
+   `WA.gradePassed(g)` reads the **number**, `WA.gradeMission(g)` reads the
+   **band**; they agree today only because `GRADE_BANDS[good].lo ===
+   GRADE_PASS_MIN === 60`. **Anything that moves either number must move the
+   other, or state out loud why the two stop agreeing.** Same pair, same
+   invariant, on the server (`wa.grade_passed` / `wa.grade_mission`). Checked by
+   reading, not by asserting — see *THE 60 IS NOW READ FROM TWO PLACES* above.
+
+## 4q. Round 15b (2026-08-21) — THE VERIFY SWEEP: THREE FINDINGS OF THE ROUND-15 ADVERSARIAL READ
+
+No new directive. Round 15 shipped one ruling; the verify pass over what it
+shipped found **one defect and two hygiene items**, and this round is those three
+and **nothing else**. `db/schema.sql` is **byte-identical**. The three open
+RULINGS of §4p (a failed exam's colour, the operative-attempt badge, the F/S
+mark) are **untouched — they are the user's**.
+
+### 1. THE LAG CHIP SURVIVED ITS OWN ANSWER — *the one defect*
+
+The «N d» chip in an exam's grade cell says exactly one thing: **«sat N days ago
+and STILL WITHOUT A RESULT»**. Round 15 taught the keystroke to repaint the row
+in place — the state class, the name cell, the actions cell, the grade box's
+`title` — and **that is where it stopped**: `syncExamRows` never touched the
+**rest of `td.c-gr`**. So the sentence that a result had not arrived stayed on
+screen **beside the result being typed**:
+
+```
+IN190  02/01/2026   [ 85 ]  231 d      ← the chip is now a lie, on every keystroke
+```
+
+including the very case round 15 was built for — the grade that **moves the
+slot** from one trial to another.
+
+**AND THE FIX COULD NOT BE A REDRAW, FOR ROUND 15'S OWN REASON.** Rebuilding the
+cell rebuilds the `<input type=number>`, and a rebuilt one comes back with its
+caret at position 0 — *«90» typed digit by digit becomes «09»*. So the cell is
+re-rendered **around** the box, exactly the way the round-12b/15 «→63»
+whole-number offer already is (`refreshGradeFix`): the chip is **dropped and
+re-inserted**, the `<input>` is **never touched**, and it stays the **same DOM
+node** with its focus and its caret.
+
+* `examLagHTML(e)` is the **third** extracted verdict-cell function, beside
+  `examNameCellHTML` and `examGradeTitle` (round 15's own pattern): **one
+  definition**, called by the renderer and by the live refresh alike, so the chip
+  a row is born with and the chip it keeps are the same sentence.
+* `refreshExamLag(i)` drops every `.lagchip` in `td.c-gr` — **and the space that
+  carried it** — and appends the fresh one at the **end** of the cell, which is
+  where the renderer puts it: **box · whole-number offer · chip**. (The chip is
+  written with its own leading space; dropping only the element would leave the
+  blank behind, and a grade typed and cleared a dozen times would leave a dozen
+  of them. Whitespace collapses on screen, so the cell would have grown without
+  bound with nothing looking wrong. Measured: **8 type-and-clear cycles, 4 child
+  nodes, unchanged** — the refreshed cell is node-for-node the rendered one.)
+* `syncExamRows` calls it for every row of the exam it repaints.
+
+**A SECOND, FREE CORRECTION**: the chip now also **appears on the keystroke that
+dates the row**. Before, a date typed into an owed exam left the cell blank until
+the next redraw — the round-5b rule («the colour follows the keystroke»)
+applied to the one part of the row that had been left out of it.
+
+**The pre-existing semantics are kept exactly**: an exams row shows the chip only
+when it is **awaiting a debrief** (dated, ungraded, no mission) **and** the wait
+has reached `WA.DEBRIEF_AMBER_DAYS` (7) — so it is **always** the amber one, and
+it **comes back** when the grade is cleared.
+
+### 2. SIX HARDCODED «80» STRINGS — ONE SOURCE OF TRUTH, FOR REAL
+
+Round 15's own doctrine comment says it: *«One function, so a chip, a tooltip, a
+CSV cell and the operative-trial rule can never quote different marks»* — and
+six sentences still carried the number **typed by hand**. They now derive from
+`WA.passMin("exams")` (and, where the same sentence names the flight's mark,
+`WA.passMin()`):
+
+| | |
+|---|---|
+| `app.js` — `SECTIONS_META.exams.tip` (the ⓘ) | 80, **60**, 80 |
+| `app.js` — `ROW_STATES.done.tip` | **60**, 80 |
+| `app.js` — `EXAM_SERIES` ΕΕΘ tip | 80 |
+| `app.js` — `WA.EXAM_PASS_TIP` | 80, 80 |
+| `admin.js` — printed brief, `(below the 80 % pass mark)` | 80 |
+| `student.js` — the exams section hint | 80, **60**, 80 |
+
+**THE ONE THING THAT STAYS TYPED BY HAND** is inside `WA.EXAM_PASS_TIP`: the
+Greek «80% για εξετασεις εδαφους, 60% για πτησεις» is the **user's ruling
+quoted**, and a quotation is not derived from anything — it stays as it was
+spoken.
+
+**THE HOIST THIS NEEDED.** Four of the six are **object literals evaluated at
+load**, a thousand lines *above* where the numbers were declared — a tooltip
+cannot read a constant that does not exist yet. So the three lines that carry the
+numbers (`WA.GRADE_PASS_MIN`, `WA.EXAM_PASS_MIN`, `WA.passMin`) now stand at the
+**top of `app.js`**, and the round-15 doctrine block keeps the whole of the
+explanation and points at them. **Nothing about the numbers themselves moved**,
+and every one of the six strings renders **byte-identically** to what it printed
+before (proved below) — only the SOURCE changed.
+
+### 3. THE MIRROR NOTE: TWO READERS OF THE 60, NAMED
+
+`WA.gradePassed` reads the **number** and `WA.gradeMission` reads the **band** —
+two sources that happen to agree. **Not unified** (the band read is load-bearing:
+see §4p, *THE 60 IS NOW READ FROM TWO PLACES*), so instead: both definitions name
+each other in full, and the parity invariant is written into §4p and carried in
+its open list. **No runtime assertion** — this application prints nothing to the
+console, ever, and a check nobody may print is not a guard.
+
+### CACHE-BUSTER
+
+`?v=20260821e` on **`app.js`, `student.js`, `admin.js`** — the three files this
+round changed. **`instructor.js` keeps `?v=20260821d`**; `styles.css`,
+`config.js` and `items-catalog.js` keep `?v=20260821b`.
+
+### SELF-VERIFICATION — ROUND 15b (live, local stack, the real form)
+
+1. **The six strings render the SAME WORDS.** Each literal was evaluated from
+   **253c5fd** and from the working tree under one stub and compared: **all six
+   byte-identical** — `760 · 677 · 416 · 442 · 53 · 992` characters,
+   `sha256` equal in every case. Live on the page: `WA.secTip('exams')` 760 ·
+   `rowStateDef('done').tip` 677 · `EXAM_SERIES[0].tip` 416 · `EXAM_PASS_TIP`
+   442, all reading *«…AT 80 % … at 60 …»* as before; the admin builder's own
+   expression evaluated in the live page returns exactly
+   `<span class="pr-n">(below the 80 % pass mark)</span>`.
+   `WA.passMin() === 60`, `WA.passMin('exams') === 80` on the live page.
+2. **THE PLAIN CASE.** `CO190` dated **231 days ago** → the cell shows
+   **`231 d`** *(and it appeared on the date keystroke — see the free correction
+   above)*. The grade box is marked with an **expando**, then `8` and `5` are
+   typed through `execCommand('insertText')` (the real caret): the chip is
+   **gone on the FIRST digit**, the box is the **same DOM node** (expando
+   intact), still `document.activeElement`, and the value goes `8` → **`85`**,
+   never `58`. Row `st-started` → `st-done`, title *«85 % PASSES»*.
+3. **CLEARED → THE CHIP COMES BACK.** Select-all + delete on the same box:
+   value `""`, **`231 d` back**, cell order `input · lagchip`, same node, still
+   focused, row back to `st-started`.
+4. **THE «→79» OFFER STILL WORKS AND STILL SITS IN ORDER.** `78.5` typed →
+   cell is `input · cfix(→79)` with **no chip**; cleared → `input · lagchip`.
+   (On an exams row the two are mutually exclusive by construction — a chip
+   means *no grade*.)
+5. **THE SLOT-MOVING CASE — the one round 15 was built for.** `IN190` 1st trial
+   dated & marked **90** (the holder); a **2nd trial** minted, dated 12 days
+   ago, ungraded → **`12 d`**. Expando on its grade box, then `9`, `5`:
+   * on `9` — **chip gone**, same node, focused, value `9`, slot still on the
+     1st trial (`slotc is-alt` on the 2nd);
+   * on `5` — value **`95`** (not `59`), **THE SLOT MOVES**: the 2nd trial loses
+     `is-alt` and the 1st gains it and is re-badged **«1st trial»** — all in
+     place, same node, still focused.
+   Cleared again → **`12 d` back** and the slot moves **back** to the 1st trial.
+   The 1st trial (marked 90) correctly shows **no** chip throughout.
+6. **THE ΕΕΘ (a row with NO slot key) behaves identically**: `ΕΕΘ 1` dated 9
+   days ago → **`9 d`**; `7`,`9` typed → chip gone on the first digit, value
+   **`79`**, same node, focused; cleared → **`9 d`** back (4 child nodes). Its
+   title still drops the re-sit clause, as round 15 ruled.
+6b. **NOTHING ACCUMULATES.** Eight consecutive type-and-clear cycles on one
+   grade box: the cell holds **4 child nodes throughout** and its shape stays
+   `text · INPUT · " " · SPAN.lagchip` — identical to the renderer's. (Measured
+   **10 nodes after 6 cycles** on the first cut of the fix, which is what put
+   the space-stripping into `refreshExamLag`.)
+7. **`WA.EXAM_PASS_TIP` reaches a real badge**: the minted 2nd trial's badge
+   title reads *«…counts with the attempt it was PASSED on — 80 % and above…»*,
+   605 characters of sentence, from the derived constant.
+8. **`node --check` clean** on all six JS files. **Zero console messages** (not
+   just zero errors) on the student form, on the admin's four tabs **including
+   the `beforeprint` builder** (26 printed pages, section head *«Ground exams —
+   passed at 80 % (done 0 · started 0 · owed 8)»*), and on the instructor form.
+9. **Busters live**: the page loads `app.js?v=20260821e`, `student.js?v=…e`,
+   `admin.js?v=…e`, `instructor.js?v=…d`.
+10. **`db/schema.sql` byte-identical** to 253c5fd (`git diff` empty).
+11. **Hygiene**: **nothing was written** — every probe was in-memory on an
+    unsaved form. `student_records` **3 rows, md5 `cd37aa79…` identical before
+    and after**, `people` **42**, `proposals` **9**. No fixture rows, no fixture
+    people, tabs closed.
+12. **Privacy grep — 0 hits in the diff.** All **150** live identifiers of the
+    local `people` table (first name · last name · MN · call sign · token),
+    word-boundary and Unicode-aware, against **this round's whole diff: 0**.
+    Repo-wide over the 17 tracked text files the standing **14** hits are the
+    known pre-existing false positives and were re-read masked to confirm it:
+    the role phrase *«Squadron CO»* in prose, the example call signs `P-xx` in
+    the ordering docs, and the two demo surnames the spec already names in §4f
+    — **none of them on a line this round touched.**
+
+### ONE OPEN ITEM RAISED BY THIS ROUND (found, NOT fixed — out of scope)
+
+**`refreshGradeFix` leaves its own blanks behind.** The whole-number offer is
+re-inserted the same way (`" <button class=cfix …>"`) and only the `.cfix`
+element is removed, so the space in front of it accumulates on every keystroke
+that makes or unmakes a fractional grade — in **four** sections, not just the
+exams. It is invisible (whitespace collapses) and it is **pre-existing**, so it
+was left exactly as found: this round was three named items and nothing else.
+The one-line cure is the one `refreshExamLag` now carries.
 
 ## 4. Screens
 
@@ -3648,6 +3857,16 @@ The two commits ahead of `origin/main` and this one are **not pushed**.
   «τελειωμένο, μη επιτυχές»; (3) το **«4 από 8 exams»** μετράει γραπτές που
   **δόθηκαν και βαθμολογήθηκαν**, όχι επιτυχίες — τώρα το λέει σε tooltip, αλλά
   αν το brief πρέπει να απαντά «πόσες πέρασε», είναι δεύτερος μετρητής.
+- **ΝΕΟ (Γύρος 15b, §4q·3) — ΑΝΟΙΧΤΗ ΑΜΕΤΑΒΛΗΤΗ (invariant), όχι εκκρεμότητα
+  απόφανσης**: το 60 της πτήσης διαβάζεται πλέον από **δύο** σημεία — η
+  `WA.gradePassed` διαβάζει τον **αριθμό** (γιατί πρέπει να απαντά και στο 80 των
+  γραπτών), η `WA.gradeMission` διαβάζει τη **ζώνη** της ΠΔ 151/13 (γιατί ΕΙΝΑΙ η
+  πεντάβαθμη κλίμακα σε δύο λέξεις). Συμφωνούν **μόνο** όσο
+  `GRADE_BANDS[good].lo === GRADE_PASS_MIN === 60`. **Όποιος γύρος κουνήσει τον
+  έναν αριθμό, κουνάει και τον άλλο** — αλλιώς να πει ρητά γιατί παύουν να
+  συμφωνούν. Το ίδιο ζεύγος και server-side (`wa.grade_passed` /
+  `wa.grade_mission`). Δεν μπαίνει assertion: η εφαρμογή **δεν γράφει ποτέ στην
+  κονσόλα** (κανόνας του σπιτιού).
 
 - **ΝΕΟ (Γύρος 14, §4n) — τέσσερα ανοιχτά σημεία του γύρου**: (1) μια αποτυχημένη
   1η προσπάθεια εξέτασης είναι **πράσινη** («δόθηκε και βαθμολογήθηκε», ο κανόνας

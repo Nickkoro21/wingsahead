@@ -1709,7 +1709,7 @@ WA.renderAdmin = async function (view, me) {
                ruling was made to end. */ ""}
           <td>${has ? WA.pct(e.grade) + (WA.examPassed(e)
                 ? ` <span class="pr-n">(pass)</span>`
-                : ` <span class="pr-n">(below the 80 % pass mark)</span>`)
+                : ` <span class="pr-n">(below the ${esc(WA.passMin("exams"))} % pass mark)</span>`)
             : (e.date ? `<span class="pr-n">awaiting the result</span>` : `<span class="pr-n">&mdash;</span>`)}</td>
           <td>${esc(WA.rowStateDef(r.state).label)}</td></tr>`;
       });

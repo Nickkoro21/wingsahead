@@ -76,6 +76,29 @@ async function rpc(fn, args) {
 /* ── router: #t=<token> → whoami → role view ── */
 const WA = { me: null, token: null };
 
+/* ══════════════════════════════════════════════════════════════════════════
+   THE TWO PASS MARKS, HOISTED (round 15b, R15 verify item 14).
+   ──────────────────────────────────────────────────────────────────────────
+   The numbers and the doctrine that settles them belong to «THE GRADE SCALE»
+   further down (round 11 / round 15) and are documented there in full — but
+   the CONSTANT STRINGS of this file are object literals evaluated at LOAD, and
+   a tooltip a thousand lines above the definition cannot read a number that
+   does not exist yet. So the three lines that carry the numbers stand HERE, at
+   the top, where every literal below can build its sentence from them. That is
+   the whole of the change: nothing about the numbers themselves moved, and the
+   doctrine — WHY there are two, what did NOT move with them, and the MIRROR to
+   db/schema.sql — stays where it was written.
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.GRADE_PASS_MIN = 60;
+/* the ground exams — the 8 fixed groups AND the ΕΕΘ weekly series, which are
+   ground exams too and are marked the same way */
+WA.EXAM_PASS_MIN = 80;
+/* WHICH NUMBER JUDGES THIS SECTION. One function, so a chip, a tooltip, a CSV
+   cell and the operative-trial rule can never quote different marks. */
+WA.passMin = function (sec) {
+  return sec === "exams" ? WA.EXAM_PASS_MIN : WA.GRADE_PASS_MIN;
+};
+
 function getToken() {
   const m = /[#&]t=([A-Za-z0-9_-]{10,})/.exec(location.hash);
   return m ? m[1] : null;
@@ -700,7 +723,7 @@ WA.SECTIONS_META = {
   flights:      { label: "Flights", tip: "The flight log — every sortie of the printed flow chart is a row here FROM THE FIRST DAY (round 13): grey while it is owed, light green once something is written in it, green when the row is complete and the mission was completed, mustard when it is beyond the syllabus's one planned pass (a repeat, an FCF, a CEF, a same-day re-fly). The grade may be left empty: a debrief sometimes takes a while, and the row says «awaiting debrief» rather than pretending the flight did not happen. Split into the four tracks; the eight checkrides are recorded in the Evaluations section, where the syllabus order applies to them. An untouched row is STORED NOWHERE — the record keeps only what actually happened." },
   fs:           { label: "F/S", tip: "The same log for the SIMULATOR — its own flow-chart sorties pre-seeded in the same four tracks, in the same four colours. Sim hours and flight hours are counted separately by the squadron, which is why they are two logs and not one." },
   lessons:      { label: "Ground lessons", tip: "The ground academics — the twelve theory groups of the programme and all 47 courses inside them, present as rows from the first day and grouped by their theory group. A lesson is a BLOCK, so it can carry an end date. A lesson is attended, not scored, so there is no grade here and no instructor. An untouched course is stored nowhere; a course the catalogue does not know goes in as an extra." },
-  exams:        { label: "Ground exams", tip: "The eight ground-exam groups of the syllabus, present as rows from the first day: grey until the exam is sat, light green on the date alone, green once the result is in — whatever the result says, because the row asked for a mark and got one. A GROUND EXAM IS PASSED AT 80 % — a flight is passed at 60, and these are two different examinations with two right numbers (ruling of 2026-08-21). The 80 % decides which TRIAL stands for the exam, never whether the row is complete. The ΕΕΘ weekly theory exams are ground exams too and are marked the same way. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and belong under Ground lessons: that is where the squadron's scheduler counts them.)" },
+  exams:        { label: "Ground exams", tip: "The eight ground-exam groups of the syllabus, present as rows from the first day: grey until the exam is sat, light green on the date alone, green once the result is in — whatever the result says, because the row asked for a mark and got one. A GROUND EXAM IS PASSED AT " + WA.passMin("exams") + " % — a flight is passed at " + WA.passMin() + ", and these are two different examinations with two right numbers (ruling of 2026-08-21). The " + WA.passMin("exams") + " % decides which TRIAL stands for the exam, never whether the row is complete. The ΕΕΘ weekly theory exams are ground exams too and are marked the same way. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and belong under Ground lessons: that is where the squadron's scheduler counts them.)" },
 };
 WA.secLabel = function (k) { return (WA.SECTIONS_META[k] || {}).label || k; };
 WA.secTip = function (k) { return (WA.SECTIONS_META[k] || {}).tip || ""; };
@@ -1108,7 +1131,7 @@ WA.sectionCap = function (sec) {
    and the word on paper can never say different things. */
 WA.ROW_STATES = [
   { id: "done", label: "done", el: "πράσινο",
-    tip: "Complete — everything the row asks for is filled in AND the mission was completed: the date, the instructor, the duration, and a grade of 60 % or better (or a mission the squadron characterised complete without a percentage). A non-graded (NG) flight is done on its date, its instructor and its duration: nobody was in a position to score it. A ground lesson is done on its date, a ground exam on its date AND its result — WHATEVER the result says: an exam marked 40 % is a complete row, because the row asked for a result and got one. Whether it PASSED is the other axis (80 % on a ground exam), and it decides which trial stands for the exam, not whether the row is finished." },
+    tip: "Complete — everything the row asks for is filled in AND the mission was completed: the date, the instructor, the duration, and a grade of " + WA.passMin() + " % or better (or a mission the squadron characterised complete without a percentage). A non-graded (NG) flight is done on its date, its instructor and its duration: nobody was in a position to score it. A ground lesson is done on its date, a ground exam on its date AND its result — WHATEVER the result says: an exam marked 40 % is a complete row, because the row asked for a result and got one. Whether it PASSED is the other axis (" + WA.passMin("exams") + " % on a ground exam), and it decides which trial stands for the exam, not whether the row is finished." },
   { id: "started", label: "started", el: "ανοιχτό πράσινο",
     tip: "Started — the row has been written in, but not everything is there yet. A flight with a date and no instructor, a flight still waiting for its debrief, an exam sat but not marked. It is not a problem and it blocks nothing; it is work in progress." },
   { id: "owed", label: "owed", el: "γκρι",
@@ -2039,15 +2062,11 @@ WA.evalOrderState = function (rec) {
    MIRROR: db/schema.sql → wa.grade_pass_min() / wa.exam_pass_min() /
    wa.grade_band() / wa.grade_passed(). Change one, change the other.
    ══════════════════════════════════════════════════════════════════════════ */
-WA.GRADE_PASS_MIN = 60;
-/* the ground exams — the 8 fixed groups AND the ΕΕΘ weekly series, which are
-   ground exams too and are marked the same way */
-WA.EXAM_PASS_MIN = 80;
-/* WHICH NUMBER JUDGES THIS SECTION. One function, so a chip, a tooltip, a CSV
-   cell and the operative-trial rule can never quote different marks. */
-WA.passMin = function (sec) {
-  return sec === "exams" ? WA.EXAM_PASS_MIN : WA.GRADE_PASS_MIN;
-};
+/* THE THREE LINES THAT CARRY THE NUMBERS — `WA.GRADE_PASS_MIN = 60`,
+   `WA.EXAM_PASS_MIN = 80` and `WA.passMin(sec)` — ARE AT THE TOP OF THIS FILE
+   («THE TWO PASS MARKS, HOISTED», round 15b): the constant strings of this file
+   are evaluated at load and have to be able to read them. This is where they
+   are EXPLAINED; that is where they are declared, and nowhere else. */
 WA.GRADE_BANDS = [
   { id: "excellent", lo: 90, code: "Α",  label: "Excellent",   el: "Άριστα",        pass: true },
   { id: "very_good", lo: 75, code: "ΛΚ", label: "Very Good",   el: "Λίαν Καλώς",    pass: true },
@@ -2072,7 +2091,31 @@ WA.gradeBand = function (g) {
    is the same test written as the number it always was); `gradePassed(g,
    'exams')` is the ground-exam question and answers it at 80. Callers that
    pass no section are asking about a flight — which is every caller that was
-   here before this round. */
+   here before this round.
+   ══════════════════════════════════════════════════════════════════════════
+   ROUND 15b (R15 verify item 15) — THE 60 IS NOW READ FROM TWO PLACES, AND
+   THAT IS DELIBERATE. THE INVARIANT: for every finite grade `g`,
+        WA.gradePassed(g) === (WA.gradeMission(g) === "complete")
+   — but the two functions do NOT share an implementation, and must not:
+   · `WA.gradePassed(g, sec)` reads the NUMBER (`n >= WA.passMin(sec)`), because
+     it has to answer a SECOND question — the ground exam's 80 % — and a band
+     has no section.
+   · `WA.gradeMission(g)` reads the printed BAND's own `pass` flag, and that is
+     load-bearing: the mission collapse is the FIVE-BAND SCALE of ΠΔ 151/13 said
+     in two words, so it must keep answering «which side of the printed scale is
+     this?» and not «is this ≥ some number?». Unifying them would silently make
+     the mission follow any future section-aware mark — which is exactly what
+     round 15 ruled it must NOT do (a flight has no ground-exam mark).
+   THEY AGREE TODAY BECAUSE `GRADE_BANDS[good].lo === 60 === GRADE_PASS_MIN`.
+   A round that moves ONE of those two numbers without the other breaks the
+   invariant, so BOTH definitions name each other here, and the invariant is
+   recorded in the spec's open list (§4p) rather than asserted at runtime:
+   this application writes NOTHING to the console, ever (house rule), and a
+   check nobody can see is not a guard — it is noise waiting to happen.
+   MIRROR of the same split, server-side: db/schema.sql → wa.grade_passed()
+   reads the number, wa.grade_mission() reads wa.grade_band(). Same pair, same
+   invariant, same reason.
+   ══════════════════════════════════════════════════════════════════════════ */
 WA.gradePassed = function (g, sec) {
   if (g === null || g === undefined || g === "") return false;
   const n = Number(g);
@@ -2141,7 +2184,16 @@ WA.missionLabel = function (id) {
    threshold. FLIGHTS AND F/S ONLY, and that is why round 15's 80 % does not
    reach it: `mission` is a key of the two flight logs and an exams row carries
    none, so there is no such thing as a ground exam's mission to collapse.
-   MIRROR: db/schema.sql → wa.grade_mission. */
+   ROUND 15b (R15 verify item 15) — IT READS THE BAND, `WA.gradePassed` READS
+   THE NUMBER, and the two are TWO SOURCES THAT AGREE rather than one source
+   used twice. The band read here is the load-bearing half: this function IS the
+   printed five-band scale collapsed into the squadron's two words, so it must
+   keep asking «which side of ΠΔ 151/13 is this?». The invariant they owe each
+   other — `gradePassed(g) === (gradeMission(g) === "complete")` for every
+   finite g — holds only while `GRADE_BANDS[good].lo === GRADE_PASS_MIN`, and it
+   is written out in full at WA.gradePassed above and listed in the spec (§4p).
+   MIRROR: db/schema.sql → wa.grade_mission (which reads wa.grade_band — the
+   same split, on purpose). */
 WA.gradeMission = function (g) {
   const b = WA.gradeBand(g);
   if (!b) return null;
@@ -2353,7 +2405,7 @@ WA.examLabel = function (id) {
 WA.EXAM_TRIALS = 3;
 WA.EXAM_SERIES = [
   { id: "EETH", label: "ΕΕΘ", en: "EETH",
-    tip: "ΕΕΘ — the weekly theory exams. An OPEN series the syllabus does not enumerate: they are numbered ΕΕΘ 1, ΕΕΘ 2 … in the order they are sat, and both the date and the grade may be left empty until they are known. They are not one of the eight ground exams and they are not extras — they are planned. They ARE ground exams, so they are marked at the ground-exam pass mark: 80 %, the same number as the eight (round 15)." },
+    tip: "ΕΕΘ — the weekly theory exams. An OPEN series the syllabus does not enumerate: they are numbered ΕΕΘ 1, ΕΕΘ 2 … in the order they are sat, and both the date and the grade may be left empty until they are known. They are not one of the eight ground exams and they are not extras — they are planned. They ARE ground exams, so they are marked at the ground-exam pass mark: " + WA.passMin("exams") + " %, the same number as the eight (round 15)." },
 ];
 WA.examSeriesDef = function (id) {
   return WA.EXAM_SERIES.find((s) => s.id === id) || null;
@@ -2490,9 +2542,12 @@ WA.examPassed = function (e) {
 };
 /* ROUND 15 — THE EXAMS' OWN PASS-ATTEMPT SENTENCE. WA.PASS_ATTEMPT_TIP is the
    CHECKRIDES' and quotes 60 %; a ground exam is judged at 80, so the two
-   surfaces cannot share one sentence any more without one of them lying. */
+   surfaces cannot share one sentence any more without one of them lying.
+   ROUND 15b (verify item 14): the two marks this sentence ASSERTS are read
+   from WA.passMin("exams"); the Greek inside the «…» is the user's ruling
+   QUOTED, and a quotation is not derived from anything — it stays as spoken. */
 WA.EXAM_PASS_TIP =
-  "A re-sat ground exam counts with the attempt it was PASSED on — 80 % and above (the ground-exam pass mark, ruled 2026-08-21: «80% για εξετασεις εδαφους, 60% για πτησεις»; FDMS calls the same number exam_pass_pct). The attempts below it stay in the record and stay visible; they never decide the exam. Two passes resolve to the later one, and if no attempt has reached 80 % the latest graded one stands for the exam and nothing has passed yet.";
+  "A re-sat ground exam counts with the attempt it was PASSED on — " + WA.passMin("exams") + " % and above (the ground-exam pass mark, ruled 2026-08-21: «80% για εξετασεις εδαφους, 60% για πτησεις»; FDMS calls the same number exam_pass_pct). The attempts below it stay in the record and stay visible; they never decide the exam. Two passes resolve to the later one, and if no attempt has reached " + WA.passMin("exams") + " % the latest graded one stands for the exam and nothing has passed yet.";
 
 /* ── WHICH OF TWO ATTEMPTS CAME LATER (round 9's twin rule, extracted) ──────
    Date first; a dated attempt beats an undated one; equal dates fall back to

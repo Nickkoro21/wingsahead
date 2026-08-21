@@ -1170,8 +1170,8 @@ WA.renderStudent = async function (view, me, opts) {
      grade box's own title. Both are DERIVED and both change on the keystroke
      that changes the number, so they are functions the live refresh can call
      as well as the renderer — the round-12b mission-cell pattern, one section
-     over. Nothing else about the row is rebuilt: the grade INPUT is never
-     re-rendered, only its title is set, so the caret survives. */
+     over. (Round 15b adds the third such function, `examLagHTML`.) The grade
+     INPUT is never re-rendered, only its title is set, so the caret survives. */
   function examNameCellHTML(i, e, meta) {
     const slot = meta.slot;
     const x = WA.exam(e.exam);
@@ -1204,10 +1204,21 @@ WA.renderStudent = async function (view, me, opts) {
       (ser ? "it simply did not pass." : "it simply did not pass, and a re-sit is the 2nd trial.") +
       (has ? " " + g + " % " + (WA.examPassed(e) ? "PASSES." : "does not pass.") : "");
   }
+  /* ROUND 15b (R15 verify item 11) — THE «N d» CHIP IS THE THIRD THING IN THE
+     GRADE CELL, and it answers the same question the number does: «sat N days
+     ago and STILL WITHOUT A RESULT». The moment a result is typed the sentence
+     is false, so the chip has to go on that keystroke — which means the
+     renderer and the live refresh must draw it from ONE definition, exactly as
+     the trial badge and the grade title are drawn from theirs (round 15). */
+  function examLagHTML(e) {
+    const late = WA.awaitingDebrief(e) ? WA.daysAgo(e.date) : null;
+    return late !== null && late >= WA.DEBRIEF_AMBER_DAYS
+      ? ` <span class="lagchip is-late" title="${esc("Sat " + late +
+          " days ago and still without a result")}">${esc(late)} d</span>` : "";
+  }
   function examRow(i, e, m) {
     const meta = m || rowMeta("exams", i);
     const fx = fixnoteHTML("exams", i, "grade", e.grade);
-    const late = WA.awaitingDebrief(e) ? WA.daysAgo(e.date) : null;
     return `
       <td class="c-ex">${examNameCellHTML(i, e, meta)}</td>
       <td class="c-dt">${cellDate("exams", i, "date", e.date, "Date")}</td>
@@ -1220,9 +1231,7 @@ WA.renderStudent = async function (view, me, opts) {
         fx ? ` <button type="button" class="cfix" data-round="exams:${i}:grade"
                  title="${esc("Grades are whole numbers — " + e.grade + " % is not one. Press to store " + Math.round(Number(e.grade)) + " %.")}"
                  >&rarr;${esc(Math.round(Number(e.grade)))}</button>` : ""}${
-        late !== null && late >= WA.DEBRIEF_AMBER_DAYS
-          ? ` <span class="lagchip is-late" title="${esc("Sat " + late +
-              " days ago and still without a result")}">${esc(late)} d</span>` : ""}</td>
+        examLagHTML(e)}</td>
       <td class="c-ac">${groundActs("exams", i, e, meta)}</td>`;
   }
 
@@ -1480,7 +1489,7 @@ WA.renderStudent = async function (view, me, opts) {
       blank: () => ({ date: "", end_date: "", group: "", course: "" }) },
 
     { id: "exams", table: true, cols: EXAM_COLS,
-      hint: "The eight ground-exam groups of the syllabus, one row each and all of them present from the first day: grey until the exam is sat, light green on the date alone, green once the result is in — whatever the result says, because the row asked for a mark and got one. Each of the eight may be sat up to THREE times — “+ 2nd trial” on the row adds the next attempt beneath it, and the row's colour follows the attempt it was PASSED on, exactly as a re-flown checkride does. A GROUND EXAM IS PASSED AT 80 % (a flight at 60): a 78 does not win the slot, and if no trial has reached 80 the latest one stands for the exam. The ΕΕΘ weekly theory exams come after the eight: they are an open series, numbered ΕΕΘ 1, ΕΕΘ 2 …, and both their date and their grade may be left empty until they are known. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and go under Ground lessons: that is where the squadron's scheduler counts them.)",
+      hint: "The eight ground-exam groups of the syllabus, one row each and all of them present from the first day: grey until the exam is sat, light green on the date alone, green once the result is in — whatever the result says, because the row asked for a mark and got one. Each of the eight may be sat up to THREE times — “+ 2nd trial” on the row adds the next attempt beneath it, and the row's colour follows the attempt it was PASSED on, exactly as a re-flown checkride does. A GROUND EXAM IS PASSED AT " + WA.passMin("exams") + " % (a flight at " + WA.passMin() + "): a 78 does not win the slot, and if no trial has reached " + WA.passMin("exams") + " the latest one stands for the exam. The ΕΕΘ weekly theory exams come after the eight: they are an open series, numbered ΕΕΘ 1, ΕΕΘ 2 …, and both their date and their grade may be left empty until they are known. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and go under Ground lessons: that is where the squadron's scheduler counts them.)",
       row: (e, i, m) => examRow(i, e, m),
       blank: () => ({ date: "", exam: "", grade: null }) },
   ];
@@ -2106,8 +2115,9 @@ WA.renderStudent = async function (view, me, opts) {
          round 12b's own rule being broken («the grade box keeps the focus and
          the caret»), so the redraw is not the instrument here.
      SO: on the keystroke every row OF THIS EXAM is repainted IN PLACE — the
-     state class, the name cell (badge, alt marker) and the actions cell — and
-     the grade box only ever has its `title` set. The ORDER settles on `change`
+     state class, the name cell (badge, alt marker), the actions cell and (round
+     15b, verify item 11) the grade cell's own NON-INPUT contents — and the
+     grade box itself only ever has its `title` set. The ORDER settles on `change`
      / `focusout`, by MOVING the <tr>s (resortSection), which is precisely what
      round 12b already does for the date: «NOT on the keystroke … it moves when
      the date is COMMITTED». The grade is now a second sort key of the same
@@ -2133,6 +2143,10 @@ WA.renderStudent = async function (view, me, opts) {
       if (ac) ac.innerHTML = groundActs("exams", k, list[k], m);
       const g = tr.querySelector('[data-field="grade"]');
       if (g) g.title = examGradeTitle(list[k]);   /* the TITLE, never the value */
+      /* ROUND 15b — and the REST of the grade cell, which is not the box: the
+         «N d — still without a result» chip is answered by the result being
+         typed, so it cannot survive the keystroke that answers it. */
+      refreshExamLag(k);
     }
     applyLocks();
     $("cnt-exams").textContent = cntHTML("exams");
@@ -2155,6 +2169,29 @@ WA.renderStudent = async function (view, me, opts) {
         }">&rarr;${esc(r)}</button>`);
     }
     applyLocks();
+  }
+  /* ROUND 15b (R15 verify item 11) — THE LAG CHIP, DROPPED AND RE-INSERTED THE
+     WAY THE "→63" OFFER ABOVE IS. The rest of the grade cell is re-rendered on
+     the keystroke; THE <input> IS NEVER TOUCHED, so it stays the same DOM node
+     and keeps its focus and its caret — which is the whole reason round 15
+     refused the section-wide redraw here in the first place. It is appended at
+     the END of the cell, which is where the renderer puts it: box, then the
+     whole-number offer, then the chip. */
+  function refreshExamLag(i) {
+    const cell = cellOf("exams", i, "td.c-gr");
+    if (!cell) return;
+    for (const old of cell.querySelectorAll(".lagchip")) old.remove();
+    /* …AND THE SPACE THAT CARRIED IT. The chip is written with its own leading
+       space (that is the gap beside the box), so removing only the element
+       would leave the space behind — and a grade typed and cleared a dozen
+       times would leave a dozen of them. Whitespace collapses on screen, so
+       nothing would look wrong while the cell grew without bound. Stripping
+       the trailing blanks makes the refreshed cell IDENTICAL to the one the
+       renderer writes: box · offer · chip, and nothing else. */
+    while (cell.lastChild && cell.lastChild.nodeType === 3 &&
+           !cell.lastChild.nodeValue.trim()) cell.lastChild.remove();
+    const h = examLagHTML((S.data.exams || [])[i]);
+    if (h) cell.insertAdjacentHTML("beforeend", h);
   }
   /* the per-block count in the collapsible's own header (flights / F/S) */
   function refreshTblCount(secId, i) {
