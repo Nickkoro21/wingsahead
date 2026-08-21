@@ -1044,20 +1044,29 @@ WA.renderAdmin = async function (view, me) {
       /* ONE trial badge, and its colour says whether this is the attempt the
          verdict is read from: accented on the operative one, plain on the
          attempts it displaced (which are kept and shown, and count for nothing
-         in that verdict — the round-11 pass rule, one section over) */
+         in that verdict — the round-11 pass rule, one section over).
+         ROUND 15 — the operative attempt is accented only when it actually
+         PASSED (80 % on a ground exam). At 60 those were the same fact; at 80
+         a 78 can be operative and not a pass, and an accent on it would be the
+         table telling the CO the exam is behind him. */
+      const ok = WA.examPassed(e);
       const showTrial = !ser && (tn > 1 || r.alt);
       return `<tr class="st-${esc(r.state)}">
         <td title="${esc(ser ? ser.tip : WA.examLabel(e.exam))}"><b>${esc(
           ser ? WA.examRowLabel(e) : (e.exam || "—"))}</b>${
           ser ? ` <span class="badge" title="${esc(ser.tip)}">weekly theory</span>` : ""}${
-          showTrial ? ` <span class="badge${r.alt ? "" : " badge-acc"}" title="${esc(
+          showTrial ? ` <span class="badge${r.alt ? "" : (ok ? " badge-acc" : " badge-warn")}" title="${esc(
             WA.examTrialWord(tn) + (r.alt
               ? " of this exam. It is kept and shown; the exam's verdict is read from the attempt it was PASSED on."
-              : " — this is the attempt the exam's verdict is read from."))}">${
-            esc(WA.examTrialWord(tn))}</span>` : ""}${
+              : (" — this is the attempt the exam's verdict is read from" +
+                 (ok ? ", and it PASSED." : ". No attempt has reached the pass mark yet."))) +
+            " " + WA.EXAM_PASS_TIP)}">${
+            esc(WA.examTrialWord(tn))}${r.alt || ok ? "" : " · not passed"}</span>` : ""}${
           x && x.cond ? ` <span class="badge badge-acc" title="Foreign SPs only — a HAF student does not owe this exam">foreign SPs only</span>` : ""}</td>
         <td>${esc(fmtD(e.date))}</td>
-        ${has ? `<td class="num">${WA.pct(e.grade)}</td>`
+        ${has ? `<td class="num" title="${esc(WA.pct(e.grade) + " — " +
+                  (ok ? "a PASS" : "not a pass") + ". " + WA.EXAM_PASS_TIP)}">${
+                  WA.pct(e.grade)}${ok ? "" : ` <span class="k">·&nbsp;fail</span>`}</td>`
               : `<td class="lag">${WA.debriefChip(e, "exams") || "&mdash;"}</td>`}
         ${stateCell(r.state, "exams", e)}
         ${srcCell(e)}</tr>`;
@@ -1451,7 +1460,13 @@ WA.renderAdmin = async function (view, me) {
                  exam done, and «9 of 8» would be the arithmetic saying so */
               return `<b>${esc(cl.slotsDone)}</b> of ${esc(WA.slotCount("lessons"))} lessons` +
                 (cl.started ? ` <span class="k">(+${esc(cl.started)} started)</span>` : "") +
-                ` · <b>${esc(cx.slotsDone)}</b> of ${esc(WA.slotCount("exams"))} exams` +
+                /* ROUND 15 — «DONE» IS NOT «PASSED», and beside a live 80 %
+                   pass mark an unlabelled «4 of 8 exams» reads as four passed.
+                   The number did not move (a marked exam is a finished row
+                   whatever the mark); the sentence that says so is new. */
+                ` · <b title="${esc("Ground exams SAT AND MARKED — a result is in, whatever it says. It is not how many were passed: a ground exam is passed at " +
+                    WA.passMin("exams") + " %, and an exam marked below it is still a finished row.")
+                  }">${esc(cx.slotsDone)}</b> of ${esc(WA.slotCount("exams"))} exams` +
                 (cx.lag ? ` <span class="k">· ${esc(cx.lag)} awaiting a result</span>` : "") +
                 (cl.extra + cx.extra ? ` <span class="k">· ${esc(cl.extra + cx.extra)} extra</span>` : "");
             })()}</div>
@@ -1687,7 +1702,14 @@ WA.renderAdmin = async function (view, me) {
           <td>${e.date ? esc(fmtD(e.date)) : `<span class="pr-n">not sat yet</span>`}</td>
           ${/* an exam nobody has sat is not "awaiting" a result — it is waiting
                to happen, and the Date cell beside this one already says so */ ""}
-          <td>${has ? WA.pct(e.grade)
+          ${/* ROUND 15 ON PAPER — the pass mark is 80 % and paper has no chip
+               and no hover, so the verdict is printed IN WORDS beside the
+               number. A photocopied brief showing a bare "78 %" under a rule
+               the reader may still remember as 60 is exactly the ambiguity the
+               ruling was made to end. */ ""}
+          <td>${has ? WA.pct(e.grade) + (WA.examPassed(e)
+                ? ` <span class="pr-n">(pass)</span>`
+                : ` <span class="pr-n">(below the 80 % pass mark)</span>`)
             : (e.date ? `<span class="pr-n">awaiting the result</span>` : `<span class="pr-n">&mdash;</span>`)}</td>
           <td>${esc(WA.rowStateDef(r.state).label)}</td></tr>`;
       });
@@ -1739,7 +1761,8 @@ WA.renderAdmin = async function (view, me) {
             (${esc(WA.stateLine("lessons", lessonCn))})</div>
           ${lessonRows.length ? prT(["Group", "Course", "Dates", "State"], lessonRows)
             : `<div class="pr-n">Nothing recorded yet — all ${esc(WA.slotCount("lessons"))} courses of the programme are owed.</div>`}
-          <div class="pr-sec">Ground exams (${esc(WA.stateLine("exams", examCn))})</div>
+          <div class="pr-sec">Ground exams — passed at ${esc(WA.passMin("exams"))} %
+            (${esc(WA.stateLine("exams", examCn))})</div>
           ${examRows.length ? prT(["Exam", "Date", "Grade", "State"], examRows)
             : `<div class="pr-n">Nothing recorded yet — all ${esc(WA.slotCount("exams"))} ground exams are owed.</div>`}
           <div class="pr-sec">Assessment for fighters — weighted mean ${
@@ -2210,15 +2233,37 @@ WA.renderAdmin = async function (view, me) {
          every other surface prints — and the "Counts" column says which attempt
          the verdict is read from, exactly as it does for a re-flown checkride. */
       {
+        /* ROUND 15 — AND THE VERDICT TRAVELS IN WORDS. A spreadsheet column of
+           bare percentages is read against whatever pass mark the reader
+           remembers, and the ground exams' is 80 while every flight in the
+           same file is judged at 60. So a graded exam row says which it is, in
+           Detail, for BOTH shapes: an ΕΕΘ is a ground exam too and is marked
+           the same way — it simply has no trials for the Counts column to
+           speak about. */
         const exCL = WA.claims("exams", r.exams || []);
+        const gradedEx = (e) => e.grade !== null && e.grade !== undefined &&
+          e.grade !== "" && isFinite(Number(e.grade));
         (r.exams || []).forEach((e, ix) => add(s, "exams", e,
           [WA.examSeries(e) ? WA.examSeries(e).label + " — weekly theory exam" : WA.examLabel(e.exam),
            WA.examTrial(e) > 1 && !WA.examSeries(e) ? WA.examTrialWord(WA.examTrial(e)) : "",
-           (WA.exam(e.exam) || {}).cond ? "foreign SPs only" : ""
+           (WA.exam(e.exam) || {}).cond ? "foreign SPs only" : "",
+           gradedEx(e) ? (WA.examPassed(e)
+             ? "passed (" + WA.passMin("exams") + " % or better)"
+             : "not passed (below the " + WA.passMin("exams") + " % ground-exam pass mark)") : ""
           ].filter(Boolean).join(" — "),
           WA.examRowLabel(e), "", "", e.grade, undefined,
-          WA.examSeries(e) ? "" : (exCL.claimed[ix] ? "yes" : "no — another attempt counts"),
-          "", undefined, stateOf("exams", e, ix)));
+          WA.examSeries(e) ? ""
+            : (exCL.claimed[ix]
+                ? (WA.examPassed(e) ? "yes" : "yes — but no attempt has passed yet")
+                : "no — another attempt counts"),
+          /* ROUND 15 residual, found by this round's own CSV read-back: this
+             call passed THIRTEEN arguments to a twelve-parameter `add`, so the
+             state landed in the dropped one and EVERY ground exam exported a
+             blank State column while the lessons beside it exported theirs.
+             The extra "" is gone; `hours` is the empty cell it was meant to be
+             (an exam has no duration) and `state` is the last argument, as it
+             is in every other section's call. */
+          "", stateOf("exams", e, ix)));
       }
     }
     download("wings-ahead-entries" + classSuffix() + "-" + stamp() + ".csv",

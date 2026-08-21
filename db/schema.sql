@@ -1160,6 +1160,44 @@ language sql immutable as $$ select array['EETH']::text[] $$;
 create or replace function wa.exam_trials() returns int
 language sql immutable as $$ select 3 $$;
 
+-- ══ ROUND 15 — THE GROUND-EXAM PASS MARK IS 80 % ══════════════════════════
+-- COMMAND WORDING (2026-08-21): «80% για εξετασεις εδαφους, 60% για πτησεις.
+-- Πλεον εχουμε κανει και το mapping.» That closes round 12b's open item («THE
+-- GROUND-EXAM PASS MARK IS DELIBERATELY NOT DECIDED — one number, or two
+-- different exams with two right numbers?») in favour of TWO: a πτήση is
+-- judged at 60 by ΠΔ 151/13 and ΠΔ 29/2020, a ground exam at 80, and FDMS has
+-- always called that second number `exam_pass_pct`.
+-- IT APPLIES TO BOTH SHAPES: the eight fixed ground exams AND the ΕΕΘ weekly
+-- series, which are ground exams too and are marked the same way.
+--
+-- THE SERVER RECORDS THE NUMBER AND JUDGES NOTHING WITH IT, and that is not an
+-- omission — it is round 12b's shape unchanged. The exams branch of
+-- wa.validate_record checks the grade's SHAPE (wa.chk_grade: a whole number
+-- 0-100) and stores it; no server function collapses an exam grade into a
+-- pass, a mission or a state. wa.grade_passed / wa.grade_mission are called
+-- ONLY from wa.eval_operative (checkrides) and the flights / fs branch of the
+-- validator respectively, and neither reaches an exams row. Which TRIAL of a
+-- re-sat exam is operative is decided on the client (WA.examOperativeIx),
+-- exactly as it was in round 14 — no round-15 behaviour moved to the server.
+-- The constant lives here so the two halves cannot drift and so the FDMS
+-- bridge has one server-side number to join on. If a later round makes the
+-- server judge an exam, this is the function it must call.
+-- The FREEZE-PER-EXAM-AT-ENTRY principle (an exam judged by the mark in force
+-- on the day it was sat) is a BRIDGE FINGERPRINT on the FDMS side, not a WA
+-- constant: this function is the one LIVE number and has no history.
+-- MIRROR: app/app.js → WA.EXAM_PASS_MIN / WA.passMin / WA.gradePassed(g,sec).
+create or replace function wa.exam_pass_min() returns numeric
+language sql immutable as $$ select 80::numeric $$;
+
+-- did this ground-exam grade PASS? — the exams' own question, at the exams'
+-- own mark. It is the mirror of WA.gradePassed(g, 'exams') and, like the
+-- constant above, it is declared and not yet called: nothing on the server
+-- judges an exam. wa.grade_passed(g) remains the FLIGHT question at 60.
+create or replace function wa.exam_passed(g numeric) returns boolean
+language sql immutable as $$
+  select g is not null and g >= wa.exam_pass_min()
+$$;
+
 -- ══ ROUND 14 — SENIORITY ORDER ════════════════════════════════════════════
 -- «τους εκπαιδευτες με σειρα αρχαιοτητας. HAF πρωτα, ITAF μετα.»
 -- Every list of instructors the application produces is ordered by this key and
@@ -1234,6 +1272,13 @@ $$;
 -- ΠΔ 29/2020 Άρθρο 3 παρ.1β (FDMS fail-16): «βαθμολογείται με βαθμολογία από
 -- μηδέν (0) έως πενήντα εννέα τοις εκατό (59%)» in a πτήση εξέτασης ή
 -- αξιολόγησης IS the referral case. One threshold, two sources, no ambiguity.
+-- SCOPE (round 15): THIS IS THE FLIGHT'S NUMBER. It judges the two flight
+-- logs, the checkrides, the solos and the FPC / CEF, and it does not move. A
+-- GROUND EXAM is judged at 80 by wa.exam_pass_min() — «80% για εξετασεις
+-- εδαφους, 60% για πτησεις» (2026-08-21) — and the printed FIVE-BAND SCALE
+-- below is untouched by that ruling, because the bands are a CHARACTERISATION
+-- and not a pass mark: a ground exam marked 78 is still «ΛΚ Λίαν Καλώς», it
+-- simply does not pass a ground exam.
 -- MIRROR: app/app.js → WA.GRADE_PASS_MIN / WA.GRADE_BANDS / WA.gradeBand /
 -- WA.gradePassed. Change one, change the other.
 create or replace function wa.grade_pass_min() returns numeric
@@ -2303,6 +2348,12 @@ begin
           end if;
           -- NULLABLE, for the same reason a flight's grade is: the result can
           -- take longer to arrive than the exam did to sit.
+          -- SHAPE ONLY, AND DELIBERATELY (round 15): chk_grade asks for a whole
+          -- number 0-100 and asks nothing about whether it PASSED. A ground
+          -- exam passes at 80 (wa.exam_pass_min) and a flight at 60, and a
+          -- refusal written here with either number would be the server
+          -- deciding a question no server function is asked. A 40 % is a valid,
+          -- complete, storable ground-exam row — it simply did not pass.
           perform wa.chk_grade(e->'grade', w || '.grade', false);
           -- ROUND 12b — the same simplicity ruling, one section over.
           perform wa.chk(not (e ? 'instructor') and not (e ? 'instructor_oid'),

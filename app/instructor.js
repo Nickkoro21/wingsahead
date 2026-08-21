@@ -128,9 +128,17 @@ WA.renderInstructor = async function (view, me, opts) {
           const cl = WA.stateCounts("lessons", rec.lessons);
           const cx = WA.stateCounts("exams", rec.exams);
           /* ROUND 14 — slotsDone, not done: an exam sat three times is ONE
-             exam done, and «9 of 8» would be the arithmetic saying so */
+             exam done, and «9 of 8» would be the arithmetic saying so.
+             ROUND 15 — AND «DONE» IS NOT «PASSED». The ground exams got a pass
+             mark of their own (80 %) and this counter did not move with it: it
+             counts the exams that have been SAT AND MARKED, whatever the mark
+             says. Left unlabelled beside a live pass mark it would read as
+             «four passed», so it says which number it is. */
           return `<div class="line">Ground: <b>${esc(cl.slotsDone)}</b> of ${
-            esc(WA.slotCount("lessons"))} lessons · <b>${esc(cx.slotsDone)}</b> of ${
+            esc(WA.slotCount("lessons"))} lessons · <b title="${
+            esc("Ground exams SAT AND MARKED — a result is in, whatever it says. It is not how many were passed: a ground exam is passed at " +
+                WA.passMin("exams") + " %, and an exam marked below it is still a finished row.")
+            }">${esc(cx.slotsDone)}</b> of ${
             esc(WA.slotCount("exams"))} exams</div>`;
         })()
       : "");

@@ -1130,16 +1130,25 @@ WA.renderStudent = async function (view, me, opts) {
      whole of the choice and a box would only let it be got wrong.
      WHICH TRIAL WEARS THE SLOT is the pass-attempt rule of the evaluations
      (WA.claims → WA.examOperativeIx), so the colour of the row follows the
-     attempt the student actually passed on, never the first one typed. */
+     attempt the student actually passed on, never the first one typed.
+     ROUND 15 — a GROUND EXAM is passed at 80 %, so the operative badge has to
+     say whether the attempt it names actually reached it. Before the ruling
+     the accented badge and "passed" were the same fact; at 80 they are not,
+     and a 78 wearing «this is the attempt the verdict is read from» with no
+     further word would read as a pass it is not. */
   function trialBadge(e, meta) {
     const t = meta.trial || 1;
     if (meta.series) return "";
     if (t === 1 && !meta.alt) return "";
-    return ` <span class="badge${meta.alt ? "" : " badge-acc"}" title="${esc(
-      meta.alt
+    const ok = WA.examPassed(e);
+    return ` <span class="badge${meta.alt ? "" : (ok ? " badge-acc" : " badge-warn")}" title="${esc(
+      (meta.alt
         ? WA.examTrialWord(t) + " of this exam. The colour of the exam above follows the attempt it was PASSED on — this row is kept and shown, and it counts for nothing in that verdict."
-        : WA.examTrialWord(t) + " — this is the attempt the exam's verdict is read from (the pass-attempt rule: a pass wins, and the later of two passes wins).")
-      }">${esc(WA.examTrialWord(t))}</span>`;
+        : WA.examTrialWord(t) + " — this is the attempt the exam's verdict is read from" +
+          (ok ? ", and it PASSED (" + e.grade + " %)."
+              : ". No attempt has reached the pass mark yet, so the latest one stands for the exam.")) +
+      " " + WA.EXAM_PASS_TIP)
+      }">${esc(WA.examTrialWord(t))}${meta.alt || ok ? "" : " · not passed"}</span>`;
   }
   function mintTrialHTML(i, e, meta) {
     if (!meta.slot || meta.alt || meta.series) return "";
@@ -1155,14 +1164,18 @@ WA.renderStudent = async function (view, me, opts) {
         WA.EXAM_TRIALS + " times and each trial is recorded once.")}"
       >+ ${esc(WA.examTrialWord(next))}</button>`;
   }
-  function examRow(i, e, m) {
-    const meta = m || rowMeta("exams", i);
+  /* ROUND 15 — THE TWO CELLS THAT CARRY THE VERDICT, EXTRACTED. The 80 % mark
+     is read in exactly two places on an exam row: the trial badge (which
+     attempt stands for the exam, and whether it reached the mark) and the
+     grade box's own title. Both are DERIVED and both change on the keystroke
+     that changes the number, so they are functions the live refresh can call
+     as well as the renderer — the round-12b mission-cell pattern, one section
+     over. Nothing else about the row is rebuilt: the grade INPUT is never
+     re-rendered, only its title is set, so the caret survives. */
+  function examNameCellHTML(i, e, meta) {
     const slot = meta.slot;
     const x = WA.exam(e.exam);
-    const fx = fixnoteHTML("exams", i, "grade", e.grade);
-    const late = WA.awaitingDebrief(e) ? WA.daysAgo(e.date) : null;
-    return `
-      <td class="c-ex">${meta.series
+    return `${meta.series
           ? `<span class="slotc serc" title="${esc(meta.series.tip)}"><b>${esc(
                WA.examRowLabel(e))}</b></span>
              <span class="badge" title="${esc(meta.series.tip)}">weekly theory</span>`
@@ -1177,13 +1190,32 @@ WA.renderStudent = async function (view, me, opts) {
                  (v.cond ? " · foreign SPs only — a HAF student does not owe it" : "") })),
           { aria: "Ground exam", ph: "— which exam? —" })}${
         trialBadge(e, meta)}${
-        x && x.cond && !meta.alt ? ` <span class="badge badge-acc" title="Foreign SPs only — a HAF student does not owe this exam">foreign SPs</span>` : ""}</td>
+        x && x.cond && !meta.alt ? ` <span class="badge badge-acc" title="Foreign SPs only — a HAF student does not owe this exam">foreign SPs</span>` : ""}`;
+  }
+  function examGradeTitle(e) {
+    const g = e ? e.grade : null;
+    const has = !(g === null || g === undefined || g === "") && isFinite(Number(g));
+    /* an ΕΕΘ is a ground exam and is marked at the same 80 %, but it has no
+       TRIALS — the series is not re-sat, the next week is the next number — so
+       the re-sit clause is the one half of the sentence it must not wear */
+    const ser = WA.examSeries(e);
+    return "Leave it empty until the result is in — the row is complete without it. A ground exam is PASSED at " +
+      WA.passMin("exams") + " % (a flight at " + WA.passMin() + " %); a mark below it still completes the row — " +
+      (ser ? "it simply did not pass." : "it simply did not pass, and a re-sit is the 2nd trial.") +
+      (has ? " " + g + " % " + (WA.examPassed(e) ? "PASSES." : "does not pass.") : "");
+  }
+  function examRow(i, e, m) {
+    const meta = m || rowMeta("exams", i);
+    const fx = fixnoteHTML("exams", i, "grade", e.grade);
+    const late = WA.awaitingDebrief(e) ? WA.daysAgo(e.date) : null;
+    return `
+      <td class="c-ex">${examNameCellHTML(i, e, meta)}</td>
       <td class="c-dt">${cellDate("exams", i, "date", e.date, "Date")}</td>
       <td class="c-gr">
         <input type="number" class="cellin c-num" min="0" max="100" step="1" inputmode="numeric"
                value="${e.grade === null || e.grade === undefined || e.grade === "" ? "" : esc(e.grade)}"
                placeholder="—" aria-label="Grade in percent"
-               title="Leave it empty until the result is in — the row is complete without it"
+               title="${esc(examGradeTitle(e))}"
                ${F("exams", i, "grade")}>${
         fx ? ` <button type="button" class="cfix" data-round="exams:${i}:grade"
                  title="${esc("Grades are whole numbers — " + e.grade + " % is not one. Press to store " + Math.round(Number(e.grade)) + " %.")}"
@@ -1448,7 +1480,7 @@ WA.renderStudent = async function (view, me, opts) {
       blank: () => ({ date: "", end_date: "", group: "", course: "" }) },
 
     { id: "exams", table: true, cols: EXAM_COLS,
-      hint: "The eight ground-exam groups of the syllabus, one row each and all of them present from the first day: grey until the exam is sat, light green on the date alone, green once the result is in. Each of the eight may be sat up to THREE times — “+ 2nd trial” on the row adds the next attempt beneath it, and the row's colour follows the attempt it was PASSED on, exactly as a re-flown checkride does. The ΕΕΘ weekly theory exams come after the eight: they are an open series, numbered ΕΕΘ 1, ΕΕΘ 2 …, and both their date and their grade may be left empty until they are known. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and go under Ground lessons: that is where the squadron's scheduler counts them.)",
+      hint: "The eight ground-exam groups of the syllabus, one row each and all of them present from the first day: grey until the exam is sat, light green on the date alone, green once the result is in — whatever the result says, because the row asked for a mark and got one. Each of the eight may be sat up to THREE times — “+ 2nd trial” on the row adds the next attempt beneath it, and the row's colour follows the attempt it was PASSED on, exactly as a re-flown checkride does. A GROUND EXAM IS PASSED AT 80 % (a flight at 60): a 78 does not win the slot, and if no trial has reached 80 the latest one stands for the exam. The ΕΕΘ weekly theory exams come after the eight: they are an open series, numbered ΕΕΘ 1, ΕΕΘ 2 …, and both their date and their grade may be left empty until they are known. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and go under Ground lessons: that is where the squadron's scheduler counts them.)",
       row: (e, i, m) => examRow(i, e, m),
       blank: () => ({ date: "", exam: "", grade: null }) },
   ];
@@ -2058,6 +2090,53 @@ WA.renderStudent = async function (view, me, opts) {
     if (!cell) return;
     cell.innerHTML = missionCell(secId, i, S.data[secId][i]);
     applyLocks();
+  }
+  /* ROUND 15 — THE EXAM'S VERDICT FOLLOWS THE KEYSTROKE, AND NOTHING IS
+     REBUILT. Two defects meet here and one fix answers both.
+     (a) Round 12b's finding, one section over: the badge and the grade box's
+         title were drawn once, so a 2nd trial typed up from 78 to 85 kept its
+         «· not passed» badge and its «78 % does not pass» title. At the old 60
+         the two facts moved together often enough to hide it; at 80 they part
+         company on exactly the marks a student cares about.
+     (b) The GRADE IS NOW AN ORDERING KEY. WA.examOperativeIx reads it, so a
+         keystroke can move the slot from one trial to another — and the
+         section-wide redraw that used to answer that (syncSlots) rebuilds the
+         grade box, and a rebuilt <input type=number> comes back with its caret
+         at position 0: typing «90» digit by digit produced «09». That is
+         round 12b's own rule being broken («the grade box keeps the focus and
+         the caret»), so the redraw is not the instrument here.
+     SO: on the keystroke every row OF THIS EXAM is repainted IN PLACE — the
+     state class, the name cell (badge, alt marker) and the actions cell — and
+     the grade box only ever has its `title` set. The ORDER settles on `change`
+     / `focusout`, by MOVING the <tr>s (resortSection), which is precisely what
+     round 12b already does for the date: «NOT on the keystroke … it moves when
+     the date is COMMITTED». The grade is now a second sort key of the same
+     table, and it settles the same way.
+     Repopulating CLAIM before returning is deliberate: the shared tail of the
+     input handler calls syncSlots(sec, i), which redraws when the signature
+     it remembers differs from the fresh one. Leaving it stale would bring the
+     rebuild — and the caret bug — back through the back door. */
+  function syncExamRows(i) {
+    claimsDirty("exams");
+    claimsOf("exams");                    /* the new map, remembered NOW */
+    const list = S.data.exams || [];
+    const key = WA.slotKey("exams", list[i]);
+    for (let k = 0; k < list.length; k++) {
+      if (k !== i && (key === null || WA.slotKey("exams", list[k]) !== key)) continue;
+      const tr = form.querySelector(`[data-row="exams:${k}"]`);
+      if (!tr) continue;
+      const m = rowMeta("exams", k);
+      for (const s of WA.ROW_STATES) tr.classList.toggle("st-" + s.id, s.id === m.state);
+      const ex = tr.querySelector("td.c-ex");
+      if (ex) ex.innerHTML = examNameCellHTML(k, list[k], m);
+      const ac = tr.querySelector("td.c-ac");
+      if (ac) ac.innerHTML = groundActs("exams", k, list[k], m);
+      const g = tr.querySelector('[data-field="grade"]');
+      if (g) g.title = examGradeTitle(list[k]);   /* the TITLE, never the value */
+    }
+    applyLocks();
+    $("cnt-exams").textContent = cntHTML("exams");
+    refreshTblCount("exams", i);
   }
   /* the grade box's "→63" offer, in a cell that must stay one line */
   function refreshGradeFix(secId, i) {
@@ -2886,6 +2965,9 @@ WA.renderStudent = async function (view, me, opts) {
       refreshMissionCell(sec, i);
       $("cnt-" + sec).textContent = cntHTML(sec);
       refreshTblCount(sec, i);
+    } else if (sec === "exams" && (f === "date" || f === "grade")) {
+      /* ROUND 15 — the exam's own verdict, in place. See syncExamRows. */
+      syncExamRows(i);
     } else if (isTbl && (f === "date" || f === "grade" || f === "duration")) {
       /* the block's own counters — flights, hours, and how many are still
          waiting for a grade — follow the keystroke that changes them */
@@ -2962,7 +3044,15 @@ WA.renderStudent = async function (view, me, opts) {
     const el = ev.target;
     if (!el || !el.dataset) return;
     const sec = el.dataset.sec, f = el.dataset.field;
-    if (!sec || !SORTED[sec] || f !== "date") return;   /* `date` IS the sort key */
+    if (!sec || !SORTED[sec]) return;
+    /* ROUND 15 — AND THE EXAMS HAVE A SECOND SORT KEY: THE GRADE. `slotRows`
+       draws an exam's OPERATIVE trial as the slot and its other attempts
+       beneath it, and which trial is operative is decided by the pass mark —
+       so typing 85 into a 2nd trial re-orders the block exactly as changing a
+       date does. It settles at the same moment and by the same act (the <tr>s
+       are MOVED, nothing is rebuilt), and for the same reason: a number typed
+       digit by digit must not take the caret with it half-way through. */
+    if (f !== "date" && !(sec === "exams" && f === "grade")) return;
     resortSection(sec, ev.type === "focusout" ? ev.relatedTarget : null);
   };
   form.addEventListener("change", dateSettled);

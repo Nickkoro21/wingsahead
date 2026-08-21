@@ -1276,11 +1276,19 @@ it is demoted to the tiebreak**:
 * no graded attempt at all → the latest row, so a flown checkride never
   disappears from a table.
 
+> **ROUND 15 SCOPE NOTE.** Every «60» on this page is the **flight's** number
+> and none of them moved. A **ground exam** is passed at **80 %** (bridge ruling
+> #6, §4p) and `WA.examOperativeIx` runs this same four-line rule against that
+> mark instead. The printed five-band scale is untouched by that: the bands are
+> a *characterisation* (78 % is still «ΛΚ»), not a pass mark.
+
 **ONE DEFINITION, WRITTEN TWICE AND CHECKED:**
 `wa.grade_pass_min()` / `wa.grade_band()` / `wa.grade_passed()` /
 `wa.eval_operative()` in `db/schema.sql`, mirrored by `WA.GRADE_PASS_MIN` /
 `WA.GRADE_BANDS` / `WA.gradeBand` / `WA.gradePassed` / `WA.attemptLater` /
-`WA.evalOperativeOf` in `app/app.js`. `WA.evalLatest` is **gone, not renamed** —
+`WA.evalOperativeOf` in `app/app.js` — and, since round 15, the exams' own
+`wa.exam_pass_min()` / `wa.exam_passed()` ⇄ `WA.EXAM_PASS_MIN` / `WA.passMin` /
+`WA.examPassed` / `WA.gradePassed(g,'exams')`. `WA.evalLatest` is **gone, not renamed** —
 two functions with two rules is exactly how a class average and a printed brief
 drift apart — and every caller was moved.
 `admin_get_data` now ships **`eval_grades`** per student (the eight operative
@@ -1729,13 +1737,22 @@ are one column each if the squadron wants them back.
 > reads that flag and leaves JP190 pending for ever; **that pre-existing defect is
 > not mirrored here.**
 
-**THE GROUND-EXAM PASS MARK IS DELIBERATELY NOT DECIDED.** FDMS uses
-`exam_pass_pct` (default **80**); WA uses **60** everywhere (ΠΔ 151/13). The
-reading that they are two different exams and both numbers are right is
-plausible, so this round **stores the grade and derives no characterisation for
-`exams` at all** — no mission, no pass/fail chip, nothing that would settle the
-question by accident. (12b did not change that: `mission` is a key of the two
-FLIGHT logs only, and an exams row carries none.) It stays an open item below.
+**THE GROUND-EXAM PASS MARK IS DELIBERATELY NOT DECIDED** *(round 12b — **now
+DECIDED, see §4p**)*. FDMS uses `exam_pass_pct` (default **80**); WA used **60**
+everywhere (ΠΔ 151/13). The reading that they are two different exams and both
+numbers are right is plausible, so this round **stores the grade and derives no
+characterisation for `exams` at all** — no mission, no pass/fail chip, nothing
+that would settle the question by accident. (12b did not change that: `mission`
+is a key of the two FLIGHT logs only, and an exams row carries none.)
+
+> **CLOSED BY BRIDGE RULING #6 (2026-08-21, §4p):** it *is* the two-exams
+> reading. A ground exam is passed at **80 %**, a flight at **60 %**, and the
+> two numbers are both right. What round 12b wrote above still stands as the
+> *storage* shape and was never rewritten — the exams section still stores a
+> grade and derives **no mission and no row state** from it. What round 15 added
+> is the one judgment the section already made implicitly since round 14
+> (**which trial is operative**), now made at 80, plus the wording that names
+> the mark.
 
 ### THE MUST-FIX: THE PASS-THROUGH IS THE POINT
 
@@ -2103,10 +2120,12 @@ keys they name were re-run against the table form in 12b — see below — and t
 
 ### OPEN ITEMS RAISED BY THIS ROUND
 
-1. **The ground-exam pass mark.** FDMS `exam_pass_pct` defaults to **80**; WA
+1. ~~**The ground-exam pass mark.** FDMS `exam_pass_pct` defaults to **80**; WA
    uses **60** everywhere. This round stores the grade and characterises nothing
    for `exams`, so the question is still open: one number, or two different exams
-   with two right numbers?
+   with two right numbers?~~ — **ANSWERED 2026-08-21 (bridge ruling #6, §4p):
+   TWO different exams with two right numbers.** Ground exams (the eight *and*
+   the ΕΕΘ) are passed at **80 %**; flights and F/S stay at **60 %**.
 2. **`admin_get_data` payload growth** — see the watch item above.
 3. **Duration in FDMS.** `trainingLog` has no duration field, so duration is
    **WA-only** for now. Making it a real FDMS field is where this work meets the
@@ -2633,6 +2652,15 @@ disagree about whether IN190 is done. `WA.claims` is the one line where the two
 doctrines meet — first-in-stored-order for the flight logs and the lessons (a
 re-fly is not the planned pass), the **operative trial** for the exams (three
 attempts at *one* slot, not three passes at it).
+
+> **ROUND 15 — THE SAME RULE, THE EXAMS' OWN MARK.** *The rule* is shared; *the
+> number* is not. Since bridge ruling #6 (§4p) `WA.examOperativeIx` asks
+> `WA.gradePassed(g, 'exams')` — **80 %** — while `WA.evalOperativeOf` keeps
+> asking the flight question at 60. This is the one place in the application
+> where round 15 changed behaviour rather than wording: a 2nd trial marked 78
+> used to take the slot and no longer does, and the rule's own documented
+> fallback (*no attempt passed → the latest graded one stands, `passed:false`*)
+> is what carries the slot instead.
 
 #### NEITHER IS MUSTARD, AND WHY IT NEEDED TWO PREDICATES
 
@@ -3234,6 +3262,235 @@ away a cache entry for nothing.
     people were created; the two test instructor names were `ZZ-TEST` and never
     reached a tracked file. **Privacy grep: 0 hits.**
 
+## 4p. Round 15 (2026-08-21) — THE 80 % WRITTEN-EXAM THRESHOLD (bridge ruling #6)
+
+### THE RULING, VERBATIM (2026-08-21)
+
+> «80% για εξετασεις εδαφους, 60% για πτησεις. Πλεον εχουμε κανει και το mapping.»
+
+**ΑΠΟΦΑΝΣΗ.** Round 12b left one question open in capitals — *«THE GROUND-EXAM
+PASS MARK IS DELIBERATELY NOT DECIDED … one number, or two different exams with
+two right numbers?»* (§4l). It is the second: **two different examinations, two
+right numbers.** A **ground exam** is passed at **80 %**; a **flight** (and an
+F/S sortie, and a checkride, and a solo, and an FPC / CEF) stays at **60 %**.
+FDMS has always called the first number `exam_pass_pct` and defaulted it to 80,
+so the ruling also closes the last arithmetic disagreement between the two
+systems — *«Πλεον εχουμε κανει και το mapping.»*
+
+**IT APPLIES TO BOTH GROUND-EXAM SHAPES**: the **eight** fixed groups and the
+**ΕΕΘ weekly series**. An ΕΕΘ is a ground exam that the syllabus does not
+enumerate; it is not a different kind of examination.
+
+### WHAT MOVED — AND, MUCH MORE OF IT, WHAT DID NOT
+
+| | | |
+|---|---|---|
+| **the printed five-band scale** (ΠΔ 151/13, `WA.GRADE_BANDS` / `wa.grade_band`) | **UNTOUCHED** | The bands are a **characterisation**, not a pass mark. A ground exam marked 78 is still «ΛΚ Λίαν Καλώς» — it simply does not pass a ground exam. Moving the bands would have re-graded every flight in the squadron to fix an exam. |
+| **flights · F/S · checkrides · solos · FPC / CEF** | **60 %, unchanged** | ΠΔ 29/2020 Άρθρο 3 παρ.1β reads that number off a *πτήση εξέτασης ή αξιολόγησης*. Nothing about a flight changed. |
+| **the mission collapse** (`WA.gradeMission` / `wa.grade_mission`) | **60 %, unchanged** | `mission` is a key of the **two flight logs only**; an exams row carries none, so there is no ground exam's mission to collapse. |
+| **the four row states** (`WA.rowDone` → `done · started · owed · extra`) | **UNCHANGED, and deliberately** | A ground exam is `done` on its **date AND its result — whatever the result says**. A 40 % is a *complete row*: the row asked for a mark and got one. **Pass/fail is the other axis.** |
+| **`slotsDone` («4 of 8 exams»)** | **number unchanged, sentence new** | It counts exams **sat and marked**, not exams passed. Unlabelled beside a live pass mark it would read as *«four passed»*, so both readouts (CO brief line, instructor card) now carry a title saying which number it is. |
+| **the operative trial** (`WA.examOperativeIx`) | **MOVED TO 80** | This is the **one** behavioural change in the application. |
+| **the server** | **judges nothing, before or after** | See below. |
+
+### THE ONE BEHAVIOURAL CHANGE: WHICH TRIAL STANDS FOR THE EXAM
+
+Round 14 gave the exams round 11's pass-attempt rule (§4n.3): *PASS is the
+filter and runs first, LATEST is only the tiebreak, and a slot with no pass at
+all falls back to the latest graded attempt marked `passed:false`.* The **rule**
+is unchanged; only the **number it asks about** is. `WA.examOperativeIx` now
+calls `WA.gradePassed(g, 'exams')`.
+
+Consequence, exactly as the user's own test case predicted: **a 2nd trial marked
+78 no longer wears the slot as a pass.** Nothing has passed, so the rule's own
+documented fallback carries it — *the latest graded attempt stands for the exam,
+`passed:false`* — and every surface says so out loud rather than showing a badge
+that means «behind you».
+
+### THE SHAPE OF THE CHANGE IN CODE
+
+* `WA.GRADE_PASS_MIN = 60` keeps its name and its meaning: **the flight's
+  number**. `WA.EXAM_PASS_MIN = 80` is new, and `WA.passMin(sec)` is the one
+  function that chooses between them.
+* `WA.gradePassed(g)` → `WA.gradePassed(g, sec)`. **A caller that passes no
+  section is asking the flight question** — which is every caller that existed
+  before this round, so nothing outside the exams moved by accident.
+* `WA.examPassed(e)` is the row-level question (both shapes), and
+  `WA.EXAM_PASS_TIP` is the exams' own pass-attempt sentence.
+  `WA.PASS_ATTEMPT_TIP` stays the **checkrides'** and still quotes 60 %: at two
+  different marks the two surfaces cannot share one sentence without one of them
+  lying.
+* **Server:** `wa.exam_pass_min()` = 80 and `wa.exam_passed(g)` are declared as
+  the mirror — and **called by nothing**, on purpose. See below.
+
+### THE SERVER JUDGES NO EXAM GRADE — BEFORE THIS ROUND OR AFTER
+
+Round 12b's shape is unchanged: the exams branch of `wa.validate_record` calls
+**`wa.chk_grade` only** (a whole number 0-100) and stores what it is given.
+Proven by grep, not by assertion: `wa.grade_passed` has exactly one call site
+(`wa.eval_operative` — **checkrides**) and `wa.grade_mission` exactly one (the
+**`flights` / `fs`** branch of the validator, in the refusal that names a stored
+mission beside a stored grade). Neither reaches an exams row, and no refusal
+text anywhere names 60 for an exam. **Live proof:** the round's own test record
+saved a `55`, a `78` and a `79` on ground exams through the real RPC without a
+murmur.
+
+The two new SQL functions therefore exist so that the MIRROR contract is real
+(«change one, change the other») and so the FDMS bridge has one server-side
+number to join on. If a later round makes the server judge an exam, that is the
+function it must call.
+
+### THE FREEZE-PER-EXAM-AT-ENTRY PRINCIPLE IS A BRIDGE FINGERPRINT, NOT A WA CONSTANT
+
+An exam judged by the mark **in force on the day it was sat** is a property of
+the **FDMS-side bridge fingerprints**, not of this application:
+`wa.exam_pass_min()` / `WA.EXAM_PASS_MIN` are **one live number with no
+history**. WA records the grade; what a reconciler decides to freeze against a
+past ruling is the reconciler's business, and inventing a WA-side effective-date
+column would put a second, quieter copy of that history here.
+
+### TWO DEFECTS FOUND BY THIS ROUND'S OWN VERIFICATION (both fixed)
+
+1. **THE EXAM'S VERDICT DID NOT FOLLOW THE KEYSTROKE — and the fix could not be
+   a redraw.** The trial badge and the grade box's title were drawn once, so a
+   2nd trial typed up from 78 to 85 kept its *«· not passed»* badge. That is
+   round 12b's own finding one section over (*«the mission chip follows EVERY
+   grade keystroke»*). But the obvious instrument — the section-wide
+   `syncSlots` redraw — **rebuilds the grade box, and a rebuilt
+   `<input type=number>` comes back with its caret at position 0: typing «90»
+   digit by digit produced «09»** (measured live, with `execCommand('insertText')`
+   respecting the real caret). So the keystroke now repaints every row **of that
+   exam** IN PLACE — state class, name cell, actions cell — and the grade box
+   only ever has its `title` set. **The ORDER settles on `change` / `focusout`,
+   by MOVING the `<tr>`s** (`resortSection`), which is precisely what round 12b
+   already does for the date: *«NOT on the keystroke … it moves when the date is
+   COMMITTED»*. The grade is now a **second sort key** of the same table — it
+   decides which trial is drawn as the slot — and it settles the same way.
+2. **EVERY GROUND EXAM EXPORTED A BLANK `State` COLUMN.** The entries-CSV call
+   for `exams` passed **thirteen** arguments to a **twelve**-parameter `add`, so
+   the state landed in the dropped one while the lessons beside it exported
+   theirs. A round-14 defect, found by this round's CSV read-back, fixed by
+   deleting the extra `""`.
+
+### WHERE THE 80 % IS NOW SAID, IN WORDS
+
+Student form — the exams section hint, the ⓘ terminology tooltip, the ΕΕΘ
+series tooltip, **every grade box's title** (*«80 % … 79 % does not pass»*, and
+without the re-sit clause on an ΕΕΘ, which has no trials), and the **trial
+badge**, which is accented only when the operative attempt actually passed and
+otherwise reads **«2nd trial · not passed»** in `--warn`. · CO's Student
+analysis — the same badge, plus **«79% · fail»** in the Grade cell with the full
+rule on hover. · Printed brief — the section head reads **«Ground exams —
+passed at 80 %»** and each line prints **«(pass)» / «(below the 80 % pass
+mark)»**, because paper is monochrome and has no hover. · Entries CSV — the
+verdict travels in **Detail** for both shapes, and *Counts* now distinguishes
+**«yes»** from **«yes — but no attempt has passed yet»**.
+
+### WHAT WAS NOT TOUCHED
+
+The **CO-lock mint behaviour** and the **seniority wording** (both still awaiting
+the user's rulings, §4o), `styles.css` (the `badge-warn` token already existed),
+and every threshold that is not a ground exam's.
+
+### CACHE-BUSTER
+
+`?v=20260821d` on **`app.js`, `student.js`, `admin.js`, `instructor.js`** — the
+four files this round changed. `styles.css`, `config.js` and `items-catalog.js`
+keep `?v=20260821b`.
+
+### DEPLOYMENT NOTE — THE SCHEMA IS TOUCHED, AND IT GOES FIRST
+
+`db/schema.sql` gains two immutable functions and three comment blocks. It is
+**additive and callable by nothing**, so old and new clients are both correct
+against either version — but it joins round 14's gate and runs before the app,
+by the house rule. **Run twice, `ON_ERROR_STOP=1`, exit 0 both times** (below).
+The two commits ahead of `origin/main` and this one are **not pushed**.
+
+### SELF-VERIFICATION — ROUND 15 (live, local stack, the real form and the real RPCs)
+
+1. **The two numbers, from the live page**: `WA.passMin() === 60`,
+   `WA.passMin('exams') === 80`; `gradePassed(79,'exams') false` ·
+   `gradePassed(80,'exams') true` · `gradePassed(59) false` ·
+   `gradePassed(60) true`.
+2. **The bands did not move.** `50 ΣΚ · 59 ΣΚ · 60 Κ · 78 ΛΚ · 79 ΛΚ · 80 ΛΚ` —
+   78, 79 and 80 are the **same band** and only the exam verdict separates them:
+   `examPass false · false · true`.
+3. **79 → fail-side, 80 → pass-side, on the keystroke.** A single-sitting IN190
+   typed 79 → *«79 % does not pass»*; typed 80 → *«80 % PASSES»*. The row stayed
+   **`st-done`** in **both** cases — the two axes, kept apart.
+4. **55 + 78 → NO trial wears the slot as a pass.** The 2nd trial holds the slot
+   as the **latest graded** attempt and says so: badge **«2nd trial · not
+   passed»** (`badge-warn`), title *«No attempt has reached the pass mark yet, so
+   the latest one stands for the exam.»* — the round-11 rule's own documented
+   fallback, not a special case. The 1st trial is beneath it, `is-alt`, marked
+   **«1st trial»**.
+5. **55 + 85 → the 85 wears it.** Same two rows; the badge turns `badge-acc` and
+   the title reads *«…the attempt the exam's verdict is read from, and it PASSED
+   (85 %)»*.
+6. **The slot moves back, too**: 1st = 90 (holder) → retyped to 9, and the slot
+   moved to the 2nd trial in place on the keystroke; the rows **re-ordered on
+   commit** (holder drawn first) by moving the `<tr>`s.
+7. **The caret survives.** In the case that moves the slot: the grade input is
+   the **same DOM node** before and after, still focused, and typing `9` then `0`
+   yields **`90`** (it yielded `09` before the fix).
+8. **Flights and F/S unchanged, probed one each.** Flight 60 → *Mission
+   complete*, `st-done`; 59 → *Mission incomplete*. F/S 50 → *Mission
+   incomplete* (`ΣΚ`); 60 → *Mission complete*. Every mission tooltip still
+   reads *«the 60 % threshold of ΠΔ 151/13»*.
+9. **The ΕΕΘ are judged at 80 too.** ΕΕΘ 1 at 79 → *«79 % does not pass»*, at 80
+   → *«80 % PASSES»* — and the title drops the re-sit clause, because an ΕΕΘ has
+   no trials.
+10. **The CO's exam table**, read off the live DOM on the saved record:
+    `CO190 79% · fail` · `IN190 2nd trial · not passed 78% · fail` ·
+    `IN190 1st trial 55% · fail` · `IN290 85%` · `ΕΕΘ 1 79% · fail` — all five
+    still `st-done`.
+11. **The printed brief** (`beforeprint` builder): *«Ground exams — passed at
+    80 % (done 5 · started 0 · owed 5)»*, then `79% (below the 80 % pass mark)` ·
+    `78% (below …)` · `55% (below …)` · `85% (pass)` · `ΕΕΘ 1 … 79% (below …)`.
+12. **The entries CSV**, captured from the real export blob: Detail carries
+    *«— not passed (below the 80 % ground-exam pass mark)»* / *«— passed (80 % or
+    better)»* on all five rows including the ΕΕΘ; *Counts* reads **«yes — but no
+    attempt has passed yet»** on the operative-but-failed rows; and the **`State`
+    column now reads `done`** where it was blank before the fix.
+13. **The server stores and does not judge**: the record saved through the real
+    RPC as
+    `[{CO190 79}, {IN190 55}, {IN290 85}, {IN190 78 trial 2}, {ΕΕΘ 1 79}]` —
+    three failing marks accepted without a murmur.
+14. **Schema gate**: `db/schema.sql` run **twice** with `ON_ERROR_STOP=1`,
+    **exit 0** both times; `wa.grade_pass_min() = 60`, `wa.exam_pass_min() = 80`,
+    `wa.exam_passed(80) t` / `wa.exam_passed(79) f`, `wa.grade_passed(60) t` /
+    `wa.grade_passed(59) f`.
+15. **`node --check` clean** on all six JS files. **Zero console errors** on the
+    student form, the admin's four tabs (including the `beforeprint` builder) and
+    the instructor form.
+16. **Hygiene**: demo data snapshotted before the round and **byte-restored**
+    after — record md5 `95c641b4…` identical before and after, **3 records · 42
+    people · 9 proposals**. The one test record created for the live probes was
+    removed; **0** stored records carry this round's fixtures (the placeholder
+    instructor name `ZZ-TEST`, or an `EETH` row); no fixture people
+    were created. **Privacy grep: 0 hits.**
+
+### OPEN ITEMS RAISED BY THIS ROUND
+
+1. **«F/S at 50» has no referent in WA.** The brief for this round named 50 % as
+   the F/S threshold. **There is no 50 % pass mark anywhere in this
+   application** — the only 50 is the **floor of the «ΣΚ» band** (ΠΔ 151/13,
+   50-59 = ΥΣΤΕΡΗΣΗ), and an F/S sortie is judged at **60** exactly like a
+   flight. Nothing was changed on that reading (*«nothing else moves»*), and it
+   is recorded here so the question can be asked deliberately: **is a simulator
+   sortie meant to pass at 50?** If it is, it is a third number and a third
+   argument to `WA.passMin`.
+2. **A failed exam is still green.** Round 14's open item 1 asked the same
+   question about a failed *attempt*; the 80 % mark sharpens it. `CO190 79 %` is
+   `st-done` — a complete row — and the CO's eye reads a green wash as *good*.
+   The colour means *«the row is finished»* and the cell beside it says
+   *«fail»*; a fifth state (*finished, not passed*) is a colour decision, not an
+   arithmetic one, and it is the user's.
+3. **`slotsDone` counts marked exams, not passed ones.** The number is right for
+   what it measures and now carries a tooltip saying so — but if the CO's brief
+   line is meant to answer *«how many has he PASSED?»*, that is a second counter
+   and a deliberate decision.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -3372,6 +3629,25 @@ away a cache entry for nothing.
 3. Admin link generated → CO adds people → distributes links.
 
 ## 7. Open items
+
+- **ΑΠΟΦΑΝΣΗ 2026-08-21 (Γύρος 15, §4p) — ΤΟ ΚΑΤΩΦΛΙ ΤΩΝ ΓΡΑΠΤΩΝ ΕΞΕΤΑΣΕΩΝ ΕΙΝΑΙ
+  80 %.** «80% για εξετασεις εδαφους, 60% για πτησεις. Πλεον εχουμε κανει και το
+  mapping.» Κλείνει το ανοιχτό σημείο 1 του Γύρου 12b: **δύο διαφορετικές
+  εξετάσεις, δύο σωστοί αριθμοί.** Ισχύει και για τις οκτώ και για τα **ΕΕΘ**. Οι
+  πτήσεις, τα F/S, οι αξιολογήσεις, τα solo και τα FPC / CEF **μένουν στο 60**,
+  και η **πεντάβαθμη κλίμακα ΠΔ 151/13 δεν κουνήθηκε** (τα «Α/ΛΚ/Κ/ΣΚ/Ε» είναι
+  *χαρακτηρισμός*, όχι βάση επιτυχίας: ένα 78 σε γραπτή είναι ακόμη «ΛΚ» και απλώς
+  δεν περνάει). Άλλαξε **μία** συμπεριφορά: ποια προσπάθεια «πιάνει» τη θυρίδα
+  (`WA.examOperativeIx`) — ένα 78 σε 2nd trial δεν την πιάνει πια ως επιτυχία.
+- **ΝΕΟ (Γύρος 15, §4p) — τρία ανοιχτά σημεία**: (1) το **«F/S στο 50»** της
+  εντολής **δεν αντιστοιχεί σε τίποτα** μέσα στην εφαρμογή — το μόνο 50 είναι το
+  κατώφλι της ζώνης «ΣΚ» και το F/S κρίνεται στο 60 όπως η πτήση· **ζητείται
+  απόφανση** αν το simulator υποτίθεται ότι περνάει στο 50 (θα ήταν τρίτος
+  αριθμός)· (2) μια **αποτυχημένη γραπτή παραμένει πράσινη** (`st-done` = η
+  γραμμή είναι πλήρης· το κελί δίπλα λέει «fail») — χρειάζεται πέμπτη κατάσταση
+  «τελειωμένο, μη επιτυχές»; (3) το **«4 από 8 exams»** μετράει γραπτές που
+  **δόθηκαν και βαθμολογήθηκαν**, όχι επιτυχίες — τώρα το λέει σε tooltip, αλλά
+  αν το brief πρέπει να απαντά «πόσες πέρασε», είναι δεύτερος μετρητής.
 
 - **ΝΕΟ (Γύρος 14, §4n) — τέσσερα ανοιχτά σημεία του γύρου**: (1) μια αποτυχημένη
   1η προσπάθεια εξέτασης είναι **πράσινη** («δόθηκε και βαθμολογήθηκε», ο κανόνας
