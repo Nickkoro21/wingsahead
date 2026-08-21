@@ -1135,20 +1135,50 @@ WA.renderStudent = async function (view, me, opts) {
      say whether the attempt it names actually reached it. Before the ruling
      the accented badge and "passed" were the same fact; at 80 they are not,
      and a 78 wearing «this is the attempt the verdict is read from» with no
-     further word would read as a pass it is not. */
+     further word would read as a pass it is not.
+     ROUND 16 (rulings 5A-a and 5A-b of 22/08/2026) — THE BADGE IS NOW TWO
+     FACTS, AND EITHER MAY APPEAR ALONE. «Which attempt is this» (the trial
+     word) and «did it pass» (the ·not passed chip) were welded together while
+     the only badged rows were re-sits; the two rulings pull them apart:
+       · a SINGLE SITTING that did not pass wears the verdict WITH NO TRIAL
+         WORD — a 79 sat once said «fail» only on hover before this round;
+       · the FIRST trial wears its word when the exam holds more than one
+         sitting, holder or not, so the pair 85-then-65 stops reading as one
+         anonymous row plus one attempt.
+     Both gates live in WA (examTrialShown · examNotPassed) because the CO's
+     analysis table wears the same badge and the two must not drift.
+     AND THE VERDICT IS GRADED-AND-BELOW, not «has not passed YET»: an ungraded
+     holder used to wear «· not passed» in --warn on the strength of a mark
+     nobody had given it. Ruling 5A-b would have spread that to first trials,
+     so the suffix now asks WA.examNotPassed and the badge stays PLAIN — no
+     accent, no warning — while the result is outstanding. */
   function trialBadge(e, meta) {
     const t = meta.trial || 1;
-    if (meta.series) return "";
-    if (t === 1 && !meta.alt) return "";
+    const word = WA.examTrialShown(S.data.exams || [], e, meta.alt) ? WA.examTrialWord(t) : "";
+    const bad = WA.examNotPassed(e);
+    if (!word && !bad) return "";
     const ok = WA.examPassed(e);
-    return ` <span class="badge${meta.alt ? "" : (ok ? " badge-acc" : " badge-warn")}" title="${esc(
-      (meta.alt
+    /* an ALT row is never accented and never carries the verdict chip: it
+       counts for nothing in the exam's verdict, and a red mark on a displaced
+       attempt would read as the exam's own answer (round 14's rule, kept) */
+    const say = !meta.alt && bad;
+    /* the re-sit sentence is dropped on an ΕΕΘ exactly as the grade box drops
+       it (round 15): the weekly series is not re-sat, so a tip about which
+       attempt counts is a sentence about something this row cannot have */
+    const tip = (meta.alt
         ? WA.examTrialWord(t) + " of this exam. The colour of the exam above follows the attempt it was PASSED on — this row is kept and shown, and it counts for nothing in that verdict."
-        : WA.examTrialWord(t) + " — this is the attempt the exam's verdict is read from" +
+        : (word ? word + " — this is the attempt the exam's verdict is read from"
+                : meta.series ? "A weekly theory exam, sat once"
+                : "This exam was sat once") +
           (ok ? ", and it PASSED (" + e.grade + " %)."
-              : ". No attempt has reached the pass mark yet, so the latest one stands for the exam.")) +
-      " " + WA.EXAM_PASS_TIP)
-      }">${esc(WA.examTrialWord(t))}${meta.alt || ok ? "" : " · not passed"}</span>`;
+              : bad ? (word
+                        ? ". No attempt has reached the pass mark yet, so the latest one stands for the exam."
+                        : ", and " + e.grade + " % does not reach the " + WA.passMin("exams") +
+                          " % ground-exam pass mark. The row is COMPLETE — that is what its colour says — and it did not pass, which is what this chip says.")
+                    : ". The result is not in yet.")) +
+      (meta.series ? "" : " " + WA.EXAM_PASS_TIP);
+    return ` <span class="badge${meta.alt ? "" : (ok ? " badge-acc" : (say ? " badge-warn" : ""))}" title="${
+      esc(tip)}">${esc(word)}${say ? (word ? " · " : "") + "not passed" : ""}</span>`;
   }
   function mintTrialHTML(i, e, meta) {
     if (!meta.slot || meta.alt || meta.series) return "";
@@ -1158,10 +1188,26 @@ WA.renderStudent = async function (view, me, opts) {
     if (meta.state === "owed") return "";
     const next = WA.examNextTrial(S.data.exams || [], e.exam);
     if (!next || next < 2) return "";
+    /* ── ROUND 16 · RULING 3B (22/08/2026) — THE MINT SURVIVES THE CO'S LOCK ──
+       «Το Β». A CO-entered exam row is locked, and until this round the lock
+       swallowed this button with every other control in the row (applyLocks
+       disables them all, by design and by shape). The effect was that a
+       student whose 1st sitting the CO had typed in COULD NOT RECORD THEIR OWN
+       RE-SIT — the one row of the log that is unambiguously theirs to report.
+       The lock is not weakened by a millimetre: the CO's row stays disabled
+       field by field and kept-or-dropped-never-rewritten (wa.carry_stamps
+       still refuses any save that alters it). What is unlocked is the ACT of
+       MINTING A NEW ROW, which touches nothing that is his — the minted trial
+       carries no `entered_by`, so it is the student's own line from the first
+       keystroke, and the server sees a payload in which the CO's entry comes
+       back fact for fact with a NEW sibling beside it. `applyLocks` therefore
+       skips [data-mint], and only that. */
+    const lk = coLocked(e);
     return ` <button type="button" class="cfix" data-mint="exams:${i}"
       title="${esc("Sat again? This adds the " + WA.examTrialWord(next) +
         " of " + e.exam + " as its own row, directly under this one. Each of the eight may be sat up to " +
-        WA.EXAM_TRIALS + " times and each trial is recorded once.")}"
+        WA.EXAM_TRIALS + " times and each trial is recorded once." +
+        (lk ? " The sitting above was entered by the squadron CO and stays locked — this re-sit is YOUR row, and you fill it in like any other." : ""))}"
       >+ ${esc(WA.examTrialWord(next))}</button>`;
   }
   /* ROUND 15 — THE TWO CELLS THAT CARRY THE VERDICT, EXTRACTED. The 80 % mark
@@ -1992,6 +2038,14 @@ WA.renderStudent = async function (view, me, opts) {
     /* round 12b — .frow is the same row in its table form (a <tr>) */
     for (const row of form.querySelectorAll(".rrow.is-colock, .frow.is-colock")) {
       for (const el of row.querySelectorAll("input, select, textarea, button")) {
+        /* ROUND 16 · RULING 3B — THE ONE EXCEPTION, AND IT IS AN EXCEPTION TO
+           THE SHAPE, NOT TO THE RULE. Every control in this row edits THIS row
+           and stays disabled. «+ 2nd trial» edits nothing: it appends a new,
+           student-owned row for the same exam. It sits inside the locked <tr>
+           only because that is where the student is standing when they learn
+           they must sit the exam again (round 14's placement), and the lock
+           was never meant to reach it. See mintTrialHTML. */
+        if (el.hasAttribute("data-mint")) continue;
         el.disabled = true;
       }
     }

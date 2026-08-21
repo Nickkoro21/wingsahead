@@ -2540,6 +2540,47 @@ WA.examOperativeIx = function (list, idxs) {
 WA.examPassed = function (e) {
   return !!e && WA.gradePassed(e.grade, "exams");
 };
+/* IS THERE A MARK AT ALL? — the question that has to be asked BEFORE the
+   verdict, and the one three surfaces used to answer with three inline copies
+   of the same four-clause test. A row with no grade has NOT failed; it waits. */
+WA.examGraded = function (e) {
+  const g = e ? e.grade : null;
+  return !(g === null || g === undefined || g === "") && isFinite(Number(g));
+};
+/* ── ROUND 16 — THE BADGE GATE, ONE DEFINITION FOR BOTH SURFACES ───────────
+   The student's exam row and the CO's Student-analysis row wear the SAME
+   badge, and until this round each decided for itself when to draw it. Two
+   rulings of 22/08/2026 move that decision, so it moves once, here.
+
+   (5A-a) THE VERDICT BECOMES VISIBLE ON A SINGLE SITTING. A graded exam that
+   did not reach the mark says so in a chip, whether it was sat once or three
+   times — before this round a 79 sat once wore its verdict ONLY on hover,
+   which is to say: on a phone, nowhere. `WA.examNotPassed` is that chip's
+   condition and it is GRADED-AND-BELOW, never merely «has not passed yet»: a
+   row still waiting for its result has not failed anything.
+   THE COLOUR OF THE ROW DOES NOT MOVE (still st-done). The two axes are kept
+   apart, as round 13 ruled: the colour says «is this row finished», the badge
+   says «what did it say». A PASS WEARS NOTHING — «passed» on 199 rows out of
+   200 is noise, and the absence of the chip IS the pass.
+
+   (5A-b) THE OPERATIVE 1ST TRIAL WEARS ITS WORD. The gate used to be
+   `trial > 1 || alt`, which left exactly one row in the app unnamed: the FIRST
+   trial, when it beat a later re-sit and kept the slot (85 then 65). Its own
+   displaced re-sit was badged «2nd trial» directly beneath it and the holder
+   said nothing, so the pair read as one anonymous row plus one attempt. The
+   word is now drawn whenever the record holds MORE THAN ONE SITTING of that
+   exam — §4o·5's «what counts as beside», read from the same counter that
+   already names the trial in the save dialog — and a single sitting stays
+   unbadged as to trial, which is what keeps the word off those 199 rows.
+   A SERIES ROW NEVER WEARS A TRIAL WORD: the ΕΕΘ are numbered, not re-sat. */
+WA.examTrialShown = function (list, e, alt) {
+  if (!e || WA.examSeries(e)) return false;
+  if (alt || WA.examTrial(e) > 1) return true;
+  return WA.examTrialsOf(list, e.exam).length > 1;
+};
+WA.examNotPassed = function (e) {
+  return WA.examGraded(e) && !WA.examPassed(e);
+};
 /* ROUND 15 — THE EXAMS' OWN PASS-ATTEMPT SENTENCE. WA.PASS_ATTEMPT_TIP is the
    CHECKRIDES' and quotes 60 %; a ground exam is judged at 80, so the two
    surfaces cannot share one sentence any more without one of them lying.

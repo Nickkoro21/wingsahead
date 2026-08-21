@@ -1035,7 +1035,7 @@ WA.renderAdmin = async function (view, me) {
           ${stateCell("owed")}<td class="k">&mdash;</td></tr>`;
       }
       const x = WA.exam(e.exam);
-      const has = e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade));
+      const has = WA.examGraded(e);
       /* ROUND 14 — the row says WHICH ATTEMPT it is, and an ΕΕΘ says its
          number: the CO reading two IN190 lines has to be able to tell the
          re-sit from the first sitting, and a series row names no exam at all */
@@ -1048,20 +1048,34 @@ WA.renderAdmin = async function (view, me) {
          ROUND 15 — the operative attempt is accented only when it actually
          PASSED (80 % on a ground exam). At 60 those were the same fact; at 80
          a 78 can be operative and not a pass, and an accent on it would be the
-         table telling the CO the exam is behind him. */
+         table telling the CO the exam is behind him.
+         ROUND 16 — THE MIRROR OF THE STUDENT'S OWN BADGE, and now literally so:
+         the two gates are WA.examTrialShown / WA.examNotPassed, read here and
+         in student.js and nowhere else, because the CO and the student must
+         never be told two different things about one row. Ruling 5A-a puts the
+         verdict on a SINGLE sitting (this table said «79% · fail» in the Grade
+         column and nothing in the name column — true, muted, and easy to skim
+         past on a table of ten exams); ruling 5A-b names the FIRST trial when
+         the exam holds more than one. The state colour is untouched by both. */
       const ok = WA.examPassed(e);
-      const showTrial = !ser && (tn > 1 || r.alt);
+      const word = WA.examTrialShown(s.record.exams, e, r.alt) ? WA.examTrialWord(tn) : "";
+      const say = !r.alt && WA.examNotPassed(e);
       return `<tr class="st-${esc(r.state)}">
         <td title="${esc(ser ? ser.tip : WA.examLabel(e.exam))}"><b>${esc(
           ser ? WA.examRowLabel(e) : (e.exam || "—"))}</b>${
           ser ? ` <span class="badge" title="${esc(ser.tip)}">weekly theory</span>` : ""}${
-          showTrial ? ` <span class="badge${r.alt ? "" : (ok ? " badge-acc" : " badge-warn")}" title="${esc(
-            WA.examTrialWord(tn) + (r.alt
-              ? " of this exam. It is kept and shown; the exam's verdict is read from the attempt it was PASSED on."
-              : (" — this is the attempt the exam's verdict is read from" +
-                 (ok ? ", and it PASSED." : ". No attempt has reached the pass mark yet."))) +
-            " " + WA.EXAM_PASS_TIP)}">${
-            esc(WA.examTrialWord(tn))}${r.alt || ok ? "" : " · not passed"}</span>` : ""}${
+          (word || say) ? ` <span class="badge${r.alt ? "" : (ok ? " badge-acc" : (say ? " badge-warn" : ""))}" title="${esc(
+            (r.alt
+              ? WA.examTrialWord(tn) + " of this exam. It is kept and shown; the exam's verdict is read from the attempt it was PASSED on."
+              : (word ? word + " — this is the attempt the exam's verdict is read from"
+                      : ser ? "A weekly theory exam, sat once" : "This exam was sat once") +
+                (ok ? ", and it PASSED."
+                    : say ? (word ? ". No attempt has reached the pass mark yet."
+                                  : ", and " + WA.pct(e.grade) + " does not reach the " +
+                                    WA.passMin("exams") + " % ground-exam pass mark. The row is COMPLETE — that is what its colour says — and it did not pass, which is what this chip says.")
+                          : ". The result is not in yet.")) +
+            (ser ? "" : " " + WA.EXAM_PASS_TIP))}">${
+            esc(word)}${say ? (word ? " · " : "") + "not passed" : ""}</span>` : ""}${
           x && x.cond ? ` <span class="badge badge-acc" title="Foreign SPs only — a HAF student does not owe this exam">foreign SPs only</span>` : ""}</td>
         <td>${esc(fmtD(e.date))}</td>
         ${has ? `<td class="num" title="${esc(WA.pct(e.grade) + " — " +
@@ -1688,14 +1702,23 @@ WA.renderAdmin = async function (view, me) {
           <td>${esc(WA.rowStateDef(r.state).label)}</td></tr>`;
       });
       const examCn = WA.stateCounts("exams", s.record.exams);
+      /* ROUND 16 ON PAPER — ruling 5A-b reaches the brief too, through the
+         helper §4o·5 already built for the save dialog. On screen the 1st trial
+         now wears its word whenever the exam was sat more than once; on paper
+         the same two lines were printed «IN190» and «IN190 · 2nd trial», where
+         the bare one reads as THE EXAM and not as one of its sittings — the
+         precise misreading that ruling was made about, and paper has neither
+         hover nor colour to correct it. `named` is set per exam, so the 199
+         exams sat once keep their bare name. */
+      const exNamed = WA.examsWithTrials(s.record.exams);
       const examRows = WA.slotRows("exams", s.record.exams).filter((r) => r.e).map((r) => {
         const e = r.e;
-        const has = e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade));
+        const has = WA.examGraded(e);
         /* ROUND 14 ON PAPER — the trial and the ΕΕΘ number are part of the row's
            NAME (WA.examRowLabel), because monochrome print has no badge colour
            to tell a re-sit from the first sitting with */
         const ser = WA.examSeries(e);
-        return `<tr><td>${esc(WA.examRowLabel(e))}${WA.coTag(e)}${
+        return `<tr><td>${esc(WA.examRowLabel(e, !!exNamed[String(e.exam || "").trim()]))}${WA.coTag(e)}${
             ser ? ` <span class="pr-n">(weekly theory)</span>` : ""}${
             !ser && r.alt ? ` <span class="pr-n">(not the operative attempt)</span>` : ""}${
             (WA.exam(e.exam) || {}).cond ? ` <span class="pr-n">(foreign SPs only)</span>` : ""}</td>

@@ -2735,6 +2735,13 @@ seniority, and it has three levels:
 3. **No call sign sorts last within its own air force**, by surname — such a
    person is not un-ranked, they are un-numbered.
 
+> **RULED 22/08/2026 (round 16, §4r ruling (b)) — LEVEL 3 IS A DEAD LETTER, AND
+> IT STAYS.** *No instructor is ever without a call sign*: some numbers are
+> deliberately skipped, and **students never have one**. The comparator is
+> **kept exactly as written and is not exercised** — it is there so that a
+> roster row missing its number lands somewhere definite instead of wherever the
+> database happened to return it. Nothing to change; the question is closed.
+
 **IT LIVES IN TWO PLACES BECAUSE IT HAS TO.** `WA.seniorityKey` / `WA.bySeniority`
 on the client, `wa.seniority_key(people)` (over `wa.natkey`, which pads digit
 runs to eight) on the server. The instructor **picker's payload is surnames and
@@ -3217,6 +3224,12 @@ row offers a disabled *“+ 2nd trial”*, awaits the user's ruling on whether t
 should be able to mint a re-sit on a row the student may not touch. The button
 stays disabled until then.
 
+> **RULED IN ROUND 16 (§4r·1), 22/08/2026 — «Το Β».** The question is answered
+> the other way round from the way it is put here: the **student** mints, on the
+> CO's row, and the row itself stays locked field for field. `applyLocks` now
+> skips `[data-mint]` and nothing else; the server needed no change and was made
+> to prove it.
+
 ### CACHE-BUSTER
 
 `?v=20260821c` on **`app.js`, `student.js`, `admin.js` only** — the three files
@@ -3409,11 +3422,23 @@ mark)»**, because paper is monochrome and has no hover. · Entries CSV — the
 verdict travels in **Detail** for both shapes, and *Counts* now distinguishes
 **«yes»** from **«yes — but no attempt has passed yet»**.
 
+> **WIDENED IN ROUND 16 (§4r·2-4).** Two of the sentences above describe a badge
+> only re-sits could wear. On both screen surfaces the chip now also appears on a
+> **single sitting** (`«not passed»`, no trial word), the **1st trial** wears its
+> word whenever the exam was sat more than once, and *“not passed”* means
+> **graded and below** — an operative attempt still waiting for its result wears a
+> **plain** badge, not `--warn`. The 80 % itself did not move.
+
 ### WHAT WAS NOT TOUCHED
 
 The **CO-lock mint behaviour** and the **seniority wording** (both still awaiting
 the user's rulings, §4o), `styles.css` (the `badge-warn` token already existed),
 and every threshold that is not a ground exam's.
+
+> **BOTH RULED IN ROUND 16 (2026-08-22)**: the mint in §4r·1 (*«Το Β»* — the
+> student mints on the CO's locked row), the seniority wording in §4r's ruling
+> **(b)** (no instructor is ever without a call sign; the within-air-force
+> placement stays as a **dead-letter fallback**). Neither is open any more.
 
 ### CACHE-BUSTER
 
@@ -3495,6 +3520,14 @@ The two commits ahead of `origin/main` and this one are **not pushed**.
 
 ### OPEN ITEMS RAISED BY THIS ROUND
 
+> **ITEMS 1, 2 AND 3 ARE CLOSED — RULED 22/08/2026, ROUND 16 (§4r).** (1) is
+> **CONFIRMED**: *«60% f/s, flights»* — the F/S is judged at 60 like a flight,
+> there is **no third threshold**, and nothing had to change. (2) is answered
+> **«Το Α»**: a visible `badge-warn` chip, and **the row colour stays `st-done`**
+> — the fifth state is declined on the record. (3) is closed **without a second
+> counter**: every row that did not pass now says so on its own face, so the
+> count keeps its meaning. **Item 4 is an invariant, not a question, and stays.**
+
 1. **«F/S at 50» has no referent in WA.** The brief for this round named 50 % as
    the F/S threshold. **There is no 50 % pass mark anywhere in this
    application** — the only 50 is the **floor of the «ΣΚ» band** (ΠΔ 151/13,
@@ -3525,7 +3558,8 @@ The two commits ahead of `origin/main` and this one are **not pushed**.
 
 No new directive. Round 15 shipped one ruling; the verify pass over what it
 shipped found **one defect and two hygiene items**, and this round is those three
-and **nothing else**. `db/schema.sql` is **byte-identical**. The three open
+and **nothing else**. `db/schema.sql` is **byte-identical**. *(All three were
+ruled the next day — round 16, §4r.)* The three open
 RULINGS of §4p (a failed exam's colour, the operative-attempt badge, the F/S
 mark) are **untouched — they are the user's**.
 
@@ -3700,6 +3734,356 @@ exams. It is invisible (whitespace collapses) and it is **pre-existing**, so it
 was left exactly as found: this round was three named items and nothing else.
 The one-line cure is the one `refreshExamLag` now carries.
 
+## 4r. Round 16 (2026-08-22) — THE MINT SURVIVES THE CO'S LOCK, AND THE VERDICT STOPS HIDING
+
+Three changes and four rulings-on-paper. Two of the three changes answer
+questions this document has been carrying open since round 14b and round 15; the
+third is the ruling those two produced between them.
+
+> The user's own words, quoted as spoken: on the CO-lock question — **«Το Β»**;
+> on the failed-exam question — **«Το Α»** (22/08/2026). The lettered options
+> they name are set out under each ruling below.
+
+`db/schema.sql` is **byte-identical** this round — asserted, not assumed
+(`git diff --name-only` names it nowhere). **The deployment gate does NOT
+apply**, and the round is pushed. That is not luck: the one change that could
+have needed the server (ruling 3B) was **tested against the real RPC first**,
+and the guard turned out to be right already — see item 1 below.
+
+---
+
+### 1. RULING 3B — THE MINT SURVIVES THE CO'S LOCK
+
+**The question, as §4o left it** (*“WHAT WAS NOT TOUCHED”*, round 14b): a
+CO-locked exam row offered a **disabled** *“+ 2nd trial”*, and the verify pass
+asked whether that was right. It was not. The effect was that **a student whose
+first sitting the CO had typed in could not record their own re-sit** — and a
+re-sit is the one line of that exam nobody but the student can report.
+
+**The ruling is B: unlock ONLY the mint.**
+
+| | before | after |
+|---|---|---|
+| the CO's row — its own fields | disabled | **disabled** (unchanged) |
+| the CO's row — clear / remove | disabled | **disabled** (unchanged) |
+| the CO's row — the payload contract | kept or dropped, never rewritten | **kept or dropped, never rewritten** (unchanged) |
+| **«+ 2nd trial» on that row** | **disabled** | **enabled** |
+| the minted row | — | a **NEW, student-owned** row: no `entered_by`, editable, removable, normal in every way |
+
+**WHY THIS IS AN EXCEPTION TO A SHAPE AND NOT TO A RULE.** `applyLocks` disables
+every `input, select, textarea, button` inside a `.is-colock` row — by design,
+so that no delegated handler can ever fire against a locked row. Every one of
+those controls **edits that row**. The mint edits nothing: it **appends a
+sibling**. It sits inside the locked `<tr>` only because round 14 put the
+affordance where the student is standing when they learn they must sit the exam
+again. The lock was never meant to reach it, and now it does not:
+`applyLocks` skips `[data-mint]`, **and only that**.
+
+**THE SERVER WAS ALREADY RIGHT — AND WAS MADE TO PROVE IT.** `wa.carry_stamps`
+matches each stored CO entry against the payload by `wa.entry_core` (the entry
+**minus** its stamp) and refuses the save if any CO entry went unclaimed. A new
+row carrying `trial: 2` has a different core, so it claims nothing and takes
+nothing away: the CO's entry still matches itself. That is the reasoning; the
+**proof is six real RPC calls** (item 1 of the self-verification). **No schema
+change, so no gate.**
+
+The button says so on a locked row. Its title gains one sentence and only
+there: *“The sitting above was entered by the squadron CO and stays locked —
+this re-sit is YOUR row, and you fill it in like any other.”*
+
+**The caps are unmoved.** One row per `(exam, trial)`, three trials, across the
+mix: the CO's row is trial 1, the student mints 2 and then 3, and a 4th is
+refused by the server (`out of range 2-3`) — and the affordance is gone from the
+form before the student can ask for it. Remove the 3rd and *“+ 3rd trial”*
+returns.
+
+---
+
+### 2. RULING 5A-a — THE NOT-PASSED VERDICT BECOMES VISIBLE ON A SINGLE SITTING
+
+**The question, as §4p·2 left it**: *“a failed exam is still green”*. `CO190
+79 %` was `st-done` — a complete row — and the only place the row said it had
+failed was **the hover title**, which on a phone is nowhere. The options put
+were **(A)** say it in a badge and leave the colour alone, or **(B)** a fifth
+row state, *finished-but-not-passed*, in its own colour.
+
+**The ruling is A.** A graded ground exam — one of the eight **or** an ΕΕΘ —
+whose mark is below `WA.passMin("exams")` wears a visible **`badge-warn` chip
+reading «not passed»**. **The row colour does not move: it stays `st-done`.**
+
+> **THE TWO AXES STAY APART, AND THIS ROUND IS THE RULING THAT SAYS SO OUT
+> LOUD.** The colour answers *“is this row finished?”* — round 13's question,
+> asked of every one of the 181 seeded slots in the same words. The badge
+> answers *“what did it say?”*. Folding the second into the first would make
+> `done` mean two things at once and would give the exams a state no other
+> section can have. Recorded here as the ruling, so a later round does not
+> re-open it as an oversight.
+
+**A PASS WEARS NOTHING.** There is no *“passed”* chip: on the 199 exams out of
+200 that are passed at the first sitting it would be noise, and the **absence**
+of the chip is the pass. This is the same economy as the trial word itself.
+
+**WHERE THE CHIP SITS — and the one place this round departs from the letter of
+the brief.** The brief said *“next to the grade”*. It sits in the **exam-name
+cell**, beside (and combined with) the trial word — because the brief also said
+*“the same badge language”* and *“trials keep their existing combined badges
+«2nd trial · not passed»”*, and those two badges are **one badge**: `«1st trial
+· not passed»` is the verdict and the trial word in a single chip. Had the
+single-sitting chip gone into the Grade column, **the same fact would live in a
+different column depending on how many times the exam was sat** — the one
+outcome the ruling was made to prevent. One fact, one column. (On the CO's
+table the Grade cell independently still reads `79% · fail`, as it has since
+round 15; that is the CO's own column and it was not touched.)
+
+---
+
+### 3. RULING 5A-b — THE OPERATIVE 1ST TRIAL WEARS ITS BADGE
+
+The gate was `trial > 1 || alt`, which left **exactly one row in the
+application unnamed**: the **first** trial, when it beat a later re-sit and kept
+the slot. `85` then a `65` re-sit rendered as
+
+```
+IN290                       85 %          ← the holder, wearing nothing
+IN290  «2nd trial»          65 %  is-alt
+```
+
+— an anonymous row plus an attempt, when it is in fact **two attempts and the
+first one won**. The gate is now **“does the record hold more than one sitting
+of this exam?”** (`WA.examTrialsOf(list, id).length > 1`), which is §4o·5's
+*“what counts as beside”* read from the same counter that already names the
+trial in the save dialog. So:
+
+* **`85` then `65`** → the holder wears **`«1st trial»` in `badge-acc`**, the
+  re-sit stays `is-alt` with a plain **`«2nd trial»`**;
+* **`79` with a re-sit ordered but not yet marked** → the holder wears
+  **`«1st trial · not passed»` in `badge-warn`**;
+* **a single sitting stays unbadged as to trial** — which is what keeps the word
+  off those 199 rows. Its verdict is ruling 5A-a's business, not this one's.
+* **an ΕΕΘ never wears a trial word at all**: the weekly series is numbered, not
+  re-sat.
+
+**ONE GATE, TWO SURFACES.** Both decisions now live in `app.js`
+(`WA.examTrialShown` · `WA.examNotPassed`, with `WA.examGraded` under them) and
+are read by the student's exam row **and** the CO's Student-analysis row. Before
+this round each surface carried its own copy of the condition; the two rulings
+would have had to be applied twice and could then have drifted. The **sentences**
+stay per-surface (the student's names the percentage, the CO's does not) —
+that is the round-12b `WA.debriefWord` pattern: *the word is the same
+everywhere, the sentence is surface-aware.*
+
+---
+
+### 4. THE FREE CORRECTION THIS ROUND HAD TO MAKE — «NOT PASSED» IS NOT «NOT PASSED YET»
+
+The suffix and the `--warn` colour were driven by `!WA.examPassed(e)`, which is
+**true of an ungraded row**. While the only badged rows were re-sits this was
+nearly invisible; ruling 5A-b would have spread it to **first** trials, so the
+round could not ship without it. The suffix now asks `WA.examNotPassed`
+(**graded AND below the mark**), and an operative attempt whose result is not in
+yet wears a **plain** badge — no accent, no warning — with the title *“The
+result is not in yet.”*
+
+**A row that has not been marked has not failed anything.** Measured live: two
+trials of one exam, both dated, neither graded → the holder used to read
+**`«2nd trial · not passed»` in `--warn`**; it now reads **`«2nd trial»`**,
+plain. Same gate, therefore, as the chip of ruling 5A-a — which is the point:
+one definition of *“did not pass”* in the whole application.
+
+---
+
+### 5. AND THE SAME NAMING REACHES PAPER
+
+Ruling 5A-b's misreading exists on the printed brief too, and paper has neither
+hover nor colour to correct it: the two lines printed **`IN190`** and
+**`IN190 · 2nd trial`**, where the bare one reads as *the exam* rather than as
+*one of its sittings*. The brief now passes the `named` flag that §4o·5 built
+for the save dialog (`WA.examRowLabel(e, named)`, per exam via
+`WA.examsWithTrials`), so a re-sat exam prints **`IN190 · 1st trial`** while
+`CO190`, sat once, keeps its bare name. The verdict itself was already on paper
+in words since round 15 (*“(pass)” / “(below the 80 % pass mark)”*) — that is
+why paper needed nothing from ruling 5A-a.
+
+---
+
+### WHAT WAS NOT TOUCHED
+
+* **`db/schema.sql`** — byte-identical, asserted. The CO guard was proven
+  correct as it stands (six live RPCs); nothing was “adjusted minimally”
+  because nothing was wrong.
+* **`styles.css`** — `badge`, `badge-acc` and `badge-warn` all already existed;
+  this round draws them, it does not define them. Its buster is unchanged.
+* **`instructor.js`** — untouched, buster unchanged.
+* **The entries CSV.** It renders no badge. Its `Detail` column has carried the
+  verdict in words for **both** shapes since round 15 and its `Counts` column
+  already distinguishes *“yes”* · *“yes — but no attempt has passed yet”* ·
+  *“no — another attempt counts”*, so a spreadsheet reader can already tell the
+  sittings apart. Deliberately left alone: round 15b's own residual was an
+  argument-position defect in exactly this call, and a third surface was not
+  asked for.
+* **`slotsDone` and every counter.** See the closure of §4p·3 below — the ruling
+  closes that item **without** a second counter, and no arithmetic moved.
+* **The confirmation dialogs** — read live, word for word unchanged.
+
+### CACHE-BUSTER
+
+`?v=20260822a` on **`app.js`, `student.js`, `admin.js`** — the three files this
+round changed. **`instructor.js` keeps `?v=20260821d`**; `styles.css`,
+`config.js` and `items-catalog.js` keep `?v=20260821b`.
+
+### SELF-VERIFICATION — ROUND 16 (live, local stack, the real forms and the real RPCs)
+
+1. **THE CO GUARD, PROVEN — six real RPC calls, no schema change.** The CO wrote
+   `IN190 · 05/08/2026 · 72` through `public.admin_save_student_record`; it
+   stored as `{"date":"2026-08-05","exam":"IN190","grade":72,"entered_by":"admin"}`.
+   Then, through `public.save_student_record` **as the student**:
+   * **(A) accepted** — the CO row returned unchanged **plus** `trial:2`;
+   * **(B) accepted** — and `trial:3` on top of it;
+   * **(C) refused** — `trial:4` → *“out of range 2-3 (exams[3].trial)”*;
+   * **(D) refused** — two rows both `trial:2` → *“two rows are the same trial of
+     the same ground exam — each of the eight may be sat once per trial (1st,
+     2nd, 3rd)”*;
+   * **(E) refused** — the CO's grade changed 72 → 92 → *“this entry was set by
+     the squadron CO and only the CO can change it …”*;
+   * **(F) refused** — the CO's row **dropped** → the same refusal.
+   The lock holds in both directions it can be broken; the mint passes through
+   it. **`db/schema.sql` was not opened.**
+2. **THE LOCKED ROW, READ OFF THE LIVE DOM.** On the student's own form the CO
+   row is `frow st-done is-co is-colock`, and every control's `.disabled` reads
+   `date=true · grade=true · clear=true` — **`[data-mint]=false`**, the one
+   enabled control in the row.
+   **Control experiment**: `.click()` on a *disabled* button of the same row
+   dispatched **nothing** (a listener attached for the test never fired, the row
+   count did not change), so the mint's success is not an artefact of the probe.
+3. **THE MINT, END TO END, THROUGH THE REAL FORM.** Clicking it produced a new
+   `st-owed` row, **student-owned and editable** (`date`/`grade` not disabled),
+   with the caret already in its date box, and the toast *“2nd trial of IN190
+   added …”*. Date `19/08/2026`, then `9` and `1` typed with
+   `execCommand('insertText')` (the real caret): value went `9` → **`91`**, the
+   **same DOM node** throughout (expando intact), still focused. Saved through
+   the form's own **Confirm & save**. **In the stored record the CO's entry is
+   byte-identical** — compared as text against the exact stored string, `t` —
+   **and the minted row carries no `entered_by`**, `f`.
+4. **THE DIALOG'S WORDING IS UNCHANGED**, read off the live modal:
+   *“Save 1 change to your record? … 1 change · Ground exams · IN190 · 2nd trial ·
+   19/08/2026 — added (grade 91 %)”* and the three buttons *Keep editing ·
+   Discard changes · Confirm & save*. The CO's row is **not** listed as a change,
+   because it is not one.
+5. **RULING 5A-a, ON THE KEYSTROKE.** A single-sitting `CO190`: `79` →
+   **`[badge badge-warn] not passed`**, row **`st-done`**; `80` → **no badge at
+   all**, row still `st-done`; back to `79` → the chip returns. An untouched
+   `LNAV790` (no date, no grade) wears nothing and stays `st-owed` — *not marked
+   is not failed*. Title on the chip, read off the live DOM: *“This exam was sat
+   once, and 79 % does not reach the 80 % ground-exam pass mark. The row is
+   COMPLETE — that is what its colour says — and it did not pass, which is what
+   this chip says.”* (The CO-locked `IN190 72 %` of item 2 wore the same chip and
+   the same sentence with its own number, before its re-sit existed.)
+6. **RULING 5A-b, THE EXACT PAIR FROM THE BRIEF.** `IN290` at `85` **alone** →
+   **no badge**. Mint the 2nd trial → the holder immediately wears
+   **`[badge badge-acc] 1st trial`** and the new row `slotc is-alt` with plain
+   **`2nd trial`**. Fill the re-sit with `65` → unchanged: holder `«1st trial»`
+   accented (title *“…and it PASSED (85 %)”*), the `65` **`is-alt`**.
+7. **THE FAILED FIRST-TRIAL HOLDER.** Same exam dropped to `79` with the re-sit
+   dated but ungraded → the holder reads **`«1st trial · not passed»`** in
+   `badge-warn`, title *“No attempt has reached the pass mark yet, so the latest
+   one stands for the exam.”*
+8. **THE FREE CORRECTION, MEASURED.** Both trials dated, **neither graded** →
+   the holder reads **`«2nd trial»`, plain** (no `--warn`, no suffix), title
+   *“The result is not in yet.”* — where before this round it read
+   `«2nd trial · not passed»`.
+9. **THE ΕΕΘ, BOTH WAYS.** `ΕΕΘ 1` at `79` → `[badge] weekly theory` **plus**
+   `[badge badge-warn] not passed`, **no trial word**, and the title **drops the
+   re-sit clause** exactly as the grade box has since round 15: *“A weekly theory
+   exam, sat once, and 79 % does not reach the 80 % ground-exam pass mark …”*.
+   `ΕΕΘ 2` at `80` → `weekly theory` only. Neither offers a mint.
+10. **THE CAPS AND THE AFFORDANCE.** With trials 1 and 2 present the button reads
+    *“+ 3rd trial”*; minting it makes the button **disappear from every row of
+    that exam** (there is no 4th to offer); **✕** on the 3rd brings
+    *“+ 3rd trial”* back. The badges of the other two rows are unaffected
+    throughout.
+11. **THE CO'S STUDENT-ANALYSIS TABLE — the mirror, read off the live DOM** on
+    the saved record:
+    `CO190 «not passed» 79% · fail done self` ·
+    `IN190 «2nd trial»(acc) 91% done self` ·
+    `IN190 «1st trial»(plain) 72% · fail done CO` ·
+    `IN290 «1st trial»(acc) 85% done self` ·
+    `IN290 «2nd trial»(plain) 65% · fail done self` ·
+    `ΕΕΘ 1 «weekly theory» «not passed» 79% · fail done self` ·
+    `ΕΕΘ 2 «weekly theory» 80% done self`.
+    **All seven rows `st-done`** — the colour did not move on either surface.
+12. **THE PRINTED BRIEF** (`beforeprint` builder, live): `CO190 06/08/2026 79%
+    (below the 80 % pass mark) done` · `IN190 · 2nd trial … 91% (pass)` ·
+    `IN190 · 1st trial CO (not the operative attempt) … 72% (below …)` ·
+    `IN290 · 1st trial … 85% (pass)` · `IN290 · 2nd trial (not the operative
+    attempt) … 65% (below …)` · `ΕΕΘ 1 (weekly theory) … 79% (below …)` ·
+    `ΕΕΘ 2 (weekly theory) … 80% (pass)`. The **1st trials are named on paper**
+    (item 5 above) while `CO190`, sat once, is not.
+13. **`node --check` clean** on all six JS files. **Zero console messages** (not
+    just zero errors) on the student form, on the admin's four tabs **including
+    the `beforeprint` builder**, and on the instructor form.
+14. **Busters live**: the page loads `app.js?v=20260822a`, `student.js?v=…a`,
+    `admin.js?v=…a`, and `instructor.js?v=20260821d` unchanged.
+15. **`db/schema.sql` byte-identical** — `git diff --name-only` lists only
+    `app/app.js`, `app/student.js`, `app/admin.js`, `app/index.html`.
+16. **Hygiene**: the round's probes needed real writes, so the three tables were
+    `pg_dump`ed before the round and compared after. The fixture record (created
+    on a student who had none) was **deleted**; `people` **42**, `student_records`
+    **3**, `proposals` **9**, record md5 **`201d44b3…` identical before and
+    after**, and the two dumps are **byte-identical** once `pg_dump`'s own
+    per-session `\restrict` nonce is masked (**21 397 bytes, md5 `687c80f2…`
+    both**). **0** stored records carry an `EETH` row; **0** fixture people.
+    Browser tabs closed.
+17. **Privacy grep — 0 real hits in the diff.** All **152** live identifiers of
+    the local `people` table (first name · last name · MN · call sign · token),
+    word-boundary and Unicode-aware, against **this round's whole diff**:
+    **4 matches, every one of them the standing false positive** — the *role
+    phrase* **«squadron CO»** in prose (the CO account's `last_name` **is** that
+    role placeholder, with no first name, which is why the phrase matches at
+    all); three are English UI/comment prose and the fourth is **this very
+    sentence** naming the exception.
+    **No name, MN, call sign or token reached a tracked file.** Repo-wide over
+    the 17 tracked text files the known pre-existing set is unchanged and none of
+    it sits on a line this round touched: the same role phrase, the two demo
+    surnames §4f already names, and the example call signs `P-xx` in the
+    ordering docs — the identical set §4q·12 recorded, and this round adds
+    nothing to it.
+
+### THE FOUR RULINGS RECORDED ON PAPER THIS ROUND (no code)
+
+**(a) §4p·1 — «60% f/s, flights» (22/08/2026). CLOSED as CONFIRMED.** The
+round-15 brief's *“F/S at 50”* had no referent in this application, and the
+question was put deliberately. The answer is that **a simulator sortie is judged
+at 60, exactly like a flight** — which is what `WA.passMin()` already returns for
+`fs`, so **nothing changed and nothing had to**. The only 50 in Wings Ahead
+remains the **floor of the «ΣΚ» band** of ΠΔ 151/13, which is a
+*characterisation* and not a pass mark. There is **no third threshold**: 60 for
+flying (flights, F/S, evaluations, solos, FPC/CEF) and 80 for written ground
+exams, and that is the whole list. Noted the same day: **the FDMS bridge report
+aligns its own constant to the same number**, so the two applications state one
+rule.
+
+**(b) The seniority “no call sign” fallback — CLOSED as a dead letter.** §4n·4
+level 3 says *“no call sign sorts last within its own air force, by surname”*.
+The user states that **no instructor is ever without a call sign** — some numbers
+are deliberately skipped, and **students never have one**. The comparator is
+therefore **kept exactly as written and is not exercised**: it is a
+**dead-letter fallback**, there so that a roster row missing its number lands
+somewhere definite instead of wherever the database happened to return it. No
+code, no wording change, and the question is not open any more.
+
+**(c) §4p·2 — CLOSED by change 2 of this round.** *“A failed exam is still
+green”* is answered: **a visible badge, and the colour does not move.** The fifth
+row state (*finished, not passed*) is **declined**, on the record, for the reason
+set out in item 2 above.
+
+**(d) §4p·3 — CLOSED by changes 2 and 3, and WITHOUT a second counter.** The
+question was whether *“4 of 8 exams”* — which counts exams **sat and marked** —
+ought to answer *“how many has he PASSED?”* instead, or in addition. It does not
+need to: after this round **every exam row that did not pass says so on its own
+face**, on both surfaces and on paper, so the CO reading the count can read the
+answer straight off the table beneath it. The counter keeps its meaning and its
+tooltip; **no arithmetic changed**.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -3839,6 +4223,37 @@ The one-line cure is the one `refreshExamLag` now carries.
 
 ## 7. Open items
 
+- **ΑΠΟΦΑΝΣΕΙΣ 2026-08-22 (Γύρος 16, §4r) — ΤΕΣΣΕΡΙΣ, ΚΑΙ ΚΛΕΙΝΟΥΝ ΠΕΝΤΕ ΣΗΜΕΙΑ.**
+  1. **«Το Β» — το mint επιβιώνει του κλειδώματος του Διοικητή.** Σε γραμμή
+     εξέτασης που **έγραψε ο Διοικητής**, ο μαθητής μπορεί πλέον να πατήσει
+     «+ 2nd trial»: η γραμμή του Διοικητή **μένει κλειδωμένη πεδίο-πεδίο** και
+     ταξιδεύει στο save αυτούσια (kept-or-dropped-never-rewritten), αλλά η
+     **νέα** γραμμή είναι **δική του**, χωρίς `entered_by`. Ξεκλειδώνει **μόνο**
+     το `[data-mint]` — τίποτε άλλο. Ο server **δεν χρειάστηκε αλλαγή** και το
+     απέδειξε σε 6 πραγματικά RPC (2 δεκτά, 4 αρνήσεις). Κλείνει το ανοιχτό
+     εύρημα (c) του Γύρου 14b (§4o).
+  2. **«Το Α» — η ετυμηγορία γίνεται ΟΡΑΤΗ και σε μονή εξέταση.** Βαθμολογημένη
+     γραπτή (μία από τις οκτώ **ή** ΕΕΘ) κάτω από το 80 φοράει **ορατό chip
+     «not passed»** (`badge-warn`)· **το χρώμα της γραμμής ΔΕΝ αλλάζει**
+     (`st-done`). Οι δύο άξονες μένουν χωριστοί: το χρώμα λέει «τελείωσε η
+     γραμμή», το badge λέει «τι είπε». **Πέμπτη κατάσταση: ΑΠΟΡΡΙΠΤΕΤΑΙ.**
+     Κλείνει το §4p·2.
+  3. **Η λειτουργική 1η προσπάθεια φοράει το badge της.** Όταν η εξέταση έχει
+     **2+ προσπάθειες**, ο κάτοχος της θυρίδας φοράει «1st trial» (και
+     «1st trial · not passed» αν δεν πέρασε)· η μονή εξέταση μένει **χωρίς**
+     λέξη trial. Ίδια πύλη σε **δύο** επιφάνειες (`WA.examTrialShown`), και το
+     ίδιο όνομα πλέον **και στο τυπωμένο brief**. Κλείνει το §4p·3 — **χωρίς
+     δεύτερο μετρητή**: κάθε γραμμή που δεν πέρασε το λέει μόνη της.
+  4. **«60% f/s, flights» — ΕΠΙΒΕΒΑΙΩΝΕΤΑΙ.** Το F/S κρίνεται στο **60** όπως η
+     πτήση· **δεν υπάρχει τρίτος αριθμός**. Η WA το έκανε ήδη, άρα **δεν άλλαξε
+     τίποτα**. Το μόνο 50 παραμένει το κατώφλι της ζώνης «ΣΚ» (χαρακτηρισμός,
+     όχι βάση). Την ίδια ημέρα **το FDMS bridge report ευθυγραμμίζει τη σταθερά
+     του** στον ίδιο αριθμό. Κλείνει το §4p·1.
+  5. **Αρχαιότητα — «χωρίς call sign» = ΝΕΚΡΟ ΓΡΑΜΜΑ.** **Κανένας εκπαιδευτής
+     δεν είναι ποτέ χωρίς call sign** (κάποιοι αριθμοί παραλείπονται σκόπιμα· οι
+     **μαθητές δεν έχουν ποτέ**). Το 3ο επίπεδο του comparator (§4n·4) **μένει
+     ως έχει και δεν ενεργοποιείται** — υπάρχει ώστε μια ελλιπής γραμμή roster
+     να προσγειώνεται κάπου ορισμένα. Κλείνει, χωρίς αλλαγή κώδικα.
 - **ΑΠΟΦΑΝΣΗ 2026-08-21 (Γύρος 15, §4p) — ΤΟ ΚΑΤΩΦΛΙ ΤΩΝ ΓΡΑΠΤΩΝ ΕΞΕΤΑΣΕΩΝ ΕΙΝΑΙ
   80 %.** «80% για εξετασεις εδαφους, 60% για πτησεις. Πλεον εχουμε κανει και το
   mapping.» Κλείνει το ανοιχτό σημείο 1 του Γύρου 12b: **δύο διαφορετικές
@@ -3848,7 +4263,11 @@ The one-line cure is the one `refreshExamLag` now carries.
   *χαρακτηρισμός*, όχι βάση επιτυχίας: ένα 78 σε γραπτή είναι ακόμη «ΛΚ» και απλώς
   δεν περνάει). Άλλαξε **μία** συμπεριφορά: ποια προσπάθεια «πιάνει» τη θυρίδα
   (`WA.examOperativeIx`) — ένα 78 σε 2nd trial δεν την πιάνει πια ως επιτυχία.
-- **ΝΕΟ (Γύρος 15, §4p) — τρία ανοιχτά σημεία**: (1) το **«F/S στο 50»** της
+- ~~**ΝΕΟ (Γύρος 15, §4p) — τρία ανοιχτά σημεία**~~ — **ΚΑΙ ΤΑ ΤΡΙΑ ΕΚΛΕΙΣΑΝ
+  στον Γύρο 16 (22/08/2026, §4r)**: το (1) ως **ΕΠΙΒΕΒΑΙΩΣΗ** (60, χωρίς αλλαγή),
+  το (2) με **«Το Α»** (ορατό badge, το χρώμα μένει), το (3) **χωρίς δεύτερο
+  μετρητή**. Το αρχικό κείμενο μένει ως ίχνος:
+  (1) το **«F/S στο 50»** της
   εντολής **δεν αντιστοιχεί σε τίποτα** μέσα στην εφαρμογή — το μόνο 50 είναι το
   κατώφλι της ζώνης «ΣΚ» και το F/S κρίνεται στο 60 όπως η πτήση· **ζητείται
   απόφανση** αν το simulator υποτίθεται ότι περνάει στο 50 (θα ήταν τρίτος
@@ -3877,6 +4296,9 @@ The one-line cure is the one `refreshExamLag` now carries.
   ούτε παρονομαστή («3 owed» = τρία που κατέγραψε κάποιος, όχι «3 από N»)· (4) το
   panel οδηγεί σε **ενότητες**, όχι σε γραμμές — ένα «πήγαινέ με στην πρώτη γραμμή
   που χρωστάω» είναι ένα κλικ παραπάνω στο ίδιο component.
+  **Το (1) ΕΚΛΕΙΣΕ στον Γύρο 16 (§4r·2, «Το Α»)**: το χρώμα **μένει** —
+  η γραμμή είναι πλήρης — και η ετυμηγορία λέγεται με **badge**, όχι με γκρι.
+  Τα (2), (3), (4) παραμένουν ανοιχτά.
 
 - ~~Weighted-score formula visible & adjustable? (default 3/2/1)~~ — ΑΠΑΝΤΗΘΗΚΕ
   στον Γύρο 10 (§4j): βάρη **10/8/5/3/1** ορισμένα από τη διοίκηση, τύπος ορατός
