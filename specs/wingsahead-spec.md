@@ -945,7 +945,7 @@ his behalf, it is **excluded from the mean** (not scored zero), and the surfaces
 say *"has submitted but has not formed a view yet"*, which round 8's rule about
 the two silences still requires to be different from *"has not submitted"*.
 
-### THE FORM — ONE RADIO GROUP, AND A THIN RULE BEFORE THE FIFTH
+### THE FORM — ONE RADIO GROUP, AND A THIN RULE BEFORE THE FIFTH *(round 10; the rule moved up one in round 14 — §4n·5)*
 
 Per student, **one `role="radiogroup"` of five real radios in scale order**
 (arrow keys walk the scale, screen readers announce "3 of 5"), each showing its
@@ -970,7 +970,8 @@ next step down, and it is not allowed to read as the continuation of a list.
 does not offer by itself, and the only way to un-say something an instructor did
 not mean to say.
 
-**JUDGEMENT — no floating Save here (and why).** §4i·3 gave the *student* form a
+**JUDGEMENT — no floating Save here (and why)** *(round 10, reversed in round 14
+— see the block below)*. §4i·3 gave the *student* form a
 floating dirty-state Save because that form is metres long and its Save scrolls
 out of reach. This form is a five-option question whose Save sits inside the same
 small card, a thumb away — and there is **one card per student**, so a floating
@@ -3045,6 +3046,194 @@ so the gate is stated here for whoever runs the deployment.
    still owe”*. A per-section “jump to the first owed row” would be one more
    click on the same component; it was not asked for and is not built.
 
+---
+
+## 4o. Round 14b (2026-08-21) — THE VERIFY SWEEP: FIVE FINDINGS OF THE ROUND-14 ADVERSARIAL READ
+
+No new directive. Round 14 shipped seven items; the adversarial verify pass over
+what it shipped found five defects, and this round is those five and **nothing
+else**. `db/schema.sql` is **byte-identical** — every one of them is a naming, a
+sentence or a readout, and not one of them is a rule.
+
+### 1. A ROW TITLE COULD NOT NAME A SAME-DAY RE-FLY — *the one that mattered*
+
+`WA.rowIdent` has told an original and its same-day re-fly apart by `seq` since
+round 13. **`WA.rowTitle` never printed it.** So the confirmation dialog round 14
+built — the whole point of which is *«σε σχεση με τι»* — rendered the two rows as
+**identical lines**:
+
+```
+Flights · C4101 · Contact · 12/08/2026 — added (…)
+Flights · C4101 · Contact · 12/08/2026 — added (…)
+```
+
+and, far worse, a **deletion** printed the line of the row that SURVIVED. A
+dialog whose one job is to say what is about to be written was, on the one shape
+where two rows are legitimately alike, unreadable.
+
+The name now wears the mark the log table already draws on the row — `#2`:
+
+```
+Flights · C4101 · Contact · 12/08/2026 — added (instructor …, duration 1.3 h, grade 85 %)
+Flights · C4101 · Contact · 12/08/2026 #2 — added (instructor …, duration 1.1 h, grade 72 %)
+Flights · C4101 · Contact · 12/08/2026 #2 — removed
+```
+
+**AND THE REFUSALS ACTUALLY JOIN THE DIALOG NOW.** Round 14's own comment said
+`WA.rowTitle` was extracted *“so the refusals, the change list and any later
+surface cannot drift”* — and `student.js` still carried a **second copy** of
+12b's naming inside `buildPayload`, which had already drifted from it in four
+ways: no `#2` (so a refusal about a re-fly named the row that was fine), no
+end-only lesson date, an **ΕΕΘ** reduced to `#7` because it carries no `exam`,
+and a raw solo slot key where the form prints a label. The copy is gone; the
+closure calls `WA.rowLabel`.
+
+`WA.rowLabel(sec, e, opts)` is the naming core and returns **`""`** for a row
+that shows nothing — the caller decides what to say instead, which is the one
+thing the two surfaces disagree about (*“a new entry”* in the dialog, *“#4”* in a
+refusal). `WA.rowTitle` is the dialog's wrapper around it.
+
+### 2. THE CURRENT-STATE PARAGRAPH STILL DESCRIBED THE FORM ROUND 14 REPLACED
+
+§4 Screens · 2 (the *current state* description of the instructor form, which is
+what a reader who skips the round sections reads) still said **“thin rule before
+the fifth”** and **“the card's own Save rings accent while dirty”**. Items 5 and
+6 of round 14 reversed **both**. Rewritten to the true state — the rule marks the
+**fighter / other split** between *Recommended as Alternate* and *Recommended for
+Other Assignments*, and there is **ONE general Save** counting the dirty
+assessments plus the confirmation dialog — with the round attributed.
+
+Swept the whole document for the same two claims. Everything else that states
+them is **round 10's own record**, each already carrying its `SUPERSEDED IN ROUND
+14` / `REVERSED IN ROUND 14` block; the two round-10 **headings** that stated the
+old rule as a bare fact now carry the round and the pointer, so a reader scanning
+headings cannot pick up a rule that was reversed two rounds later.
+
+### 3. THE OWED CHIP TOLD AN ΕΕΘ IT WAS A FLOW-CHART ROW — AND ITS OWN CELL SAID OTHERWISE
+
+The generic **owed** sentence ends *“It is a row of the printed flow chart, not
+something anybody reported, and NOTHING IS STORED for it until the first
+keystroke.”* True of all 181 seeded slots. **False of both shapes round 14
+added** — and false on the fact that decides whether anything is stored:
+
+| the row | what it actually is |
+|---|---|
+| **ΕΕΘ n** | a weekly theory exam the syllabus **does not enumerate**; its own cell tooltip says so two columns away |
+| **a minted 2nd / 3rd trial** | a re-sit somebody **ordered**; the flow chart prescribes one sitting, not this one |
+
+Both correctly wear the grey — *“on the programme, nothing recorded yet”* is
+exactly what they are — and **both are STORED** (`WA.rowMinted` disqualifies them
+from `slotUntouched`, which is the line `buildPayload` drops rows on), so the
+chip had the storage fact **backwards** as well.
+
+The precedent is round 12b's `WA.debriefWord`: **the word is the same everywhere,
+the sentence is section- and row-aware.** `WA.rowStateTip(sec, e, st)` returns
+`WA.rowStateDef(st).tip` for every true flow-chart row and its own sentence for
+these two, in all three states they can reach (*owed · started · done*; neither
+can ever be *extra* — that is what `WA.rowPlanned` decided in round 14). Read by
+the student form's chip **and** the CO's State column, so the two sides of one
+record cannot disagree.
+
+### 4. THE ANALYSIS RAIL'S EVALUATIONS ROW WAS THE ONE ROW THAT SAID NOTHING
+
+The student form's rail prints the two **fixed** sections as *slots flown out of
+slots prescribed* (**“8/8”**). The admin's analysis rail — the same component,
+mounted on the same record — left `ana-eval` out of its `by` map entirely, so it
+rendered an **empty** chip: one component saying two different things about one
+record, on the row the CO most often opens that tab for. Same arithmetic as
+`navItems()` (distinct non-empty checkrides, capped at the eight) and the same
+two-segment bar.
+
+> **RULING — Student and Comparison stay stateless**, and that is a judgement,
+> not the same omission. `ana-id` is an **identity header** and `ana-cmp` is a
+> chart of **whichever metric the chips have selected**; neither has a count that
+> is *“the one fact”* about it, and a badge invented for them would be decoration
+> on a component whose whole discipline is that it is not.
+
+### 5. TWO LINES OF THE DIALOG THAT READ BADLY
+
+**(a) The first sitting would not say it was one.** `WA.examRowLabel` names the
+trial from the **2nd** up. On a row standing alone that is right — *IN190* **is**
+the first sitting, and *“IN190 · 1st trial”* would be noise on the 199 exams out
+of 200 that are sat once. Beside *“IN190 · 2nd trial”* it is the opposite: the
+unqualified *IN190* reads as **the exam**, not as one of its sittings.
+
+> **RULING — what counts as “beside”.** The word is added when **the record holds
+> more than one sitting of that exam in either version** (before or after),
+> counted **within** each list and never across them — one unchanged sitting
+> appearing in both lists is one sitting, not two. `WA.examsWithTrials(...lists)`
+> computes it once per section; `WA.examRowLabel(e, named)` takes the flag. A
+> caller that cannot see the other trials never sets it, so the noise cannot
+> appear where there is a single sitting.
+
+```
+Ground exams · CO190 · 05/08/2026 — added (grade 91 %)          ← one sitting, no trial word
+Ground exams · IN190 · 1st trial · 10/08/2026 — added (grade 48 %)
+Ground exams · IN190 · 2nd trial · 17/08/2026 — added (grade 78 %)
+```
+
+**(b) The date was printed twice.** An *added* line named the row by its date and
+then listed the date again in the parenthetical — *“NFS · 21/08/2026 — added
+(date 21/08/2026, reason …)”*: one fact twice in eleven words. The parenthetical
+is **what the row was added WITH**; the date is **what it is CALLED**. The one
+date the title actually printed is now dropped from it — `WA.titleDateField(e)`
+is the single function both readers ask, so they cannot drift, and **the other
+date of a two-date row is still listed** (an end date the title did not print is
+news, not a repeat).
+
+### WHAT WAS NOT TOUCHED
+
+`db/schema.sql` (byte-identical, asserted), the seniority comparator, and the
+**CO-lock mint behaviour** — the verify pass's finding (c), that a CO-locked exam
+row offers a disabled *“+ 2nd trial”*, awaits the user's ruling on whether the CO
+should be able to mint a re-sit on a row the student may not touch. The button
+stays disabled until then.
+
+### CACHE-BUSTER
+
+`?v=20260821c` on **`app.js`, `student.js`, `admin.js` only** — the three files
+this round changed. `styles.css`, `config.js`, `items-catalog.js` and
+`instructor.js` keep `?v=20260821b`; bumping a file that did not change throws
+away a cache entry for nothing.
+
+### SELF-VERIFICATION — ROUND 14b (live, local stack, the real forms and the real RPCs)
+
+1. **The re-fly, named.** C4101 filled and re-flown on the **same date** through
+   the form's own ↻: the dialog printed the two lines above, `#2` on the second.
+   **Confirm & save** wrote them; deleting the re-fly and re-opening the dialog
+   printed **`… 12/08/2026 #2 — removed`** — the removed row, not the survivor.
+2. **The date is not repeated.** Every *added* line in that dialog read
+   `(instructor …, duration …, grade …)`; not one carried its own title's date.
+3. **The trial word, both ways, in one dialog** — the three exam lines above:
+   `CO190` bare (one sitting), `IN190 · 1st trial` and `IN190 · 2nd trial`
+   (two).
+4. **The refusals use the extracted namer** — proven in passing on a record whose
+   legacy SMS row blocks the save: *“SMS (09/03/2026): choose the condition …”*.
+5. **The two chips, live.** The minted 2nd trial: *“Owed — a planned 2nd trial of
+   IN190 … A re-sit is ORDERED, not prescribed … it IS stored.”* The ΕΕΘ:
+   *“Owed — a planned weekly theory exam (ΕΕΘ 1) … The ΕΕΘ are not rows of the
+   printed flow chart …”* The **first** trial of IN190, a true slot row, kept the
+   **generic** sentence verbatim.
+6. **Same two sentences on the CO's side** — read off the analysis Ground card's
+   State column on the same record, beside a `CO190` row still carrying the
+   generic one.
+7. **The rail.** `ana-eval` reads **`0/8`** (muted, one owed bar) on a student
+   with no checkrides and **`8/8`** (good, one done bar) on the two who have flown
+   all eight — walked student by student with the arrows. `ana-id` and `ana-cmp`
+   stay blank by ruling.
+8. **The instructor form is what §4 now says it is** — read off the live DOM:
+   **0** `[data-save]` buttons, and the group order
+   `Strongly Recommended · Recommended · Recommended as Alternate │ Recommended
+   for Other Assignments · Strongly Recommended for Other Assignments`.
+9. **`node --check` clean** on all six JS files. **Zero console errors** across
+   the student form, the admin's four tabs (including the `beforeprint` builder)
+   and the instructor form.
+10. **`db/schema.sql` byte-identical** — `git diff --stat` names it nowhere.
+11. **Hygiene**: demo data snapshotted before the round and **byte-restored**
+    after — 42 people, 3 records, 9 proposals, exactly as before. No fixture
+    people were created; the two test instructor names were `ZZ-TEST` and never
+    reached a tracked file. **Privacy grep: 0 hits.**
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -3072,11 +3261,19 @@ so the gate is stated here for whoever runs the deployment.
    still awaiting a grade, and (round 13) how many of the flow chart are still
    OWED**) beside **ONE radio group
    of the five assessment levels for fighters** (round 10, §4j — scale order,
-   weights shown, **thin rule before the fifth**, click-the-selected-one to
-   clear) + comment + flew-with checkbox. Save/edit any time; the card's own
-   Save rings accent while dirty. **Its own printable sheet** (round 8, round-10
-   content): one structured block per student — the assessment in words with its
-   weight, flown-with, comment, and the student's reported record.
+   weights shown, click-the-selected-one to clear) + comment + flew-with
+   checkbox. **Round 14 (§4n·5): the thin rule sits between «Recommended as
+   Alternate» and «Recommended for Other Assignments»** — it marks the
+   **fighter / other split** (three answers above it, two below), not the last
+   level off from the list, and the CO's readout draws it from the same
+   `WA.LEVEL_SEP_AT`. **Round 14 (§4n·6): there is ONE general Save**, not one
+   per card — it names how many assessments differ from what is stored
+   (*“Save 3 assessments”*, floating copy + bottom bar, disabled while nothing
+   differs), a dirty card is marked in place, and the write goes through the
+   round-14 **confirmation dialog** (§4n·7) naming the instructor the link
+   belongs to and enumerating the changes. **Its own printable sheet** (round 8,
+   round-10 content): one structured block per student — the assessment in words
+   with its weight, flown-with, comment, and the student's reported record.
 3. **Admin dashboard** (CO) — THREE MODES (decision 2026-08-13):
    a. **Overview**: one row per student (key counters, the **weighted mean** with
       its five-segment distribution bar and `n/instructors`,

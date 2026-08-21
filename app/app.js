@@ -1119,6 +1119,39 @@ WA.ROW_STATES = [
 WA.rowStateDef = function (id) {
   return WA.ROW_STATES.find((s) => s.id === id) || WA.ROW_STATES[2];
 };
+/* ROUND 14b (verify finding 3) — THE CHIP'S SENTENCE, IN THE ROW'S OWN TERMS.
+   The word is the same on every row — one vocabulary, and the four colours mean
+   one thing — but the generic OWED sentence ends «It is a row of the printed
+   flow chart, not something anybody reported», which is true of the 181 seeded
+   slots and FALSE of the two shapes round 14 added. An ΕΕΘ's own cell says the
+   syllabus does not enumerate them; a minted 2nd trial is a re-sit somebody
+   ORDERED. Both wear the grey, correctly — «on the programme, nothing recorded
+   yet» is exactly what they are — and both carried a chip that contradicted the
+   tooltip two columns away, and got the one fact backwards that decides whether
+   anything is stored for them. The precedent is round 12b's WA.debriefWord: the
+   WORD is the same everywhere, the SENTENCE is section- and row-aware. */
+WA.rowStateTip = function (sec, e, st) {
+  const d = WA.rowStateDef(st);
+  if (sec !== "exams" || !e || typeof e !== "object") return d.tip;
+  const ser = WA.examSeries(e);
+  if (!ser && !WA.rowMinted(sec, e)) return d.tip;          /* a true slot row */
+  const what = ser
+    ? "a planned weekly theory exam (" + WA.examRowLabel(e) + ")"
+    : "a planned " + WA.examTrialWord(WA.examTrial(e)) + " of " + String(e.exam);
+  const tail = ser
+    ? " The ΕΕΘ are not rows of the printed flow chart — the syllabus does not enumerate them, they are numbered in the order they are sat — and unlike a flow-chart slot this row IS stored: nothing but the record remembers that it was put on the programme."
+    : " A re-sit is ORDERED, not prescribed, so this is not a row of the printed flow chart — and unlike a flow-chart slot it IS stored: nothing but the record remembers that the squadron ordered it.";
+  if (st === "owed") {
+    return "Owed — " + what + ", on the programme and nothing recorded against it yet." + tail;
+  }
+  if (st === "started") {
+    return "Started — " + what + ", written in and not finished: an exam sat and not marked yet." + tail;
+  }
+  if (st === "done") {
+    return "Complete — " + what + ", with its date and its result both in." + tail;
+  }
+  return d.tip;
+};
 
 /* THE SLOT CATALOGUE OF ONE SECTION, in syllabus order — the flow chart for
    the two flight logs (MINUS the eight checkrides, which are recorded in the
@@ -2295,8 +2328,17 @@ WA.EXAM_TRIAL_WORDS = ["", "1st trial", "2nd trial", "3rd trial"];
 WA.examTrialWord = function (n) {
   return WA.EXAM_TRIAL_WORDS[n] || (n + "th trial");
 };
-/* what this row IS CALLED, on every surface: "IN190 · 2nd trial", "ΕΕΘ 3" */
-WA.examRowLabel = function (e) {
+/* what this row IS CALLED, on every surface: "IN190 · 2nd trial", "ΕΕΘ 3"
+   ROUND 14b (verify finding 5a) — AND WHEN THE FIRST SITTING HAS TO SAY SO.
+   The trial is named from the 2nd up, which is right on a row standing alone:
+   «IN190» IS the first sitting, and «IN190 · 1st trial» would be noise on the
+   199 exams out of 200 that are sat once. In a LIST beside «IN190 · 2nd trial»
+   it is the opposite — the unqualified «IN190» reads as the exam itself rather
+   than as one of its sittings, so the save dialog could name the re-sit and the
+   attempt it displaced with two lines the reader cannot tell apart. `named`
+   forces the word; only a caller that can SEE the other trials sets it
+   (WA.examsWithTrials), so the noise is never added where there is one sitting. */
+WA.examRowLabel = function (e, named) {
   const s = WA.examSeries(e);
   if (s) {
     const n = WA.examSeriesNo(e);
@@ -2304,7 +2346,26 @@ WA.examRowLabel = function (e) {
   }
   const id = (e && e.exam) ? String(e.exam) : "";
   const t = WA.examTrial(e);
-  return (id || "—") + (t > 1 ? " · " + WA.examTrialWord(t) : "");
+  return (id || "—") + ((t > 1 || (named && id)) ? " · " + WA.examTrialWord(t) : "");
+};
+/* WHICH EXAMS ARE SAT MORE THAN ONCE — the set the naming reads as `trials`.
+   COUNTED WITHIN EACH LIST, never across them: the dialog hands in the record
+   BEFORE and the record AFTER, and one unchanged sitting appearing in both is
+   one sitting, not two. A series row is never counted — the ΕΕΘ are numbered
+   and no two of them share a name. */
+WA.examsWithTrials = function (...lists) {
+  const out = {};
+  for (const list of lists) {
+    const n = {};
+    for (const e of (Array.isArray(list) ? list : [])) {
+      if (!e || typeof e !== "object" || WA.examSeries(e)) continue;
+      const id = String(e.exam || "").trim();
+      if (!id) continue;
+      n[id] = (n[id] || 0) + 1;
+      if (n[id] > 1) out[id] = true;
+    }
+  }
+  return out;
 };
 /* the next free number of a series — «next = max + 1», counted over what is
    actually there, so a deleted ΕΕΘ 2 does not make the next one a duplicate */
@@ -2892,22 +2953,54 @@ WA.personRankName = function (p) {
   return [o.rank || "", o.last_name || ""].filter(Boolean).join(" ").trim() ||
          (o.first_name || "this link's holder");
 };
-/* WHAT A ROW IS CALLED (round 12b's naming, extracted so the refusals, the
-   change list and any later surface cannot drift): what the user can SEE. */
-WA.rowTitle = function (sec, e, i) {
+/* WHICH DATE A ROW IS NAMED BY — the one WA.rowLabel prints, and the one an
+   «added» line must therefore NOT repeat in its parenthetical (round 14b,
+   verify finding 5b). One function, both readers, so they cannot drift. */
+WA.titleDateField = function (e) {
   const x = e || {};
+  if (x.date) return "date";
+  if (x.entrance_date) return "entrance_date";
+  if (x.end_date) return "end_date";
+  return null;
+};
+/* WHAT A ROW IS CALLED (round 12b's naming, extracted so the refusals, the
+   change list and any later surface cannot drift): what the user can SEE.
+   Returns "" for a row that shows nothing at all — the caller decides what to
+   say instead, because a dialog says «a new entry» and a save refusal says «#4».
+     opts.trials — {examId:true} for the exams sat more than once, so a first
+                   sitting standing beside its re-sit is named as one
+                   (WA.examsWithTrials; see WA.examRowLabel). */
+WA.rowLabel = function (sec, e, opts) {
+  const x = e || {};
+  const o = opts || {};
   const bits = [];
-  if (sec === "exams") bits.push(WA.examRowLabel(x));
-  else if (x.sortie) bits.push(String(x.sortie).toUpperCase());
+  if (sec === "exams") {
+    if (WA.examSeries(x) || x.exam) {
+      bits.push(WA.examRowLabel(x, !!((o.trials || {})[String(x.exam || "").trim()])));
+    }
+  } else if (x.sortie) bits.push(String(x.sortie).toUpperCase());
   else if (x.exam) bits.push(String(x.exam));
   else if (x.group) bits.push(String(x.group) + (x.course ? " · " + x.course : ""));
   else if (x.slot) bits.push(WA.soloSlotLabel ? WA.soloSlotLabel(x.slot) : String(x.slot));
   else if (x.evaluation) bits.push(String(x.evaluation));
   else if (x.flight_code) bits.push(String(x.flight_code).toUpperCase());
   if (x.track) bits.push(WA.itemCatLabel ? WA.itemCatLabel(x.track) : x.track);
-  const dt = x.date || x.entrance_date || x.end_date;
-  if (dt) bits.push(fmtD(dt));
-  return bits.filter(Boolean).join(" · ") ||
+  const df = WA.titleDateField(x);
+  if (df) bits.push(fmtD(x[df]));
+  const nm = bits.filter(Boolean).join(" · ");
+  if (!nm) return "";
+  /* ROUND 14b (verify finding 1) — AND WHICH FLIGHT OF THE DAY IT IS. WA.rowIdent
+     has told a same-day re-fly apart by its `seq` since round 13; the NAME never
+     did, so an original and its re-fly printed the IDENTICAL line in the save
+     dialog — and «— removed» on the re-fly read exactly like the row that
+     survived, which is the one line in that dialog nobody can afford to misread.
+     `#2` is the mark the log table already draws on the row, so the name wears
+     the squadron's own. */
+  const seq = Math.round(Number(x.seq) || 1);
+  return nm + (seq > 1 ? " #" + seq : "");
+};
+WA.rowTitle = function (sec, e, i, opts) {
+  return WA.rowLabel(sec, e, opts) ||
          (i === undefined || i === null ? "a new entry" : "#" + (i + 1));
 };
 /* THE IDENTITY TWO VERSIONS OF ONE ROW SHARE. Without it a removed row makes
@@ -3010,7 +3103,7 @@ WA.sameValue = function (a, b) {
 };
 /* THE CHANGE LIST OF ONE RECORD — the student form and its CO twin.
      before / after : two records in the migrated shape
-     → ["Ground exams · IN190 · 2nd trial — added (date 12/08/2026, grade 78 %)", …] */
+     → ["Ground exams · IN190 · 2nd trial · 12/08/2026 — added (grade 78 %)", …] */
 WA.recordChanges = function (before, after, sections) {
   const A = before || {}, B = after || {}, out = [];
   const secs = sections || WA.COUNTED;
@@ -3024,6 +3117,11 @@ WA.recordChanges = function (before, after, sections) {
     });
     const label = WA.secLabel(sec);
     const used = {};
+    /* ROUND 14b (verify finding 5a) — the naming context of THIS section: the
+       exams this record holds more than one sitting of, in either version, so
+       the first trial is named beside its re-sit and left alone when it stands
+       on its own. Computed once per section, not per line. */
+    const nm = (sec === "exams") ? { trials: WA.examsWithTrials(la, lb) } : null;
     for (const e of lb) {
       const k = WA.rowIdent(sec, e);
       const q = bag[k] || [];
@@ -3031,12 +3129,18 @@ WA.recordChanges = function (before, after, sections) {
       if (prev) { used[k] = true; }
       if (!prev) {
         /* ADDED — and it says what it was added WITH, or the row would be a
-           name with no content in a list that exists to show content */
+           name with no content in a list that exists to show content.
+           ROUND 14b (verify finding 5b) — MINUS THE DATE THE TITLE ALREADY SAID.
+           «NFS · 21/08/2026 — added (date 21/08/2026, reason …)» printed one fact
+           twice in eleven words; the parenthetical is what the row was added WITH,
+           and the date is what it is CALLED. The other date of a two-date row is
+           still listed: an end date the title did not print is news. */
         const ident = WA.IDENT_FIELDS[sec] || [];
+        const df = WA.titleDateField(e);
         const said = WA.diffFields(sec)
-          .filter((f) => ident.indexOf(f) < 0 && !WA.sameValue(undefined, e[f]))
+          .filter((f) => ident.indexOf(f) < 0 && f !== df && !WA.sameValue(undefined, e[f]))
           .map((f) => WA.fieldWord(f) + " " + WA.fieldText(sec, f, e[f]));
-        out.push(label + " · " + WA.rowTitle(sec, e) + " — added" +
+        out.push(label + " · " + WA.rowTitle(sec, e, null, nm) + " — added" +
                  (said.length ? " (" + said.join(", ") + ")" : ""));
         continue;
       }
@@ -3046,11 +3150,11 @@ WA.recordChanges = function (before, after, sections) {
         ch.push(WA.fieldWord(f) + " " + WA.fieldText(sec, f, prev.e[f]) +
                 " → " + WA.fieldText(sec, f, e[f]));
       }
-      if (ch.length) out.push(label + " · " + WA.rowTitle(sec, e) + " — " + ch.join(", "));
+      if (ch.length) out.push(label + " · " + WA.rowTitle(sec, e, null, nm) + " — " + ch.join(", "));
     }
     for (const k of Object.keys(bag)) {
       for (const left of bag[k]) {
-        out.push(label + " · " + WA.rowTitle(sec, left.e, left.i) + " — removed");
+        out.push(label + " · " + WA.rowTitle(sec, left.e, left.i, nm) + " — removed");
       }
     }
   }

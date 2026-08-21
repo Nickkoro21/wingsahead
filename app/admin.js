@@ -258,10 +258,39 @@ WA.renderAdmin = async function (view, me) {
                bars: [{ state: "done", n: cn.done }, { state: "started", n: cn.started },
                       { state: "owed", n: cn.owed }, { state: "extra", n: cn.extra }] };
     };
+    /* ROUND 14b (verify finding 4) — THE EVALUATIONS ROW SAYS «6/8» HERE TOO.
+       The student form's rail prints the two FIXED sections as slots flown out
+       of slots prescribed; this rail left the same row with an EMPTY chip, so
+       one component said two different things about one record — and the row
+       the CO most often opens this tab for was the one row that said nothing.
+       Same arithmetic as navItems(): distinct non-empty checkrides, capped at
+       the eight, and the two-segment bar beside it.
+       STUDENT AND COMPARISON STAY STATELESS, and that is a ruling, not an
+       omission: the first is an identity header and the second is a chart of
+       whichever metric the chips have selected — neither has a count that is
+       «the one fact» about it, and a badge invented for them would be
+       decoration on a component whose whole discipline is that it is not. */
+    const evalSlots = () => {
+      const seen = {};
+      for (const e of (Array.isArray(s.record.evaluations) ? s.record.evaluations : [])) {
+        if (WA.slotEmpty("evaluations", e)) continue;
+        if (e && e.evaluation) seen[e.evaluation] = true;
+      }
+      const n = WA.EVALUATIONS.length;
+      return { done: Math.min(Object.keys(seen).length, n), n };
+    };
+    const ev = evalSlots();
     const gl = WA.stateCounts("lessons", s.record.lessons);
     const gx = WA.stateCounts("exams", s.record.exams);
     const a = s.assessment || { n: 0, mean: null };
     const by = {
+      "ana-eval": {
+        badge: ev.done + "/" + ev.n,
+        tone: ev.done === ev.n ? "good" : (ev.done ? "" : "muted"),
+        tip: "Evaluations — " + ev.done + " of the " + ev.n +
+             " checkrides of the stage flown, in syllabus order",
+        bars: [{ state: "done", n: ev.done }, { state: "owed", n: ev.n - ev.done }],
+      },
       "ana-fail": cnt(st.fail + st.almost_good),
       "ana-air": cnt(st.airsickness),
       "ana-other": cnt(st.fpc + st.cef + st.nfs + st.sms),
@@ -891,9 +920,14 @@ WA.renderAdmin = async function (view, me) {
      are THE SAME TABLE: same order, same colours, same four counts, and the
      one question the CO actually asks — what is this student still owed — is
      answered without opening the student's own link. */
-  const stateCell = (st) => {
+  /* ROUND 14b (verify finding 3) — the WORD is the four-state vocabulary, the
+     SENTENCE is the row's: an ΕΕΘ and a minted re-sit are grey because they are
+     on the programme, not because the flow chart prescribes them (they are not
+     in it), and unlike a flow-chart slot they ARE stored. WA.rowStateTip. */
+  const stateCell = (st, sec, e) => {
     const d = WA.rowStateDef(st);
-    return `<td><span class="stchip st-${esc(st)}" title="${esc(d.tip)}">${esc(d.label)}</span></td>`;
+    return `<td><span class="stchip st-${esc(st)}" title="${esc(WA.rowStateTip(sec, e, st))}"
+      >${esc(d.label)}</span></td>`;
   };
   function logRows(s, band, track) {
     return WA.slotRows(band, s.record[band], track).map((r) => {
@@ -1025,7 +1059,7 @@ WA.renderAdmin = async function (view, me) {
         <td>${esc(fmtD(e.date))}</td>
         ${has ? `<td class="num">${WA.pct(e.grade)}</td>`
               : `<td class="lag">${WA.debriefChip(e, "exams") || "&mdash;"}</td>`}
-        ${stateCell(r.state)}
+        ${stateCell(r.state, "exams", e)}
         ${srcCell(e)}</tr>`;
     });
     return evTable(["Exam", "Date", "Grade", "State", "Source"], rows);

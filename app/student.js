@@ -959,11 +959,14 @@ WA.renderStudent = async function (view, me, opts) {
        aria-label="Clear this row back to an owed slot">&#9003;</button>`;
   /* the state of a row, as a chip the eye can read without the colour — the
      colour is the answer, this is the word beside it (and paper, a colour-blind
-     reader and a screen reader all get the same fact) */
-  function stateChip(st) {
+     reader and a screen reader all get the same fact).
+     ROUND 14b (verify finding 3) — THE WORD IS GENERIC, THE SENTENCE IS THE
+     ROW'S: an ΕΕΘ and a minted re-sit are grey for a reason that is not «the
+     printed flow chart prescribes it», and WA.rowStateTip says which. */
+  function stateChip(st, sec, e) {
     if (!st) return "";
     const d = WA.rowStateDef(st);
-    return `<span class="stchip st-${esc(st)}" title="${esc(d.tip)}">${esc(d.label)}</span>`;
+    return `<span class="stchip st-${esc(st)}" title="${esc(WA.rowStateTip(sec, e, st))}">${esc(d.label)}</span>`;
   }
 
   /* ── ONE FLIGHT, ONE ROW ──────────────────────────────────────────────────
@@ -1001,7 +1004,7 @@ WA.renderStudent = async function (view, me, opts) {
   function logActs(sec, i, e, m) {
     const slot = m && m.slot;
     const owed = m && m.state === "owed";
-    return `${rowFlags(sec, i, e)}${seqBadge(e)}${stateChip(m ? m.state : null)}
+    return `${rowFlags(sec, i, e)}${seqBadge(e)}${stateChip(m ? m.state : null, sec, e)}
         <button type="button" class="cbtn" data-refly2="${esc(sec)}:${i}"
           title="A second turn on the same sortie on the SAME DAY. It is a real thing and it is not a duplicate, so it is a deliberate act: the new row opens with the same flight and date and the next sequence number — and it is an EXTRA, because the slot is the syllabus's one planned pass."
           aria-label="Add a same-day re-fly of this sortie">&#8635;</button>
@@ -1105,7 +1108,7 @@ WA.renderStudent = async function (view, me, opts) {
        is the one a keystroke re-renders (refreshRowState), so «+ 2nd trial»
        appears the instant the first attempt is written in. In the exam cell it
        would have waited for the next full redraw of the section. */
-    return `${rowFlags(sec, i, e)}${stateChip(m ? m.state : null)}${
+    return `${rowFlags(sec, i, e)}${stateChip(m ? m.state : null, sec, e)}${
       sec === "exams" ? mintTrialHTML(i, e, m || {}) : ""}${
       slot ? (owed ? "" : clearCell(sec, i)) : rmCell(sec, i)}`;
   }
@@ -2986,19 +2989,18 @@ WA.renderStudent = async function (view, me, opts) {
     /* 12b verify finding 2 — "#4" was the STORED index, which the date-sorted,
        track-split tables show NOWHERE. A problem row is named by what the user
        can SEE (its code and date), and the first one is remembered so save()
-       can scroll to and mark the actual row. */
+       can scroll to and mark the actual row.
+       ROUND 14b (verify finding 1) — AND IT IS THE EXTRACTED NAMER, which is
+       what round 14 said it was: this closure was a SECOND copy of 12b's rules
+       and had already drifted from WA.rowLabel in four ways — no same-day `#2`
+       (so a refusal about a re-fly named the row that was fine), no end-only
+       lesson date, an ΕΕΘ named "#7" because it carries no `exam`, and a raw
+       solo slot key where the form prints a label. One namer, every surface. */
+    const examNames = { trials: WA.examsWithTrials(
+      (d.exams || []).filter((e) => !WA.slotOwed("exams", e))) };
     const rowName = (sec, i) => {
-      const e = (d[sec] || [])[i] || {};
-      const bits = [];
-      if (e.sortie) bits.push(String(e.sortie).toUpperCase());
-      else if (e.exam) bits.push(String(e.exam));
-      else if (e.group) bits.push(String(e.group) + (e.course ? " · " + e.course : ""));
-      else if (e.slot) bits.push(String(e.slot));
-      else if (e.evaluation) bits.push(String(e.evaluation));
-      if (e.track) bits.push(WA.itemCatLabel ? WA.itemCatLabel(e.track) : e.track);
-      const dt = e.date || e.entrance_date;
-      if (dt) bits.push(fmtD(dt));
-      return bits.length ? " (" + bits.join(" · ") + ")" : " #" + (i + 1);
+      const nm = WA.rowLabel(sec, (d[sec] || [])[i] || {}, sec === "exams" ? examNames : null);
+      return nm ? " (" + nm + ")" : " #" + (i + 1);
     };
     const need = (sec, i, what) => {
       problems.push(WA.secLabel(sec) + rowName(sec, i) + ": " + what);
