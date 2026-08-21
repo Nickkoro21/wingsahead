@@ -111,6 +111,10 @@ function renderLanding(el, invalid) {
    a key handler can never fire against a DOM that is no longer there */
 function teardownView() {
   if (WA._admTimer) { clearInterval(WA._admTimer); WA._admTimer = null; }
+  /* ROUND 14 — the left panel keeps a scroll listener on `window`, which
+     outlives the DOM it points at unless it is told to stop. One slot, because
+     one view at a time mounts one panel. */
+  if (WA._nav) { WA._nav.destroy(); WA._nav = null; }
   WA._adminState = null;
   WA._admNav = null;
   WA._stuState = null;
@@ -608,11 +612,21 @@ WA.LEVELS = [
   { id: "strongly_other_assignments", w: 1,
     label: "Strongly Recommended for Other Assignments", short: "Strongly Recommended for Other Assignments" },
 ];
-/* THE FIFTH IS A DIFFERENT KIND OF STATEMENT, not merely the next step down —
-   the four above place a student on the fighter track or beside it, the fifth
-   places him firmly elsewhere. The form separates it with a thin rule for
-   exactly that reason, and this index is what draws the rule. */
-WA.LEVEL_SEP_AT = 4;
+/* THE LINE IS THE FIGHTER / OTHER SPLIT (round 14) — «την γραμμη μεταξυ
+   recommended as alternate and recommended for other assignments».
+   Until round 14 the rule sat before the FIFTH level and said "the last one is
+   a different kind of statement". The command moved it up one: it now sits
+   between **Recommended as Alternate (5)** and **Recommended for Other
+   Assignments (3)**, and it marks the real boundary of the scale —
+     ABOVE the line   the three FIGHTER answers: strongly recommended,
+                      recommended, recommended as alternate. All three place the
+                      student on the fighter track or immediately beside it.
+     BELOW the line   the two REDIRECT answers: other assignments, and strongly
+                      so. Both place him somewhere else in the Air Force.
+   So the rule no longer separates "the last level" from "the list"; it
+   separates the two things the form is actually asked to tell apart. The index
+   is the count of options ABOVE the rule, which is what draws it. */
+WA.LEVEL_SEP_AT = 3;
 WA.LEVEL_TIP = "One assessment per instructor per student, about fighters. " +
   "The scale carries its judgement in the weights (10 · 8 · 5 · 3 · 1), never in a negative word: " +
   "the lower levels say where a student's value lies, not that he has none.";
@@ -1017,7 +1031,13 @@ WA.ENTRY_KEYS = {
   fs:           ["date", "track", "sortie", "seq", "kind", "instructor", "instructor_oid",
                  "duration", "grade", "ng", "mission", "legacy", "entered_by"],
   lessons:      ["date", "end_date", "group", "course", "legacy", "entered_by"],
-  exams:        ["date", "exam", "grade", "legacy", "entered_by"],
+  /* ROUND 14 — TRIAL and SERIES. `trial` is 2 or 3 and nothing else: the first
+     trial is written as no key at all, so every record from before this round
+     is already correct. `series`/`series_no` are the ΕΕΘ weekly exams, which
+     name no `exam` — the two shapes are exclusive and the server refuses a row
+     that tries to be both. */
+  exams:        ["date", "exam", "trial", "series", "series_no", "grade",
+                 "legacy", "entered_by"],
 };
 
 /* ── AN EMPTY FIXED SLOT (round 5) ─────────────────────────────────────────
@@ -1073,6 +1093,15 @@ WA.slotEmpty = function (sec, e) {
    ══════════════════════════════════════════════════════════════════════════ */
 WA.SLOT_SECTIONS = ["flights", "fs", "lessons", "exams"];
 WA.hasSlots = function (sec) { return WA.SLOT_SECTIONS.indexOf(sec) >= 0; };
+
+/* HOW MANY ENTRIES ONE SECTION MAY HOLD — the client's mirror of
+   wa.section_cap(). It is not a validation (the server's is), it is what an
+   affordance that MINTS rows has to know before it mints one: «unlimited count
+   within caps» is only true if something knows where the cap is.
+   MIRROR: db/schema.sql → wa.section_cap. */
+WA.sectionCap = function (sec) {
+  return (sec === "flights" || sec === "fs" || sec === "lessons") ? 400 : 200;
+};
 
 /* THE FOUR STATES, in the user's own terms. `label` is the word every count,
    legend, CSV cell and tooltip uses — one vocabulary, so the colour on screen
@@ -1155,10 +1184,45 @@ WA.slotKey = function (sec, e) {
     return WA.slotIndex(sec)[k] ? k : null;
   }
   if (sec === "exams") {
+    /* ROUND 14 — an ΕΕΘ names no exam and occupies no slot: the series is not
+       in the syllabus's enumerated eight, so there is nothing for it to claim.
+       A TRIAL, on the other hand, keeps its exam's key on purpose — all three
+       trials of IN190 compete for the IN190 slot and WA.claims hands it to the
+       operative one (the pass-attempt rule), which is what makes the slot's
+       colour follow the successful attempt rather than the first row typed. */
+    if (WA.examSeries(e)) return null;
     const x = WA.normLine(e.exam);
     return (x && WA.slotIndex(sec)[x]) ? x : null;
   }
   return null;
+};
+/* ══ ROUND 14 — TWO QUESTIONS ABOUT A ROW THAT HOLDS NO SLOT ═══════════════
+   They sound alike and they are not, and keeping them apart is what makes the
+   exams section behave.
+
+   WAS IT MINTED?  — did somebody CREATE this row with an affordance: the next
+     ΕΕΘ, or the 2nd / 3rd trial of an exam. A minted row is a REPORT even when
+     it is empty («a re-sit has been ordered»), so it is stored, it is never
+     mistaken for a seeded placeholder, and it never silently disappears on the
+     next save. A blank trial-1 row, by contrast, IS the seeded placeholder.
+     → WA.slotUntouched, WA.claims
+
+   IS IT ON THE PROGRAMME? — should it wear the MUSTARD? `extra` means «beyond
+     the syllabus's one planned pass», and EVERY attempt at one of the eight is
+     within the plan whichever trial it is: when a 2nd trial passes it takes the
+     slot, and the failed FIRST attempt that it displaces is not suddenly an
+     off-catalogue extra — it is the first trial, and it is shown as one. Only a
+     row naming no known exam at all is an extra here.
+     → WA.rowState */
+WA.rowMinted = function (sec, e) {
+  if (sec !== "exams" || !e || typeof e !== "object") return false;
+  if (WA.examSeries(e)) return true;
+  return !!WA.exam(WA.normLine(e.exam)) && WA.examTrial(e) > 1;
+};
+WA.rowPlanned = function (sec, e) {
+  if (sec !== "exams" || !e || typeof e !== "object") return false;
+  if (WA.examSeries(e)) return true;
+  return !!WA.exam(WA.normLine(e.exam));
 };
 /* WHO OCCUPIES EACH SLOT — in TWO PASSES, and the order of the passes is the
    whole of the rule.
@@ -1179,10 +1243,30 @@ WA.claims = function (sec, list) {
   const taken = {}, claimed = new Array(arr.length).fill(false),
         keys = new Array(arr.length);
   for (let i = 0; i < arr.length; i++) keys[i] = WA.slotKey(sec, arr[i]);
+  /* ROUND 14 — WHICH OF SEVERAL WRITTEN ROWS HOLDS THE SLOT.
+     For the two flight logs and the lessons the answer is round 13's: the
+     FIRST in stored order, because a second row naming the same sortie is a
+     re-fly and the slot is the one planned pass. For the EXAMS it is the
+     OPERATIVE TRIAL — round 11's pass-attempt rule, one section over — because
+     the three trials of one exam are three attempts at the SAME slot, not
+     three passes at it, and the colour of the slot has to follow the attempt
+     the student actually passed on. `holder` is the one line where the two
+     doctrines meet, and nothing else in the pass changes. */
+  const holder = {};
   for (let i = 0; i < arr.length; i++) {
     const k = keys[i];
-    if (!k || WA.slotUntouched(sec, arr[i]) || taken[k]) continue;
-    taken[k] = true; claimed[i] = true;
+    if (!k || WA.slotUntouched(sec, arr[i])) continue;
+    /* ROUND 14 — a PLANNED row with nothing in it does not take the slot away
+       from the attempt that has something in it: a 2nd trial that has only
+       been scheduled must not decide the colour of an exam already sat. */
+    if (WA.rowMinted(sec, arr[i]) && WA.rowBlank(sec, arr[i])) continue;
+    (holder[k] = holder[k] || []).push(i);
+  }
+  for (const k of Object.keys(holder)) {
+    const idxs = holder[k];
+    const win = (sec === "exams" && idxs.length > 1)
+      ? WA.examOperativeIx(arr, idxs) : idxs[0];
+    taken[k] = true; claimed[win] = true;
   }
   for (let i = arr.length - 1; i >= 0; i--) {
     const k = keys[i];
@@ -1201,6 +1285,21 @@ WA.claims = function (sec, list) {
 WA.slotUntouched = function (sec, e) {
   if (!e || typeof e !== "object") return false;
   if (e.legacy || e.entered_by) return false;
+  /* ROUND 14 — AND A PLANNED ROW IS A REPORT TOO. A minted 2nd trial and an
+     ΕΕΘ are rows somebody CREATED: they say «a re-sit has been ordered» and «a
+     weekly exam is on the programme», which is information no placeholder
+     carries and which nothing but the record remembers. Treating them as
+     placeholders would drop them from the payload on the next save and the
+     student's click would quietly undo itself. Same disqualifier, same
+     reasoning, as `legacy` and `entered_by` above. */
+  if (WA.rowMinted(sec, e)) return false;
+  return WA.rowBlank(sec, e);
+};
+/* THE SHAPE TEST ALONE — is there anything in the fields of this row? It is
+   what `slotUntouched` asks after its three disqualifiers, and it is asked on
+   its own by the rules that need "empty" without needing "droppable". */
+WA.rowBlank = function (sec, e) {
+  if (!e || typeof e !== "object") return false;
   const empty = (v) => v === null || v === undefined || String(v) === "";
   /* `ng` IS DELIBERATELY NOT IN THIS LIST, and it is the round-9 solo ruling
      applied to a log row: ON AN UNFLOWN SLOT, NG IS AN ANSWER ABOUT A FLIGHT
@@ -1244,14 +1343,44 @@ WA.rowDone = function (sec, e) {
     if (e.ng) return true;
     return WA.rowMission(e) === "complete";
   }
-  if (sec === "lessons") return isD(e.date);
+  /* ROUND 14 — AN END DATE ALONE IS A RECORD. «τα μαθηματα να δεχομαστε και
+     μονο end date για την καταγραφη»: the course ENDED, therefore it ran, and
+     a squadron that knows a lesson finished on the 12th knows the lesson
+     happened. Round 13's rule («a lesson is done on its date») counted only
+     the START date and made an end-only row incomplete for ever — which is
+     also the exact shape open item 2 of round 13 named as a defect («a started
+     ground lesson cannot be saved»): the ONLY partial state a two-date row can
+     have is an end without a start, and it was the one state the form refused.
+     Either date now completes the row; both is the normal case; neither is
+     still an owed slot. */
+  if (sec === "lessons") return isD(e.date) || isD(e.end_date);
   if (sec === "exams") return isD(e.date) && has(e.grade) && isFinite(Number(e.grade));
   return false;
+};
+/* THE DATE A ROW IS FILED UNDER — the one every date sort reads. It is `date`
+   everywhere except a ground lesson recorded by its END alone (round 14),
+   where the end date is the only date the row has and sorting it among the
+   undated would file a course that demonstrably ran behind every course that
+   has not started. */
+WA.rowDate = function (sec, e) {
+  const o = e || {};
+  const d = String(o.date || "").trim();
+  if (d) return d;
+  return (sec === "lessons") ? String(o.end_date || "").trim() : "";
 };
 /* THE ONE VERDICT every colour, count, legend and CSV cell reads */
 WA.rowState = function (sec, e, claimed) {
   if (WA.slotOwed(sec, e)) return "owed";
-  if (!claimed) return "extra";
+  /* ROUND 14 — a numbered trial and an ΕΕΘ claim no slot and are not extras:
+     they are planned rows, and they are read exactly like a claimed one.
+     A PLANNED ROW WITH NOTHING IN IT IS OWED, not started: minting ΕΕΘ 4 or a
+     2nd trial of IN190 puts it on the programme, and "in the programme,
+     nothing recorded yet" is the exact sentence the grey wash already carries.
+     Neither is a seeded placeholder though — both are STORED, because nothing
+     but the record remembers that the squadron scheduled them (WA.slotOwed
+     stays false for them, which is the line buildPayload drops rows on). */
+  if (!claimed && !WA.rowPlanned(sec, e)) return "extra";
+  if (!claimed && WA.rowPlanned(sec, e) && WA.rowBlank(sec, e)) return "owed";
   return WA.rowDone(sec, e) ? "done" : "started";
 };
 
@@ -1263,14 +1392,23 @@ WA.rowState = function (sec, e, claimed) {
 WA.stateCounts = function (sec, list, track) {
   const arr = Array.isArray(list) ? list : [];
   const c = WA.claims(sec, arr);
-  const out = { done: 0, started: 0, owed: 0, extra: 0, hours: 0, lag: 0, n: 0 };
+  const out = { done: 0, started: 0, owed: 0, extra: 0, hours: 0, lag: 0, n: 0,
+                /* ROUND 14 — how many SLOTS are complete, which is not the same
+                   number as how many ROWS are: an exam sat three times has one
+                   slot and up to three done rows, so every «X of 8» sentence
+                   reads this and every «done X» reads the other. */
+                slotsDone: 0 };
   let claimedN = 0;
   for (let i = 0; i < arr.length; i++) {
     const e = arr[i];
     if (track != null && (e.track || "") !== track) continue;
     const st = WA.rowState(sec, e, c.claimed[i]);
-    if (st === "owed") continue;
-    if (c.claimed[i]) claimedN++;
+    /* a SEEDED PLACEHOLDER is counted from the catalogue below, never here —
+       but a stored row that reads `owed` (an ΕΕΘ nobody has sat yet) is a real
+       row and does count, which is why the test is the placeholder test and
+       not the word */
+    if (WA.slotOwed(sec, e)) continue;
+    if (c.claimed[i]) { claimedN++; if (st === "done") out.slotsDone++; }
     out[st]++;
     out.n++;
     const h = Number(e.duration);
@@ -1282,7 +1420,9 @@ WA.stateCounts = function (sec, list, track) {
     if (sec !== "lessons" && WA.awaitingDebrief(e)) out.lag++;
   }
   out.hours = Math.round(out.hours * 10) / 10;
-  out.owed = Math.max(0, WA.slotCount(sec, track == null ? null : track) - claimedN);
+  /* += , not = : the catalogue's untouched slots PLUS the stored rows that are
+     themselves owed (an ΕΕΘ on the programme and not yet sat) */
+  out.owed += Math.max(0, WA.slotCount(sec, track == null ? null : track) - claimedN);
   return out;
 };
 /* ── THE DISPLAY ORDER, AND IT IS ONE FUNCTION ────────────────────────────
@@ -1298,17 +1438,35 @@ WA.stateCounts = function (sec, list, track) {
 WA.slotRows = function (sec, list, track) {
   const arr = Array.isArray(list) ? list : [];
   const c = WA.claims(sec, arr);
-  const by = {}, extras = [];
+  const by = {}, alts = {}, series = [], extras = [];
   arr.forEach((e, i) => {
     if (track !== undefined && track !== null && (e.track || "") !== track) return;
     if (c.claimed[i]) { by[c.keys[i]] = { e, i }; return; }
     /* a REDUNDANT placeholder — its slot is already held by a written row — is
        drawn nowhere: it is not an extra, it is a row nobody ever wrote in */
     if (WA.slotOwed(sec, e)) return;
+    /* ROUND 14 — the planned rows that hold no slot. A NON-OPERATIVE TRIAL is
+       filed under its own exam, so it renders directly beneath the slot it is
+       an attempt at (the evaluations section's "another attempt at C4590",
+       one section over); an ΕΕΘ goes to its own list, after the eight. */
+    if (WA.rowPlanned(sec, e)) {
+      if (WA.examSeries(e)) { series.push({ e, i }); return; }
+      const k = WA.normLine(e.exam);
+      (alts[k] = alts[k] || []).push({ e, i });
+      return;
+    }
     extras.push({ e, i });
   });
+  /* the series in NUMBER order — the number is the name, so ΕΕΘ 2 must never
+     print above ΕΕΘ 1 because it was typed first */
+  series.sort((a, b) => {
+    const na = WA.examSeriesNo(a.e), nb = WA.examSeriesNo(b.e);
+    if (na === null || nb === null) return na === nb ? a.i - b.i : (na === null ? 1 : -1);
+    return na - nb || a.i - b.i;
+  });
+  for (const k of Object.keys(alts)) alts[k].sort((a, b) => WA.examTrial(a.e) - WA.examTrial(b.e) || a.i - b.i);
   extras.sort((a, b) => {
-    const da = String(a.e.date || "").trim(), db = String(b.e.date || "").trim();
+    const da = WA.rowDate(sec, a.e), db = WA.rowDate(sec, b.e);
     if (!da !== !db) return da ? -1 : 1;             /* dateless last */
     if (da !== db) return da < db ? -1 : 1;
     const sa = Number(a.e.seq || 1), sb = Number(b.e.seq || 1);
@@ -1321,6 +1479,20 @@ WA.slotRows = function (sec, list, track) {
     const hit = by[d.key];
     out.push({ def: d, e: hit ? hit.e : null, i: hit ? hit.i : -1,
                state: hit ? WA.rowState(sec, hit.e, true) : "owed" });
+    /* the other trials of this exam, immediately under it. `alt` marks them so
+       a caller can render the trial badge and NOT a second slot header; `def`
+       is repeated on purpose (it is the same exam), and nothing counts defs —
+       WA.slotCount reads the catalogue, never this list. */
+    for (const x of (alts[d.key] || [])) {
+      out.push({ def: d, alt: true, trial: WA.examTrial(x.e), e: x.e, i: x.i,
+                 state: WA.rowState(sec, x.e, false) });
+    }
+  }
+  /* THE ΕΕΘ SERIES, after the eight fixed slots — «rendered after the 8 fixed
+     slots» — and before the extras, which are the rows nobody planned at all */
+  for (const x of series) {
+    out.push({ def: null, series: WA.examSeries(x.e), no: WA.examSeriesNo(x.e),
+               e: x.e, i: x.i, state: WA.rowState(sec, x.e, false) });
   }
   for (const x of extras) out.push({ def: null, e: x.e, i: x.i, state: "extra" });
   return out;
@@ -1546,13 +1718,41 @@ WA.migrateRecord = function (rec) {
     /* round 12b — no `absent` default: attendance, periods, the instructor and
        the note are not keys of a lesson any more, and the whitelist pass drops
        whatever a stored row still carries under those names */
-    if (!isDate(o.date) || !o.group) o.legacy = true;
+    /* ROUND 14 — EITHER date completes a lesson: «τα μαθηματα να δεχομαστε και
+       μονο end date για την καταγραφη». A row with an end and no start is a
+       course that demonstrably ran, so it is no longer flagged as an import
+       that lost its date. */
+    if ((!isDate(o.date) && !isDate(o.end_date)) || !o.group) o.legacy = true;
     return o;
   });
   out.exams = (arr(src.exams) || []).map((e) => {
     const o = { ...e };
+    /* ROUND 14 — the two shapes, repaired the round-13 way: narrowed out of
+       its catalogue, an unknown value is NULLED and the row FLAGGED, never
+       dropped and never guessed at. */
+    const ser = WA.examSeriesDef(String(o.series || "").trim());
+    if (o.series && !ser) { o.series = null; o.legacy = true; }
+    if (ser) {
+      /* an ΕΕΘ names no exam and takes no trial number; the number is its name
+         and a row without one cannot be told from any other ΕΕΘ */
+      if (o.exam) { o.exam = null; o.legacy = true; }
+      delete o.trial;
+      /* the key is DROPPED and not nulled, so this mirror and wa.migrate_record
+         produce byte-identical rows (the house rule: change one, change both) */
+      if (WA.examSeriesNo(o) === null) { delete o.series_no; o.legacy = true; }
+      else o.series_no = WA.examSeriesNo(o);
+      /* date AND grade are nullable here — a minted ΕΕΘ is a planned row */
+      return o;
+    }
     if (o.exam && !WA.exam(o.exam)) { o.exam = null; o.legacy = true; }
-    if (!isDate(o.date) || !o.exam) o.legacy = true;
+    /* trial 1 is written as no key at all, so a stored 1 (or anything outside
+       1..3) is normalised away rather than carried as a second way to say it */
+    const t = Math.round(Number(o.trial));
+    if (isFinite(t) && t > 1 && t <= WA.EXAM_TRIALS) o.trial = t; else delete o.trial;
+    delete o.series; delete o.series_no;
+    /* a PLANNED trial may be dateless — a re-sit that has been ordered and not
+       yet sat is a row with a number and nothing else */
+    if ((!isDate(o.date) && !o.trial) || !o.exam) o.legacy = true;
     return o;
   });
 
@@ -2030,6 +2230,144 @@ WA.examLabel = function (id) {
   return e ? e.id + " — " + e.name : (id ? String(id) : "—");
 };
 
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 14 — TRIALS, AND THE ΕΕΘ SERIES.
+   ──────────────────────────────────────────────────────────────────────────
+   «στα ground exam να εχουμε 2nd trial, 3rd και να μπορουμε να βαλουμε τα ΕΕΘ
+    με ΕΕΘ 1, ΕΕΘ 2 κλπ»
+
+   TWO DIFFERENT THINGS ARRIVE IN ONE SENTENCE, and they are stored
+   differently because they ARE different:
+
+   1. A TRIAL is another attempt AT ONE OF THE EIGHT. It is not a new exam —
+      it is the same exam, sat again — so it carries the exam's own identity
+      and a number: `trial` 1 · 2 · 3, at most three, at most one row each.
+      A row with no `trial` key IS the first trial; nothing in the record has
+      to be rewritten for that to be true, which is why 1 is written as null.
+
+   2. AN ΕΕΘ is a WEEKLY THEORY EXAM — an OPEN series the syllabus does not
+      enumerate. It has no place among the eight and no fixed count, so it
+      carries `series` ('EETH') and `series_no` (1, 2, 3 …) and no `exam` at
+      all. The next one is max + 1: they are numbered, not dated, and the
+      number is the name.
+
+   WHICH TRIAL HOLDS THE SLOT — THE EVALUATIONS' RULE, ONE SECTION OVER.
+   The colour of an exam slot follows the OPERATIVE attempt, decided exactly
+   as round 11 decided it for the eight checkrides (WA.evalOperativeOf): PASS
+   is the filter and it runs first, LATEST is only the tiebreak, and a slot
+   with no pass at all falls back to the latest attempt so that a student who
+   has failed twice still shows a number rather than an em dash. It has to be
+   the same rule — a re-sat exam and a re-flown checkride are the same fact
+   about the same student, and two rules would let the brief and the form
+   disagree about whether IN190 is done.
+
+   NEITHER IS MUSTARD. The `extra` wash means «beyond the syllabus's one
+   planned pass», and both of these are planned: a 2nd trial is ordered by the
+   squadron, an ΕΕΘ is on the weekly programme. They take the ordinary
+   done / started verdict of any written row (WA.rowPlanned).
+   MIRROR: db/schema.sql → wa.exam_series() and the exams branch of
+   wa.validate_record. Change one, change the other.
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.EXAM_TRIALS = 3;
+WA.EXAM_SERIES = [
+  { id: "EETH", label: "ΕΕΘ", en: "EETH",
+    tip: "ΕΕΘ — the weekly theory exams. An OPEN series the syllabus does not enumerate: they are numbered ΕΕΘ 1, ΕΕΘ 2 … in the order they are sat, and both the date and the grade may be left empty until they are known. They are not one of the eight ground exams and they are not extras — they are planned." },
+];
+WA.examSeriesDef = function (id) {
+  return WA.EXAM_SERIES.find((s) => s.id === id) || null;
+};
+/* the series a row belongs to, or null when it is one of the eight */
+WA.examSeries = function (e) {
+  return (e && typeof e === "object") ? WA.examSeriesDef(String(e.series || "").trim()) : null;
+};
+WA.examSeriesNo = function (e) {
+  const n = Math.round(Number((e || {}).series_no));
+  return isFinite(n) && n >= 1 ? n : null;
+};
+/* WHICH TRIAL THIS ROW IS. Absent, null and 1 all mean the first trial — the
+   key is only ever written when it says something (2 or 3), so a record from
+   before this round is already correct without being touched. */
+WA.examTrial = function (e) {
+  const n = Math.round(Number((e || {}).trial));
+  return (isFinite(n) && n >= 1 && n <= WA.EXAM_TRIALS) ? n : 1;
+};
+WA.EXAM_TRIAL_WORDS = ["", "1st trial", "2nd trial", "3rd trial"];
+WA.examTrialWord = function (n) {
+  return WA.EXAM_TRIAL_WORDS[n] || (n + "th trial");
+};
+/* what this row IS CALLED, on every surface: "IN190 · 2nd trial", "ΕΕΘ 3" */
+WA.examRowLabel = function (e) {
+  const s = WA.examSeries(e);
+  if (s) {
+    const n = WA.examSeriesNo(e);
+    return s.label + (n === null ? "" : " " + n);
+  }
+  const id = (e && e.exam) ? String(e.exam) : "";
+  const t = WA.examTrial(e);
+  return (id || "—") + (t > 1 ? " · " + WA.examTrialWord(t) : "");
+};
+/* the next free number of a series — «next = max + 1», counted over what is
+   actually there, so a deleted ΕΕΘ 2 does not make the next one a duplicate */
+WA.examNextSeriesNo = function (list, seriesId) {
+  let max = 0;
+  for (const e of (Array.isArray(list) ? list : [])) {
+    const s = WA.examSeries(e);
+    if (!s || s.id !== seriesId) continue;
+    const n = WA.examSeriesNo(e);
+    if (n !== null && n > max) max = n;
+  }
+  return max + 1;
+};
+/* the trials of one exam already in the record, and the next free number */
+WA.examTrialsOf = function (list, examId) {
+  const out = [];
+  (Array.isArray(list) ? list : []).forEach((e, i) => {
+    if (WA.examSeries(e)) return;
+    if (!e || String(e.exam || "") !== String(examId)) return;
+    out.push({ e, i, trial: WA.examTrial(e) });
+  });
+  return out;
+};
+WA.examNextTrial = function (list, examId) {
+  const taken = {};
+  for (const t of WA.examTrialsOf(list, examId)) taken[t.trial] = true;
+  for (let n = 1; n <= WA.EXAM_TRIALS; n++) if (!taken[n]) return n;
+  return null;                       /* all three sat — the affordance is gone */
+};
+/* THE OPERATIVE TRIAL of one exam — the round-11 pass-attempt rule, verbatim,
+   over exam rows instead of evaluation rows. Returns the STORED INDEX. */
+WA.examOperativeIx = function (list, idxs) {
+  const arr = Array.isArray(list) ? list : [];
+  const at = (i) => arr[i] || {};
+  const g = (i) => {
+    const v = at(i).grade;
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return isFinite(n) ? n : null;
+  };
+  /* the same tiebreak as WA.attemptLater: date first, a dated attempt beats an
+     undated one, and equal dates fall back to the LATER TRIAL NUMBER (which is
+     what "the later attempt" means when two re-sits share a day) */
+  const later = (i, j) => {
+    const di = String(at(i).date || "").trim(), dj = String(at(j).date || "").trim();
+    if (!di !== !dj) return !!di;
+    if (di !== dj) return di > dj;
+    const ti = WA.examTrial(at(i)), tj = WA.examTrial(at(j));
+    if (ti !== tj) return ti > tj;
+    return i > j;
+  };
+  let pass = -1, any = -1, some = -1;
+  for (const i of (idxs || [])) {
+    if (some < 0 || later(i, some)) some = i;
+    const v = g(i);
+    if (v === null) continue;
+    if (any < 0 || later(i, any)) any = i;
+    if (!WA.gradePassed(v)) continue;
+    if (pass < 0 || later(i, pass)) pass = i;
+  }
+  return pass >= 0 ? pass : (any >= 0 ? any : some);
+};
+
 /* ── WHICH OF TWO ATTEMPTS CAME LATER (round 9's twin rule, extracted) ──────
    Date first; a dated attempt beats an undated one; equal dates fall back to
    the position in the stored list. ONE definition — the slot picker and the
@@ -2188,9 +2526,16 @@ WA.legacyItems = function (rec) {
    The server sends a JSON array of surnames and nothing else; this is the one
    place that turns it into the list the form draws. It takes STRINGS only —
    an object that ever appeared in that array would be dropped here rather
-   than stringified into "[object Object]" beside real names — trims them,
-   drops the empties, de-duplicates and sorts. Whatever the transport, the
-   form sees the same shape.
+   than stringified into "[object Object]" beside real names — trims them and
+   drops the empties and the duplicates. Whatever the transport, the form sees
+   the same shape.
+   ROUND 14 — IT NO LONGER SORTS, AND THAT IS THE POINT. The order is the
+   SENIORITY order (HAF before ITAF, call sign natural within each), and it is
+   decided by wa.instructor_surnames() because it is the only place that can
+   decide it: the payload is surnames and nothing else — no country, no call
+   sign ever leaves the database for a student — so the client has nothing left
+   to sort BY. Re-sorting alphabetically here, which is what round 9 did, threw
+   the squadron's own order away one line after the server had applied it.
    MIRROR: db/schema.sql → wa.instructor_surnames(). */
 WA.insNames = function (raw) {
   const seen = Object.create(null), out = [];
@@ -2201,7 +2546,7 @@ WA.insNames = function (raw) {
     seen[n] = true;
     out.push(n);
   }
-  return out.sort((a, b) => a.localeCompare(b));
+  return out;
 };
 
 /* THE STANDALONE QUESTION — the round-8 path, kept as the FALLBACK for an
@@ -2251,6 +2596,550 @@ WA.personCall = function (p, withRank) {
   const n = WA.personName(p || {}, withRank);
   const cs = WA.callSign(p);
   return cs ? n + " (" + cs + ")" : n;
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 14 — SENIORITY ORDER, AND IT IS ONE COMPARATOR.
+   ──────────────────────────────────────────────────────────────────────────
+   «τους εκπαιδευτες με σειρα αρχαιοτητας. HAF πρωτα, ITAF μετα.»
+
+   Every surface that LISTS instructors — the People table, the picker behind
+   every "who" box, the Overview submissions strip, the assessment drill-down,
+   the by-level names — used to sort them alphabetically by surname, which is
+   an order the squadron does not use for anything. The squadron's order is
+   SENIORITY, and it has two levels:
+
+     1. THE AIR FORCE.  HAF first, ITAF second, any other named air force
+        after them (alphabetically, so a third one lands somewhere definite
+        rather than wherever the roster happened to insert it), and people the
+        roster gave no country last.
+     2. THE CALL SIGN, in NATURAL order — P-2 before P-14 before P-31, never
+        the string order that puts P-14 before P-2. The call sign IS the
+        squadron's own hierarchy (P-14, the CO, comes first), which is why it
+        and not the rank field decides: rank is a grade, the call sign is the
+        position. This is the FDMS Currency precedent, unchanged.
+     3. Anybody without a call sign sorts LAST WITHIN THEIR OWN AIR FORCE, by
+        surname — they are not un-ranked, they are un-numbered.
+
+   ONE comparator, used by every list on this side; MIRROR: db/schema.sql →
+   wa.seniority_key(), which orders the same lists on the server so that a
+   payload the client cannot re-sort (the picker is surnames only — no country
+   and no call sign ever leave the database for a student) still arrives in
+   this order. Change one, change the other.
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.SENIORITY_TIP =
+  "Seniority order — HAF first, then ITAF, then any other air force; within each, by call sign in natural order (P-2 before P-14), and whoever has no call sign last by surname.";
+/* digits padded so a numeric run compares as a NUMBER: "P-14" → "P-00000014" */
+WA.natKey = function (s) {
+  return String(s === null || s === undefined ? "" : s).toUpperCase()
+    .replace(/\d+/g, (d) => d.padStart(8, "0"));
+};
+WA.SENIORITY_FORCES = ["HAF", "ITAF"];
+WA.seniorityKey = function (p) {
+  const o = p || {};
+  const c = String(o.country || "").trim().toUpperCase();
+  const i = WA.SENIORITY_FORCES.indexOf(c);
+  /* 0,1 = the two named air forces · 2 = any other, ordered by its own name
+     · 3 = the roster gave none */
+  const band = i >= 0 ? String(i) : (c ? "2" : "3");
+  const cs = String(o.call_sign || "").trim();
+  return [band, i >= 0 ? "" : c, cs ? "0" : "1", WA.natKey(cs),
+          String(o.last_name || "").toUpperCase(),
+          String(o.first_name || "").toUpperCase()].join("|");
+};
+/* the comparator itself — plain string comparison on the key, never
+   localeCompare: the key is already padded and upper-cased, and a locale that
+   sorts "|" differently would silently reorder the bands */
+WA.bySeniority = function (a, b) {
+  const ka = WA.seniorityKey(a), kb = WA.seniorityKey(b);
+  return ka < kb ? -1 : ka > kb ? 1 : 0;
+};
+/* a copy, sorted — never in place: the caller's array is usually A.data's own */
+WA.sortBySeniority = function (list) {
+  return (Array.isArray(list) ? list.slice() : []).sort(WA.bySeniority);
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 14 — THE LEFT NAVIGATION PANEL.
+   ──────────────────────────────────────────────────────────────────────────
+   «θα ηθελα στο wings ahead να προσθεσουμε στα αριστερα ενα navigation panel»
+
+   The student form is FOURTEEN SECTIONS and, since round 13 pre-seeded the
+   syllabus, something over 180 rows long. Everything in it is reachable and
+   nothing in it is findable: a student who wants to add an NFS scrolls past
+   the whole flight log to get there, and a CO entering data on somebody's
+   behalf does it twice. The panel is the form's table of contents — one row
+   per section, click to go there, and each row carries THE ONE FACT that
+   section is about, so the panel answers "what do I still owe?" without being
+   opened at all.
+
+   IT IS ONE COMPONENT AND IT IS NOT THE FORM'S. The student form and the
+   admin's Student-analysis tab both mount it; neither knows how it works, and
+   both hand it the same shape:
+     items = [{ id, label, tip, badge, bars:[{state,n}], tone }]
+   The panel renders, tracks the scroll, and re-reads the items on demand
+   (refresh) — it never reads a record, because it must not have an opinion
+   about what a section is.
+
+   STICKY, AND UNDER 900 px IT IS THE SAME LIST IN A DIFFERENT SHAPE. Above the
+   break it is a rail sticking below the top bar; below it, the SAME <ul> is a
+   one-line horizontally-scrolling strip of pills, and the burger opens it into
+   a wrapped grid of all of them. One list, two shapes: a phone gets the pills
+   without a second copy of the markup that could drift from the first.
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.NAV_BREAK = 900;
+/* how far a click may animate before it simply jumps (see go(), below) */
+WA.NAV_SMOOTH_MAX = 2400;
+/* the sticky top bar's measured height, published as a token so the CSS can
+   place the rail under it — the bar wraps to two rows on a 375 px phone and a
+   hard-coded offset would sit on top of it (the round-9 placeFloat precedent) */
+WA.measureTopbar = function () {
+  const t = document.querySelector(".topbar");
+  const h = t ? Math.round(t.getBoundingClientRect().height) : 56;
+  document.documentElement.style.setProperty("--topbar-h", h + "px");
+  return h;
+};
+WA.navItemHTML = function (it) {
+  const bars = (it.bars || []).filter((b) => b.n > 0);
+  return `
+    <li class="sn-li">
+      <button type="button" class="sn-row" data-navto="${esc(it.id)}"
+              title="${esc(it.tip || it.label)}">
+        <span class="sn-lbl">${esc(it.label)}</span>
+        ${bars.length
+          ? `<span class="sn-bars" aria-hidden="true">${bars.map((b) =>
+              `<i class="st-${esc(b.state)}" style="flex:${b.n}"
+                  title="${esc(b.n + " " + WA.rowStateDef(b.state).label)}"></i>`).join("")}</span>`
+          : ""}
+        <span class="sn-st${it.tone ? " is-" + esc(it.tone) : ""}">${esc(it.badge || "")}</span>
+      </button>
+    </li>`;
+};
+WA.navHTML = function (id, items, opts) {
+  const o = opts || {};
+  return `
+    <nav class="secnav" id="${esc(id)}" aria-label="${esc(o.aria || "Sections")}">
+      <div class="sn-head">
+        <button type="button" class="sn-burger" data-navburger
+                aria-expanded="false" aria-controls="${esc(id)}-list">
+          <span class="sn-ic" aria-hidden="true">&#9776;</span>
+          <span class="sn-t">${esc(o.title || "Sections")}</span>
+        </button>
+        <span class="sn-sum" data-navsum></span>
+      </div>
+      <ul class="sn-list" id="${esc(id)}-list">${(items || []).map(WA.navItemHTML).join("")}</ul>
+    </nav>`;
+};
+/* mount: wire the clicks, the burger and the scroll spy. Returns a controller
+   the caller keeps and DESTROYS on the way out — a scroll handler that outlived
+   its DOM is exactly the leak teardownView() exists to prevent. */
+WA.navMount = function (navEl, opts) {
+  const o = opts || {};
+  const anchor = o.anchor || ((secId) => document.getElementById("sec-" + secId));
+  const list = navEl.querySelector(".sn-list");
+  const burger = navEl.querySelector("[data-navburger]");
+  let raf = 0, dead = false;
+
+  /* WHAT HAS TO BE CLEARED ABOVE THE TARGET. Above the break that is the top
+     bar alone — the rail sits BESIDE the content, not over it. Below the break
+     the panel is a second sticky strip under the bar, so its height counts too,
+     or every jump would land the section's heading behind the very pills that
+     were used to ask for it. Measured, never assumed: the bar wraps to two rows
+     on a 375 px phone and the strip's height follows the palette's font size. */
+  function offset() {
+    const mini = window.innerWidth <= WA.NAV_BREAK
+      ? Math.round(navEl.getBoundingClientRect().height) : 0;
+    return WA.measureTopbar() + mini + 14;
+  }
+  function go(secId) {
+    const el = anchor(secId);
+    if (!el) return;
+    const y = Math.max(0, el.getBoundingClientRect().top + window.scrollY - offset());
+    const from = window.scrollY;
+    /* ── HOW FAR, AND WHETHER TO ANIMATE IT ────────────────────────────────
+       SMOOTH ONLY FOR A SHORT HOP. This form is twelve thousand pixels tall;
+       animating a jump from the top to Ground exams is not "smooth", it is a
+       four-second wait, and a table of contents exists to TAKE you there. Under
+       WA.NAV_SMOOTH_MAX the animation says «you moved down the page», which is
+       worth having; beyond it the jump is instant. `prefers-reduced-motion`
+       turns the animation off at any distance — an eleven-thousand-pixel slide
+       is exactly the movement that setting exists to switch off. */
+    const still = window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const smooth = !still && Math.abs(y - from) <= WA.NAV_SMOOTH_MAX;
+    window.scrollTo({ top: y, behavior: smooth ? "smooth" : "auto" });
+    /* AND THE LANDING IS CONFIRMED. `behavior:"smooth"` is advisory: some
+       engines and some emulation modes ignore it outright and the page simply
+       never moves, which would make the whole panel look broken while every
+       other part of it worked. So if nothing has moved AT ALL a moment later
+       and we are not already there, the jump is made instantly. A real smooth
+       scroll has travelled by then, so this never interrupts one. */
+    if (smooth) {
+      window.setTimeout(() => {
+        if (Math.abs(window.scrollY - y) > 2 && Math.abs(window.scrollY - from) < 2) {
+          window.scrollTo(0, y);
+        }
+      }, 250);
+    }
+    /* on a phone the panel is a strip the reader just tapped: close it, or the
+       section they asked for opens underneath the list they asked it from */
+    if (window.innerWidth <= WA.NAV_BREAK) setOpen(false);
+    mark(secId);
+  }
+  function mark(secId) {
+    for (const b of list.querySelectorAll(".sn-row")) {
+      const on = b.dataset.navto === secId;
+      b.classList.toggle("is-here", on);
+      if (on && window.innerWidth <= WA.NAV_BREAK && !navEl.classList.contains("is-open")) {
+        /* keep the current pill visible in the strip without moving the page */
+        const r = b.getBoundingClientRect(), lr = list.getBoundingClientRect();
+        if (r.left < lr.left || r.right > lr.right) {
+          list.scrollLeft += (r.left - lr.left) - (lr.width - r.width) / 2;
+        }
+      }
+    }
+  }
+  /* WHICH SECTION AM I IN — the last one whose top has passed the top bar. A
+     plain measurement and not an IntersectionObserver, because the sections are
+     re-rendered under it constantly (every keystroke redraws a row, a save
+     redraws all fourteen) and an observer would have to be re-registered each
+     time against elements that no longer exist. */
+  function spy() {
+    raf = 0;
+    if (dead) return;
+    const line = offset() + 8;
+    let cur = null;
+    for (const it of (o.items || [])) {
+      const el = anchor(it.id);
+      if (!el) continue;
+      if (el.getBoundingClientRect().top <= line) cur = it.id;
+    }
+    if (!cur && (o.items || []).length) cur = o.items[0].id;
+    if (cur) mark(cur);
+  }
+  function onScroll() { if (!raf) raf = window.requestAnimationFrame(spy); }
+  function setOpen(on) {
+    navEl.classList.toggle("is-open", !!on);
+    if (burger) burger.setAttribute("aria-expanded", on ? "true" : "false");
+  }
+  navEl.addEventListener("click", (ev) => {
+    if (ev.target.closest("[data-navburger]")) {
+      setOpen(!navEl.classList.contains("is-open"));
+      return;
+    }
+    const b = ev.target.closest("[data-navto]");
+    if (b) go(b.dataset.navto);
+  });
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll);
+  WA.measureTopbar();
+  spy();
+
+  return {
+    /* the states are live: every count the form recomputes lands here too */
+    refresh(items) {
+      if (dead) return;
+      o.items = items || o.items;
+      const here = list.querySelector(".sn-row.is-here");
+      const keep = here ? here.dataset.navto : null;
+      list.innerHTML = (o.items || []).map(WA.navItemHTML).join("");
+      if (keep) mark(keep);
+      const sum = navEl.querySelector("[data-navsum]");
+      if (sum) sum.textContent = o.summary ? o.summary() : "";
+    },
+    summary(text) {
+      const sum = navEl.querySelector("[data-navsum]");
+      if (sum) sum.textContent = text || "";
+    },
+    destroy() {
+      dead = true;
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      if (raf) window.cancelAnimationFrame(raf);
+    },
+  };
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 14 — WHAT AM I ABOUT TO SAVE, AND WHO AM I SAVING IT AS.
+   ──────────────────────────────────────────────────────────────────────────
+   «οταν πατησει το γενικο save ή το ειδικο να του βγαζουμε ενα μηνυμα
+    επιβεβαιωσης ποιος εγραψε (απο το link, o Maj ⟨ΟΝΟΜΑ⟩) και σε σχεση με
+    τι … Επισης θα μπορει να απορριψει. Αν θελει να απορριψει θα τον ρωταμε αν
+    θελει σιγουρα να απορριψει τις 1,2,3 αλλαγες»
+   (the surname the directive names is redacted here and everywhere else in the
+   repository — no real name enters a tracked file, ever.)
+
+   THE IDENTITY COMES FROM THE LINK, WHICH IS THE WHOLE POINT. Whoever holds a
+   personal link IS that person to this application; the one thing it can and
+   must say back before a write is WHOSE NAME goes on it. The header is the
+   token's own record (WA.me) — rank + surname, the way the squadron writes it
+   — and where the CO is entering on somebody's behalf it names both: who is
+   writing, and whose record is being written.
+
+   AND WHAT — AS A NUMBERED LIST OF SENTENCES, not a payload. The list is
+   built by comparing the form against the state it was last saved in, and
+   every item is in the terms the user can see on screen: the section, the row
+   named the round-12b way (its code / date, never a stored index), and what
+   changed, old → new. One builder for all three forms — the student's, the
+   CO's on-behalf twin and the instructor's general save — because three
+   builders is three chances for the message and the write to disagree.
+   ══════════════════════════════════════════════════════════════════════════ */
+/* "Maj ⟨SURNAME⟩" — rank + surname, and nothing else: the confirmation names
+   the person the squadron names, not the roster's full record */
+WA.personRankName = function (p) {
+  const o = p || {};
+  return [o.rank || "", o.last_name || ""].filter(Boolean).join(" ").trim() ||
+         (o.first_name || "this link's holder");
+};
+/* WHAT A ROW IS CALLED (round 12b's naming, extracted so the refusals, the
+   change list and any later surface cannot drift): what the user can SEE. */
+WA.rowTitle = function (sec, e, i) {
+  const x = e || {};
+  const bits = [];
+  if (sec === "exams") bits.push(WA.examRowLabel(x));
+  else if (x.sortie) bits.push(String(x.sortie).toUpperCase());
+  else if (x.exam) bits.push(String(x.exam));
+  else if (x.group) bits.push(String(x.group) + (x.course ? " · " + x.course : ""));
+  else if (x.slot) bits.push(WA.soloSlotLabel ? WA.soloSlotLabel(x.slot) : String(x.slot));
+  else if (x.evaluation) bits.push(String(x.evaluation));
+  else if (x.flight_code) bits.push(String(x.flight_code).toUpperCase());
+  if (x.track) bits.push(WA.itemCatLabel ? WA.itemCatLabel(x.track) : x.track);
+  const dt = x.date || x.entrance_date || x.end_date;
+  if (dt) bits.push(fmtD(dt));
+  return bits.filter(Boolean).join(" · ") ||
+         (i === undefined || i === null ? "a new entry" : "#" + (i + 1));
+};
+/* THE IDENTITY TWO VERSIONS OF ONE ROW SHARE. Without it a removed row makes
+   every row below it read as changed, which would turn one deletion into
+   eighty edits in the dialog. Where a row has a syllabus identity that IS the
+   identity; where it has none, its date and its one distinguishing string are
+   as close as the data comes, and a collision only ever costs a slightly
+   differently-worded true sentence. */
+WA.rowIdent = function (sec, e) {
+  const x = e || {};
+  const s = (v) => String(v === null || v === undefined ? "" : v).trim().toUpperCase();
+  if (sec === "flights" || sec === "fs") {
+    return [s(x.track), s(x.sortie), Math.round(Number(x.seq) || 1), s(x.kind)].join("|");
+  }
+  if (sec === "lessons") return [s(x.group), s(x.course)].join("|");
+  if (sec === "exams") {
+    const ser = WA.examSeries(x);
+    return ser ? "S|" + ser.id + "|" + (WA.examSeriesNo(x) || "?")
+               : "X|" + s(x.exam) + "|" + WA.examTrial(x);
+  }
+  if (sec === "solo_flights") return s(x.slot) || "SOLO|" + s(x.date);
+  if (sec === "evaluations") return s(x.evaluation) + "|" + s(x.date);
+  if (sec === "sms") return s(x.entrance_date) + "|" + s(x.reason);
+  return [s(x.date), s(x.flight_code), s(x.reason), s(x.evaluator), s(x.category)].join("|");
+};
+/* a value, in the words the form shows */
+WA.fieldText = function (sec, field, v) {
+  if (v === null || v === undefined || v === "") return "—";
+  if (field === "date" || field === "end_date" || field === "entrance_date" || field === "exit_date") {
+    return fmtD(v);
+  }
+  if (field === "grade") return v + " %";
+  if (field === "duration") return v + " h";
+  if (field === "ng") return v ? "non-graded (NG)" : "graded";
+  if (field === "flew_with") return v ? "yes" : "no";
+  if (field === "level") return WA.levelLabel(v);
+  if (field === "trial") return WA.examTrialWord(Math.round(Number(v)) || 1);
+  if (field === "series") {
+    const d = WA.examSeriesDef(String(v));
+    return d ? d.label : String(v);
+  }
+  if (field === "items") return (Array.isArray(v) ? v : []).join(", ") || "—";
+  if (field === "reason") {
+    const r = (sec === "sms" ? WA.smsReason(v) : WA.nfsReason(v));
+    return r ? (r.label || r.short || String(v)) : String(v);
+  }
+  if (field === "kind") {
+    const k = WA.flightKind(v);
+    return k ? k.label : String(v);
+  }
+  if (field === "mission") {
+    const m = WA.mission(v);
+    return m ? m.label : String(v);
+  }
+  if (field === "track") return WA.itemCatLabel ? WA.itemCatLabel(v) : String(v);
+  if (typeof v === "boolean") return v ? "yes" : "no";
+  return String(v);
+};
+WA.FIELD_WORDS = {
+  date: "date", end_date: "end date", entrance_date: "entrance date",
+  exit_date: "exit date", grade: "grade", instructor: "instructor",
+  evaluator: "evaluator", with: "evaluator", duration: "duration", ng: "grading",
+  mission: "mission", kind: "kind", track: "track", sortie: "flight",
+  seq: "flight of the day", note: "note", result: "result", items: "items",
+  category: "track", flight_code: "flight", reason: "reason", group: "group",
+  course: "course", exam: "exam", trial: "trial", series: "series",
+  series_no: "number", slot: "slot", evaluation: "checkride",
+  level: "assessment", flew_with: "flown with this student", comment: "comment",
+};
+WA.fieldWord = function (f) { return WA.FIELD_WORDS[f] || f; };
+/* THE FIELDS THAT ARE THE ROW'S NAME. WA.rowTitle already prints them, so an
+   «added» line that listed them again would read «IN190 · 2nd trial — added
+   (exam IN190, trial 2nd trial)». They are still compared: changing one of them
+   changes WA.rowIdent, so it surfaces as a removal and an addition, which is
+   the honest description of moving a row from one identity to another. */
+WA.IDENT_FIELDS = {
+  flights: ["track", "sortie", "seq", "kind"],
+  fs: ["track", "sortie", "seq", "kind"],
+  lessons: ["group", "course"],
+  exams: ["exam", "trial", "series", "series_no"],
+  solo_flights: ["slot"],
+  evaluations: ["evaluation"],
+};
+/* the fields a change list ever mentions — the stored keys of the section,
+   minus the two the user never typed and cannot act on */
+WA.diffFields = function (sec) {
+  return (WA.ENTRY_KEYS[sec] || []).filter((k) => k !== "legacy" && k !== "entered_by");
+};
+WA.sameValue = function (a, b) {
+  const n = (v) => (v === null || v === undefined || v === "") ? "" : v;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return JSON.stringify(Array.isArray(a) ? a : []) === JSON.stringify(Array.isArray(b) ? b : []);
+  }
+  if (typeof a === "boolean" || typeof b === "boolean") return !!a === !!b;
+  if (typeof a === "number" || typeof b === "number") {
+    if (n(a) === "" || n(b) === "") return n(a) === n(b);
+    return Number(a) === Number(b);
+  }
+  return String(n(a)) === String(n(b));
+};
+/* THE CHANGE LIST OF ONE RECORD — the student form and its CO twin.
+     before / after : two records in the migrated shape
+     → ["Ground exams · IN190 · 2nd trial — added (date 12/08/2026, grade 78 %)", …] */
+WA.recordChanges = function (before, after, sections) {
+  const A = before || {}, B = after || {}, out = [];
+  const secs = sections || WA.COUNTED;
+  for (const sec of secs) {
+    const la = (Array.isArray(A[sec]) ? A[sec] : []).filter((e) => !WA.slotOwed(sec, e));
+    const lb = (Array.isArray(B[sec]) ? B[sec] : []).filter((e) => !WA.slotOwed(sec, e));
+    const bag = {};
+    la.forEach((e, i) => {
+      const k = WA.rowIdent(sec, e);
+      (bag[k] = bag[k] || []).push({ e, i });
+    });
+    const label = WA.secLabel(sec);
+    const used = {};
+    for (const e of lb) {
+      const k = WA.rowIdent(sec, e);
+      const q = bag[k] || [];
+      const prev = q.length ? q.shift() : null;
+      if (prev) { used[k] = true; }
+      if (!prev) {
+        /* ADDED — and it says what it was added WITH, or the row would be a
+           name with no content in a list that exists to show content */
+        const ident = WA.IDENT_FIELDS[sec] || [];
+        const said = WA.diffFields(sec)
+          .filter((f) => ident.indexOf(f) < 0 && !WA.sameValue(undefined, e[f]))
+          .map((f) => WA.fieldWord(f) + " " + WA.fieldText(sec, f, e[f]));
+        out.push(label + " · " + WA.rowTitle(sec, e) + " — added" +
+                 (said.length ? " (" + said.join(", ") + ")" : ""));
+        continue;
+      }
+      const ch = [];
+      for (const f of WA.diffFields(sec)) {
+        if (WA.sameValue(prev.e[f], e[f])) continue;
+        ch.push(WA.fieldWord(f) + " " + WA.fieldText(sec, f, prev.e[f]) +
+                " → " + WA.fieldText(sec, f, e[f]));
+      }
+      if (ch.length) out.push(label + " · " + WA.rowTitle(sec, e) + " — " + ch.join(", "));
+    }
+    for (const k of Object.keys(bag)) {
+      for (const left of bag[k]) {
+        out.push(label + " · " + WA.rowTitle(sec, left.e, left.i) + " — removed");
+      }
+    }
+  }
+  return out;
+};
+/* THE CHANGE LIST OF A SET OF ASSESSMENTS — the instructor's general save.
+     before / after : { studentId: {level, flew_with, comment} }
+     nameOf(id)     : the student's name, because an id is not a change list */
+WA.proposalChanges = function (before, after, nameOf) {
+  const A = before || {}, B = after || {}, out = [];
+  for (const id of Object.keys(B)) {
+    const a = A[id] || {}, b = B[id] || {};
+    const ch = [];
+    for (const f of ["level", "flew_with", "comment"]) {
+      if (WA.sameValue(a[f], b[f])) continue;
+      ch.push(WA.fieldWord(f) + " " + WA.fieldText(null, f, a[f]) +
+              " → " + WA.fieldText(null, f, b[f]));
+    }
+    if (ch.length) out.push((nameOf ? nameOf(id) : id) + " — " + ch.join(", "));
+  }
+  return out;
+};
+
+/* THE DIALOG. One promise, three answers — "save" · "discard" · "keep" — and
+   the second question is asked INSIDE it, so a discard can still be backed out
+   of without the first list having to be rebuilt. */
+WA.confirmSave = function (opts) {
+  const o = opts || {};
+  const list = (o.changes || []).slice();
+  const n = list.length;
+  const range = n === 1 ? "1" : "1-" + n;
+  const items = (cls) => `<ol class="cfm-list${cls ? " " + cls : ""}">${
+    list.map((t) => `<li>${esc(t)}</li>`).join("")}</ol>`;
+  return new Promise((resolve) => {
+    const veil = document.createElement("div");
+    veil.className = "veil";
+    veil.id = "wa-confirm";
+    const first = () => `
+      <div class="modal cfm" role="dialog" aria-modal="true" aria-labelledby="wa-cfm-h">
+        <h3 id="wa-cfm-h">${esc(o.title || ("Save " + n + " change" + (n === 1 ? "" : "s") + "?"))}</h3>
+        <p class="cfm-who">Signed by <b>${esc(o.who || "")}</b>${
+          o.onBehalf ? ` <span class="cotag" title="${esc(WA.CO_TIP || "")}">CO</span>
+            <span class="k">on behalf of <b>${esc(o.onBehalf)}</b></span>` : ""}</p>
+        <p class="hint">${esc(o.what || "")}</p>
+        <p class="cfm-n">${esc(n + (n === 1 ? " change" : " changes"))}</p>
+        ${items()}
+        <div class="mfoot">
+          <button type="button" class="btn" data-cfm="keep">Keep editing</button>
+          <button type="button" class="btn btn-danger" data-cfm="ask">Discard changes</button>
+          <button type="button" class="btn btn-primary" data-cfm="save">Confirm &amp; save</button>
+        </div>
+      </div>`;
+    const second = () => `
+      <div class="modal cfm" role="alertdialog" aria-modal="true" aria-labelledby="wa-cfm-h2">
+        <h3 id="wa-cfm-h2">Are you sure you want to discard change${n === 1 ? "" : "s"} ${esc(range)}?</h3>
+        <p class="hint">They will be undone and the form will go back to the way it was
+          ${esc(o.savedWord || "last saved")}. This cannot be undone.</p>
+        ${items("is-warn")}
+        <div class="mfoot">
+          <button type="button" class="btn" data-cfm="back">No &mdash; go back</button>
+          <button type="button" class="btn btn-danger" data-cfm="discard">Yes, discard ${esc(
+            n === 1 ? "it" : "all " + n)}</button>
+        </div>
+      </div>`;
+    function draw(html, focusSel) {
+      veil.innerHTML = html;
+      const f = veil.querySelector(focusSel);
+      if (f) f.focus();
+    }
+    function done(answer) {
+      document.removeEventListener("keydown", onKey, true);
+      veil.remove();
+      resolve(answer);
+    }
+    function onKey(ev) {
+      if (ev.key === "Escape") { ev.preventDefault(); done("keep"); }
+    }
+    veil.addEventListener("click", (ev) => {
+      const b = ev.target.closest("[data-cfm]");
+      if (!b) return;
+      const a = b.dataset.cfm;
+      if (a === "ask") { draw(second(), '[data-cfm="back"]'); return; }
+      if (a === "back") { draw(first(), '[data-cfm="save"]'); return; }
+      done(a);
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(veil);
+    draw(first(), '[data-cfm="save"]');
+  });
 };
 
 /* copy to clipboard with fallback */

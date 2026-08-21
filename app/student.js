@@ -93,8 +93,13 @@ WA.renderStudent = async function (view, me, opts) {
        it. A flight is complete when it says WHICH flight, WHEN, and WITH WHOM. */
     flights: (e) => isDate(e.date) && !!txt(e.sortie) && !!txt(e.instructor) && !!e.track,
     fs: (e) => isDate(e.date) && !!txt(e.sortie) && !!txt(e.instructor) && !!e.track,
-    lessons: (e) => isDate(e.date) && !!WA.groundGroup(e.group),
-    exams: (e) => isDate(e.date) && !!WA.exam(e.exam),
+    /* ROUND 14 — EITHER date completes a lesson («τα μαθηματα να δεχομαστε και
+       μονο end date»); an ΕΕΘ is complete on its NUMBER, because the date and
+       the grade of a weekly exam are both allowed to arrive later. */
+    lessons: (e) => (isDate(e.date) || isDate(e.end_date)) && !!WA.groundGroup(e.group),
+    exams: (e) => WA.examSeries(e)
+      ? WA.examSeriesNo(e) !== null
+      : (isDate(e.date) && !!WA.exam(e.exam)),
   };
   const stillLegacy = (sec, e) => !!e.legacy && !COMPLETE[sec](e);
 
@@ -232,11 +237,27 @@ WA.renderStudent = async function (view, me, opts) {
     if (!WA.hasSlots(secId)) return { claimed: false, slot: null, state: null };
     const c = claimsOf(secId);
     const claimed = !!c.claimed[i];
-    return {
+    const m = {
       claimed,
       slot: claimed ? (WA.slotIndex(secId)[c.keys[i]] || null) : null,
       state: WA.rowState(secId, e, claimed),
     };
+    /* ROUND 14 — THE TWO PLANNED SHAPES OF THE EXAMS SECTION. A row that holds
+       no slot is not automatically a free-text extra any more: it may be the
+       2nd or 3rd TRIAL of one of the eight (its exam is fixed — it is an
+       attempt AT that exam, so the cell must print the exam and not offer a
+       picker), or an ΕΕΘ of the weekly series (whose identity is its number).
+       The operative trial is the one that holds the slot, so `alt` is exactly
+       "a trial that is not the one the colour follows". */
+    if (secId === "exams") {
+      m.series = WA.examSeries(e);
+      m.trial = m.series ? null : WA.examTrial(e);
+      if (!claimed && !m.series && WA.exam(e.exam)) {
+        m.alt = true;
+        m.slot = WA.slotIndex("exams")[e.exam] || null;
+      }
+    }
+    return m;
   }
   ensureSlots();
 
@@ -1073,9 +1094,19 @@ WA.renderStudent = async function (view, me, opts) {
   }
   /* the acts at the end of a ground row — one cell, both shapes (see logActs) */
   function groundActs(sec, i, e, m) {
-    const slot = m && m.slot;
+    /* ROUND 14 — a SYLLABUS SLOT is cleared, never removed (it comes back the
+       moment it is emptied, because the syllabus still prescribes it). A 2nd
+       trial and an ΕΕΘ are rows somebody ADDED — nothing re-creates them — so
+       they carry ✕ like any added row, or a trial minted by mistake would be
+       stuck in the table for ever. */
+    const slot = m && m.slot && !m.alt && !m.series;
     const owed = m && m.state === "owed";
+    /* THE MINT LIVES IN THE ACTIONS CELL, and that is not cosmetic: this cell
+       is the one a keystroke re-renders (refreshRowState), so «+ 2nd trial»
+       appears the instant the first attempt is written in. In the exam cell it
+       would have waited for the next full redraw of the section. */
     return `${rowFlags(sec, i, e)}${stateChip(m ? m.state : null)}${
+      sec === "exams" ? mintTrialHTML(i, e, m || {}) : ""}${
       slot ? (owed ? "" : clearCell(sec, i)) : rmCell(sec, i)}`;
   }
 
@@ -1083,11 +1114,44 @@ WA.renderStudent = async function (view, me, opts) {
      The grade is nullable for the same reason a flight's is: the result can
      take longer to arrive than the exam did to sit. */
   const EXAM_COLS = [
-    { t: "Exam", c: "c-ex", tip: "One of the eight ground-exam groups of the syllabus" },
+    { t: "Exam", c: "c-ex", tip: "One of the eight ground-exam groups of the syllabus — or one of the ΕΕΘ weekly theory exams, which are numbered instead" },
     { t: "Date", c: "c-dt" },
     { t: "Grade", c: "c-gr", tip: "0-100, whole. Empty means the result is not in yet" },
     { t: "", c: "c-ac" },
   ];
+  /* ── ROUND 14 — THE TRIAL BADGE AND THE MINT ──────────────────────────────
+     «στα ground exam να εχουμε 2nd trial, 3rd» — an exam may be sat up to
+     three times. The affordance lives ON THE SLOT ROW, because that is the row
+     the student is looking at when they learn they have to sit it again, and
+     it mints the NEXT free number rather than asking for one: 1, 2, 3 is the
+     whole of the choice and a box would only let it be got wrong.
+     WHICH TRIAL WEARS THE SLOT is the pass-attempt rule of the evaluations
+     (WA.claims → WA.examOperativeIx), so the colour of the row follows the
+     attempt the student actually passed on, never the first one typed. */
+  function trialBadge(e, meta) {
+    const t = meta.trial || 1;
+    if (meta.series) return "";
+    if (t === 1 && !meta.alt) return "";
+    return ` <span class="badge${meta.alt ? "" : " badge-acc"}" title="${esc(
+      meta.alt
+        ? WA.examTrialWord(t) + " of this exam. The colour of the exam above follows the attempt it was PASSED on — this row is kept and shown, and it counts for nothing in that verdict."
+        : WA.examTrialWord(t) + " — this is the attempt the exam's verdict is read from (the pass-attempt rule: a pass wins, and the later of two passes wins).")
+      }">${esc(WA.examTrialWord(t))}</span>`;
+  }
+  function mintTrialHTML(i, e, meta) {
+    if (!meta.slot || meta.alt || meta.series) return "";
+    /* AN EXAM NOBODY HAS SAT HAS NO SECOND TRIAL. The affordance appears the
+       moment the first attempt is written in, which is also the moment the
+       question «do I have to sit it again?» can first be asked. */
+    if (meta.state === "owed") return "";
+    const next = WA.examNextTrial(S.data.exams || [], e.exam);
+    if (!next || next < 2) return "";
+    return ` <button type="button" class="cfix" data-mint="exams:${i}"
+      title="${esc("Sat again? This adds the " + WA.examTrialWord(next) +
+        " of " + e.exam + " as its own row, directly under this one. Each of the eight may be sat up to " +
+        WA.EXAM_TRIALS + " times and each trial is recorded once.")}"
+      >+ ${esc(WA.examTrialWord(next))}</button>`;
+  }
   function examRow(i, e, m) {
     const meta = m || rowMeta("exams", i);
     const slot = meta.slot;
@@ -1095,8 +1159,12 @@ WA.renderStudent = async function (view, me, opts) {
     const fx = fixnoteHTML("exams", i, "grade", e.grade);
     const late = WA.awaitingDebrief(e) ? WA.daysAgo(e.date) : null;
     return `
-      <td class="c-ex">${slot
-          ? `<span class="slotc" title="${esc(slot.def.id + " — " + slot.def.name + " · " +
+      <td class="c-ex">${meta.series
+          ? `<span class="slotc serc" title="${esc(meta.series.tip)}"><b>${esc(
+               WA.examRowLabel(e))}</b></span>
+             <span class="badge" title="${esc(meta.series.tip)}">weekly theory</span>`
+          : slot
+          ? `<span class="slotc${meta.alt ? " is-alt" : ""}" title="${esc(slot.def.id + " — " + slot.def.name + " · " +
                (slot.def.p === null ? "?" : slot.def.p) + " period" + (slot.def.p === 1 ? "" : "s") +
                (slot.def.cond ? " · foreign SPs only — a HAF student does not owe it" : ""))}"
              ><b>${esc(slot.def.id)}</b> <span class="k">${esc(slot.def.name)}</span></span>`
@@ -1105,7 +1173,8 @@ WA.renderStudent = async function (view, me, opts) {
             tip: v.name + " · " + (v.p === null ? "?" : v.p) + " period" + (v.p === 1 ? "" : "s") +
                  (v.cond ? " · foreign SPs only — a HAF student does not owe it" : "") })),
           { aria: "Ground exam", ph: "— which exam? —" })}${
-        x && x.cond ? ` <span class="badge badge-acc" title="Foreign SPs only — a HAF student does not owe this exam">foreign SPs</span>` : ""}</td>
+        trialBadge(e, meta)}${
+        x && x.cond && !meta.alt ? ` <span class="badge badge-acc" title="Foreign SPs only — a HAF student does not owe this exam">foreign SPs</span>` : ""}</td>
       <td class="c-dt">${cellDate("exams", i, "date", e.date, "Date")}</td>
       <td class="c-gr">
         <input type="number" class="cellin c-num" min="0" max="100" step="1" inputmode="numeric"
@@ -1371,12 +1440,12 @@ WA.renderStudent = async function (view, me, opts) {
       blank: (track) => logBlank(track) },
 
     { id: "lessons", table: true, cols: LESSON_COLS,
-      hint: "The ground academics — the twelve theory groups of the programme and the 47 courses inside them, ALL OF THEM ALREADY HERE, grouped by their theory group and in the order the programme prints them. Fill in the start date (and the end date, because a lesson is a BLOCK and a course taught over several days is one row). There is no grade here (a lesson is attended, not scored) and no instructor: «Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο». A course the catalogue does not know goes in as an extra at the end.",
+      hint: "The ground academics — the twelve theory groups of the programme and the 47 courses inside them, ALL OF THEM ALREADY HERE, grouped by their theory group and in the order the programme prints them. A lesson is a BLOCK, so it carries a start date and an end date: fill in EITHER of them and the course is recorded — an end date on its own says the course ran and finished, which is exactly what the squadron needs to know. There is no grade here (a lesson is attended, not scored) and no instructor: «Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο». A course the catalogue does not know goes in as an extra at the end.",
       row: (e, i, m) => lessonRow(i, e, m),
       blank: () => ({ date: "", end_date: "", group: "", course: "" }) },
 
     { id: "exams", table: true, cols: EXAM_COLS,
-      hint: "The eight ground-exam groups of the syllabus, one row each and all of them present from the first day: grey until the exam is sat, light green on the date alone, green once the result is in. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and go under Ground lessons: that is where the squadron's scheduler counts them.)",
+      hint: "The eight ground-exam groups of the syllabus, one row each and all of them present from the first day: grey until the exam is sat, light green on the date alone, green once the result is in. Each of the eight may be sat up to THREE times — “+ 2nd trial” on the row adds the next attempt beneath it, and the row's colour follows the attempt it was PASSED on, exactly as a re-flown checkride does. The ΕΕΘ weekly theory exams come after the eight: they are an open series, numbered ΕΕΘ 1, ΕΕΘ 2 …, and both their date and their grade may be left empty until they are known. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and go under Ground lessons: that is where the squadron's scheduler counts them.)",
       row: (e, i, m) => examRow(i, e, m),
       blank: () => ({ date: "", exam: "", grade: null }) },
   ];
@@ -1591,7 +1660,13 @@ WA.renderStudent = async function (view, me, opts) {
       else if (e.reason === "judgement" && !txt(e.note)) out.push("the reduced performance the decision was based on");
       return out;
     }
-    if (!isDate(e.date)) out.push("the date");
+    /* ROUND 14 — the two sections where a missing `date` is not a missing
+       fact: a lesson recorded by its END alone is complete, and an ΕΕΘ is put
+       on the programme before it is sat. */
+    const dateOptional =
+      (sec === "lessons" && isDate(e.end_date)) ||
+      (sec === "exams" && !!WA.examSeries(e));
+    if (!isDate(e.date) && !dateOptional) out.push("the date");
     if (sec === "fail" || sec === "almost_good") {
       if (!WA.itemCat(e.category)) out.push("the track");
       if (!(e.items || []).length) out.push("at least one item");
@@ -1633,9 +1708,12 @@ WA.renderStudent = async function (view, me, opts) {
       out.push(e.group ? "a group from the current list (“" + e.group + "” is no longer one of them)"
                        : "which theory group it belongs to");
     }
-    if (sec === "exams" && !WA.exam(e.exam)) {
+    if (sec === "exams" && !WA.examSeries(e) && !WA.exam(e.exam)) {
       out.push(e.exam ? "an exam from the current list (“" + e.exam + "” is no longer one of them)"
                       : "which of the eight ground exams it was");
+    }
+    if (sec === "exams" && WA.examSeries(e) && WA.examSeriesNo(e) === null) {
+      out.push("its number in the " + WA.examSeries(e).label + " series");
     }
     return out;
   }
@@ -1675,9 +1753,13 @@ WA.renderStudent = async function (view, me, opts) {
     /* ROUND 12b — the four table sections break out of the form's 760 px
        reading column: eight columns of a flight log do not fit in it, and a
        row that wrapped would stop being a row. Everything else keeps the
-       column, because a stack of labelled fields is easier to read narrow. */
+       column, because a stack of labelled fields is easier to read narrow.
+       ROUND 14 — every section carries its ANCHOR (id="sec-…"), which is what
+       the left panel scrolls to. It is on the <section> and not on the heading
+       so that the whole card, hint included, comes into view. */
     return `
-      <section class="card${sec.log || sec.table ? " wide-sec" : ""}">
+      <section class="card${sec.log || sec.table ? " wide-sec" : ""}"
+               id="sec-${esc(sec.id)}" data-sec="${esc(sec.id)}">
         <div class="sec-h"><h2>${esc(WA.secLabel(sec.id))}</h2>${WA.tipDot(sec.id)}
           <span class="cnt" id="cnt-${esc(sec.id)}" title="${
             sec.fixed ? "the fixed syllabus slots, and how many of them have been flown"
@@ -1688,7 +1770,20 @@ WA.renderStudent = async function (view, me, opts) {
               /* the + Add lives inside each of the four tables — a single one
                  up here could not know which track it was adding to */
               ? `<span class="badge" title="Four tables, one per track — each has its own + Add">4 tables</span>`
-              : `<button type="button" class="btn btn-sm btn-add" data-add="${esc(sec.id)}">+ Add</button>`}</div>
+              /* ROUND 14 — THE EXAMS SECTION'S ADD BUTTON IS THE ΕΕΘ.
+                 The generic one is gone from here and it is not a loss: all
+                 eight ground exams are seeded, the list is closed server-side,
+                 and a re-sit is now a TRIAL minted on its own row. The only
+                 exam row a student can legitimately need to CREATE is the next
+                 weekly ΕΕΘ, so that is the button, and it mints max + 1. */
+              : sec.id === "exams"
+                ? `<button type="button" class="btn btn-sm btn-add" data-addseries="EETH"
+                     title="${esc("Adds the next weekly theory exam — " +
+                       WA.EXAM_SERIES[0].label + " " + WA.examNextSeriesNo(S.data.exams || [], "EETH") +
+                       ". They are numbered in order and both the date and the grade may be filled in later.")}"
+                     >+ ${esc(WA.EXAM_SERIES[0].label + " " +
+                       WA.examNextSeriesNo(S.data.exams || [], "EETH"))}</button>`
+                : `<button type="button" class="btn btn-sm btn-add" data-add="${esc(sec.id)}">+ Add</button>`}</div>
         <p class="hint">${esc(sec.hint)}</p>
         <div style="margin-top:8px" id="rows-${esc(sec.id)}">${rowsHTML(sec)}</div>
       </section>`;
@@ -1713,8 +1808,56 @@ WA.renderStudent = async function (view, me, opts) {
     `<datalist id="dl-ins">${dlOpts(INS)}</datalist>` +
     `<datalist id="dl-eval">${dlOpts(WA.EVALUATOR_ROLES.concat(INS))}</datalist>`;
 
+  /* ── ROUND 14 — WHAT THE LEFT PANEL SAYS ABOUT EACH SECTION ───────────────
+     «click scrolls to the card; each row carries a tiny state». The state is
+     THE ONE FACT that section is about, and it is read from the same counters
+     the section header prints — never a second count:
+       · the four slot sections  → the four-state bar and what is still OWED,
+         which is the question the pre-seeded syllabus exists to answer;
+       · the two fixed sections  → how many of the syllabus slots are flown;
+       · everything else         → how many entries there are, because for an
+         NFS or an FPC the number IS the fact (and zero is the good news). */
+  function navItems() {
+    return SECTIONS.map((sec) => {
+      const id = sec.id, list = S.data[id] || [];
+      const label = WA.secLabel(id);
+      if (WA.hasSlots(id)) {
+        const cn = WA.stateCounts(id, list);
+        return {
+          id, label,
+          tip: label + " — " + WA.stateLine(id, cn),
+          badge: cn.owed ? cn.owed + " owed" : (cn.n ? "all in" : "—"),
+          tone: cn.owed ? "" : (cn.n ? "good" : "muted"),
+          bars: [{ state: "done", n: cn.done }, { state: "started", n: cn.started },
+                 { state: "owed", n: cn.owed }, { state: "extra", n: cn.extra }],
+        };
+      }
+      if (sec.fixed) {
+        const slots = id === "solo_flights" ? WA.soloSlots().length : WA.EVALUATIONS.length;
+        const seen = {};
+        (list || []).forEach((e) => {
+          if (WA.slotEmpty(id, e)) return;
+          const k = id === "solo_flights" ? e.slot : e.evaluation;
+          if (k) seen[k] = true;
+        });
+        const done = Math.min(Object.keys(seen).length, slots);
+        return { id, label, tip: label + " — " + cntHTML(id),
+                 badge: done + "/" + slots,
+                 tone: done === slots ? "good" : (done ? "" : "muted"),
+                 bars: [{ state: "done", n: done }, { state: "owed", n: slots - done }] };
+      }
+      const n = WA.filled(id, list).length;
+      return { id, label, tip: label + " — " + cntHTML(id),
+               badge: String(n), tone: n ? "" : "muted" };
+    });
+  }
+
   view.innerHTML = `
-    <div class="wrap" id="stu-form">
+    <div class="pagelay lay-read" id="stu-lay">
+    ${WA.navHTML("stu-nav", navItems(), {
+        title: "Sections",
+        aria: asCO ? "Sections of this student's record" : "Sections of your record" })}
+    <div class="wrap lay-main" id="stu-form">
       ${asCO ? `
         <div class="cobar" role="note">
           <span class="cotag">CO</span>
@@ -1744,6 +1887,7 @@ WA.renderStudent = async function (view, me, opts) {
       </section>
       ${SECTIONS.map(secHTML).join("")}
     </div>
+    </div>
     ${DATALISTS}
     ${/* ROUND 9 — THE SAVE THAT COMES TO YOU. The bar below is at the bottom
          of a form several screens long; this one is fixed at the top right
@@ -1760,6 +1904,10 @@ WA.renderStudent = async function (view, me, opts) {
     </div>`;
 
   const form = $("stu-form");
+  /* the left panel, mounted once and refreshed from the same counters the
+     section headers print. WA._nav is the slot teardownView() destroys. */
+  WA._nav = WA.navMount($("stu-nav"), { items: navItems() });
+  function refreshNav() { if (WA._nav) WA._nav.refresh(navItems()); }
   for (const k of WA.COUNTED) CO_BASE[k] = (S.data[k] || []).filter(WA.isCO).length;
   /* the FIRST render is a render like any other — the locks apply to it too */
   applyLocks();
@@ -1776,7 +1924,19 @@ WA.renderStudent = async function (view, me, opts) {
   function redraw(secId) {
     $("rows-" + secId).innerHTML = rowsHTML(secById(secId));
     $("cnt-" + secId).textContent = cntHTML(secId);
+    /* ROUND 14 — the ΕΕΘ button names the number it is about to mint, so it
+       has to be re-labelled the moment one is minted or removed */
+    refreshSeriesBtn();
     applyLocks();
+    refreshNav();
+  }
+  function refreshSeriesBtn() {
+    const b = form.querySelector('[data-addseries="EETH"]');
+    if (!b) return;
+    const lbl = WA.EXAM_SERIES[0].label + " " + WA.examNextSeriesNo(S.data.exams || [], "EETH");
+    b.textContent = "+ " + lbl;
+    b.title = "Adds the next weekly theory exam — " + lbl +
+      ". They are numbered in order and both the date and the grade may be filled in later.";
   }
   /* THE LOCK, ENFORCED IN THE DOM (round 8). Every control inside a row the CO
      set is disabled — inputs, selects, the item chips' ✕, the Graded/NG chips
@@ -2052,6 +2212,9 @@ WA.renderStudent = async function (view, me, opts) {
     st.className = "st";
     st.textContent = S.dirty ? "Unsaved changes — press Save." : CLEAN_ST;
     showFloat();
+    /* the panel's states are LIVE — every keystroke that moves a row between
+       the four states moves the bar beside its section name too */
+    refreshNav();
   }
   /* the floating Save is drawn once and shown or hidden — never re-created,
      so it cannot steal the focus or flicker under a fast typist */
@@ -2205,6 +2368,65 @@ WA.renderStudent = async function (view, me, opts) {
         const first = last.querySelector("input, select");
         if (first) first.focus();
       }
+      return;
+    }
+    /* ── ROUND 14 — MINT THE NEXT TRIAL OF A GROUND EXAM ───────────────────
+       «στα ground exam να εχουμε 2nd trial, 3rd». The same shape as the
+       same-day re-fly below: an ACT, not a box. The button sits on the exam's
+       own row (that is where the student is standing when they learn they must
+       sit it again), it mints the next FREE number, and nothing else in the app
+       can produce a trial above 1 — which is what makes «one row per (exam,
+       trial)» enforceable rather than merely asked for. */
+    const mint = ev.target.closest("[data-mint]");
+    if (mint) {
+      const [sec, ix] = mint.dataset.mint.split(":");
+      const src = S.data[sec][Number(ix)];
+      if (!src || !src.exam) return;
+      const next = WA.examNextTrial(S.data.exams || [], src.exam);
+      if (!next || next < 2) {
+        toast("All " + WA.EXAM_TRIALS + " trials of " + src.exam + " are already recorded", true);
+        return;
+      }
+      S.data.exams.push({ date: "", exam: src.exam, trial: next, grade: null });
+      const at = S.data.exams.length - 1;
+      claimsDirty("exams");
+      redraw("exams");
+      markDirty();
+      const box = form.querySelector(`[data-row="exams:${at}"] [data-field="date"]`);
+      if (box) box.focus();
+      toast(WA.examTrialWord(next) + " of " + src.exam +
+        " added — the exam's colour follows the attempt it is PASSED on");
+      return;
+    }
+    /* ── ROUND 14 — MINT THE NEXT ΕΕΘ ──────────────────────────────────────
+       «να μπορουμε να βαλουμε τα ΕΕΘ με ΕΕΘ 1, ΕΕΘ 2 κλπ» — an OPEN series, so
+       the only question is the number and the only right answer is max + 1.
+       Date and grade are deliberately left empty: a weekly exam is put on the
+       programme before it is sat, and the row says so in grey until it is. */
+    const addser = ev.target.closest("[data-addseries]");
+    if (addser) {
+      const sid = addser.dataset.addseries;
+      const def = WA.examSeriesDef(sid);
+      if (!def) return;
+      const no = WA.examNextSeriesNo(S.data.exams || [], sid);
+      /* «unlimited count within caps» — and this is the cap (wa.section_cap) */
+      if (no > WA.sectionCap("exams") ||
+          WA.filled("exams", S.data.exams).length >= WA.sectionCap("exams")) {
+        toast("The ground exams section is full (" + WA.sectionCap("exams") + " rows)", true);
+        return;
+      }
+      S.data.exams.push({ date: "", series: sid, series_no: no, grade: null });
+      const at = S.data.exams.length - 1;
+      claimsDirty("exams");
+      redraw("exams");
+      markDirty();
+      const row = form.querySelector(`[data-row="exams:${at}"]`);
+      if (row) {
+        row.scrollIntoView({ block: "center" });
+        const box = row.querySelector('[data-field="date"]');
+        if (box) box.focus();
+      }
+      toast(def.label + " " + no + " added — fill the date and the grade in when they are known");
       return;
     }
     /* ── THE SAME-DAY RE-FLY (round 12) ────────────────────────────────────
@@ -3071,7 +3293,12 @@ WA.renderStudent = async function (view, me, opts) {
     }
     d.lessons.forEach((e, i) => {
       if (owedRow("lessons", e)) return;
-      if (!isDate(e.date) && !e.legacy) { need("lessons", i, "the date is required"); return; }
+      /* ROUND 14 — EITHER date, and the message says which two it means. The
+         server refuses the same row in the same words (wa.validate_record). */
+      if (!isDate(e.date) && !isDate(e.end_date) && !e.legacy) {
+        need("lessons", i, "a ground lesson is recorded by its start date, its end date, or both — one of the two is required");
+        return;
+      }
       if (!WA.groundGroup(e.group)) {
         need("lessons", i, e.group
           ? "“" + e.group + "” is not one of the twelve theory groups — choose the group again"
@@ -3103,19 +3330,67 @@ WA.renderStudent = async function (view, me, opts) {
         course: course || null,
       }, e);
     });
+    /* ROUND 14 — the two shapes, and the two closed rules the server enforces:
+       one row per (exam, trial), and ΕΕΘ numbers unique. Both are refused here
+       first, in the same words, and named by the row the user can SEE. */
+    const seenTrial = {}, seenSeries = {};
     d.exams.forEach((e, i) => {
       if (owedRow("exams", e)) return;
-      if (!isDate(e.date) && !e.legacy) { need("exams", i, "the date is required"); return; }
+      const ser = WA.examSeries(e);
+      if (ser) {
+        const no = WA.examSeriesNo(e);
+        if (no === null && !e.legacy) {
+          need("exams", i, "every " + ser.label + " carries its number — the number is its name");
+          return;
+        }
+        const k = ser.id + "|" + no;
+        if (seenSeries[k]) {
+          need("exams", i, "there is already a " + ser.label + " " + no +
+            " — the number is the name, so it identifies exactly one weekly exam");
+          return;
+        }
+        seenSeries[k] = true;
+        if (!intOK("exams", i, e, "grade", "the grade")) return;
+        /* NEITHER the date NOR the grade is required — «date + grade nullable»:
+           an ΕΕΘ is put on the weekly programme before it is sat */
+        push("exams", {
+          date: e.date || null,
+          series: ser.id,
+          series_no: no,
+          grade: gr(e.grade),
+        }, e);
+        return;
+      }
+      const t0 = WA.examTrial(e);
+      /* ROUND 14 — A PLANNED ATTEMPT MAY BE DATELESS. A minted 2nd or 3rd trial
+         says «a re-sit has been ordered» before it says when; the FIRST trial
+         still needs its date, because a first attempt with no date is exactly
+         the owed slot, and that stores nothing at all. */
+      if (!isDate(e.date) && t0 === 1 && !e.legacy) {
+        need("exams", i, "the date is required"); return;
+      }
       if (!WA.exam(e.exam)) {
         need("exams", i, e.exam
           ? "“" + e.exam + "” is not one of the eight ground exams — choose it again"
-          : "every exam row names which of the eight ground exams it was");
+          : "every exam row names which of the eight ground exams it was, or the " +
+            WA.EXAM_SERIES[0].label + " series it belongs to");
         return;
       }
+      const t = t0;
+      const tk = e.exam + "|" + t;
+      if (seenTrial[tk]) {
+        need("exams", i, "the " + WA.examTrialWord(t) + " of " + e.exam +
+          " is already recorded — each of the eight may be sat once per trial");
+        return;
+      }
+      seenTrial[tk] = true;
       if (!intOK("exams", i, e, "grade", "the grade")) return;
       push("exams", {
         date: e.date || null,
         exam: e.exam || null,
+        /* trial 1 is written as NO KEY AT ALL — the absence is the first trial,
+           and a stored 1 would be a second spelling of the same fact */
+        ...(t > 1 ? { trial: t } : {}),
         grade: gr(e.grade),
       }, e);
     });
@@ -3150,6 +3425,60 @@ WA.renderStudent = async function (view, me, opts) {
      top right both land here, so the validation, the stamping and the receipt
      can never differ between them. Both are disabled while the call is in
      flight — a double-tap on a phone must not send the record twice. */
+  /* ── ROUND 14 — THE CONFIRMATION, AND THE ENUMERATED DISCARD ──────────────
+     «οταν πατησει το γενικο save ή το ειδικο να του βγαζουμε ενα μηνυμα
+      επιβεβαιωσης ποιος εγραψε (απο το link, o Maj ⟨ΟΝΟΜΑ⟩) και σε σχεση με
+      τι … Αν θελει να απορριψει θα τον ρωταμε αν θελει σιγουρα να απορριψει τις
+      1,2,3 αλλαγες»   (the surname is redacted — see app.js)
+     WHO comes from the TOKEN, which is the whole identity model of this
+     application: whoever holds a personal link IS that person, and the one
+     thing the form owes them before a write is whose name goes on it. On the
+     CO's on-behalf twin that is TWO names — who is writing, and whose record —
+     because the tag the save leaves behind says exactly that.
+     WHAT is the numbered change list, built by the shared WA.recordChanges
+     against SAVED_REC (the record as it was last saved) — the same baseline the
+     floating Save's fingerprint uses, so the dialog and the button can never
+     disagree about whether there is anything to save.
+     DISCARD asks the second question and, on yes, restores that baseline. */
+  let SAVED_REC = JSON.parse(JSON.stringify(S.data));
+  function snapshotSaved() { SAVED_REC = JSON.parse(JSON.stringify(S.data)); }
+  function discardToSaved() {
+    const back = JSON.parse(JSON.stringify(SAVED_REC));
+    for (const k of Object.keys(S.data)) delete S.data[k];
+    for (const k of Object.keys(back)) S.data[k] = back[k];
+    ensureSlots();
+    claimsDirty();
+    for (const sec of SECTIONS) redraw(sec.id);
+    showLegacyNote();
+    showCoNote();
+    markDirty();
+  }
+  async function confirmedSave() {
+    const changes = WA.recordChanges(SAVED_REC, S.data, SECTIONS.map((s) => s.id));
+    if (!changes.length) {
+      /* the fingerprint says the form differs but no change list can be built —
+         a normalisation, not an edit. Save it without asking about nothing. */
+      return save();
+    }
+    const ans = await WA.confirmSave({
+      who: WA.personRankName(WA.me || {}),
+      onBehalf: asCO ? WA.personRankName(who) : "",
+      title: "Save " + changes.length + " change" + (changes.length === 1 ? "" : "s") +
+             " to " + (asCO ? WA.personRankName(who) + "’s record" : "your record") + "?",
+      what: asCO
+        ? "Everything below is written on this student’s record and tagged “entered by CO”."
+        : "Everything below is written on your own training record, which your instructors and the squadron CO can see.",
+      changes,
+    });
+    if (ans === "keep") return;
+    if (ans === "discard") {
+      discardToSaved();
+      toast(changes.length + " change" + (changes.length === 1 ? "" : "s") + " discarded — the form is back to the last saved record");
+      return;
+    }
+    return save();
+  }
+
   async function save() {
     const st = $("stu-status");
     const { clean, rows, problems, leftovers, problemAt } = buildPayload();
@@ -3197,6 +3526,8 @@ WA.renderStudent = async function (view, me, opts) {
                      /* round 12 — the log rows' own strings (12b: `mission`
                         replaced `verdict`, and `note` is gone from the four) */
                      "track", "kind", "mission", "group", "course", "exam",
+                     /* round 14 — the ΕΕΘ series id is a stored string too */
+                     "series",
                      "instructor_oid", "end_date"];
       for (const sec of SECTIONS) {
         const list = srv ? (Array.isArray(srv[sec.id]) ? srv[sec.id] : []) : null;
@@ -3227,6 +3558,9 @@ WA.renderStudent = async function (view, me, opts) {
          loop above and not before it: a value the server trimmed would
          otherwise read as an edit and bring the floating Save straight back. */
       markSaved();
+      /* the change list's baseline moves with the fingerprint's, and for the
+         same reason: it is taken AFTER the server's normalisation is adopted */
+      snapshotSaved();
       st.className = "st ok";
       CLEAN_ST = "Saved ✓ " + fmtDT(S.lastUpdate) +
         (asCO ? " — " + coN + " of " + coTot + " entr" + (coTot === 1 ? "y" : "ies") +
@@ -3248,8 +3582,12 @@ WA.renderStudent = async function (view, me, opts) {
        still be there to try again — the fingerprint says so either way */
     showFloat();
   }
-  $("stu-save").addEventListener("click", save);
-  $("stu-float-save").addEventListener("click", save);
+  /* BOTH buttons go through the confirmation — «το γενικο save ή το ειδικο»:
+     they are one act with two positions on the screen, and a dialog that
+     appeared for only one of them would teach the student that the other one
+     writes without asking. */
+  $("stu-save").addEventListener("click", confirmedSave);
+  $("stu-float-save").addEventListener("click", confirmedSave);
 
   WA._stuState = S;
   if (!WA._stuUnloadHooked) {

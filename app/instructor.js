@@ -8,8 +8,12 @@
    ROUND 10: the branch ranking is gone. An instructor no longer distributes a
    student across three aircraft types; he answers one question about him,
    once, and the answer is one of five levels defined in app.js → WA.LEVELS.
-   The fifth option is separated from the four above by a thin rule because it
-   is a different KIND of statement, not merely the next step down.
+   ROUND 14: the thin rule moved up one — it now sits between «Recommended as
+   Alternate» and «Recommended for Other Assignments», where it marks the real
+   boundary of the scale: three FIGHTER answers above it, two REDIRECT answers
+   below. And the per-student Save is gone: ONE general Save writes every
+   assessment that differs from what is stored, after a confirmation naming the
+   instructor the link belongs to and listing the changes.
 
    ROUND-4 ENTER-ON-BEHALF: the SAME form, bound to another instructor.
    opts.asCO swaps the two RPCs for their admin_* twins (identical validation
@@ -123,8 +127,10 @@ WA.renderInstructor = async function (view, me, opts) {
       ? (() => {
           const cl = WA.stateCounts("lessons", rec.lessons);
           const cx = WA.stateCounts("exams", rec.exams);
-          return `<div class="line">Ground: <b>${esc(cl.done)}</b> of ${
-            esc(WA.slotCount("lessons"))} lessons · <b>${esc(cx.done)}</b> of ${
+          /* ROUND 14 — slotsDone, not done: an exam sat three times is ONE
+             exam done, and «9 of 8» would be the arithmetic saying so */
+          return `<div class="line">Ground: <b>${esc(cl.slotsDone)}</b> of ${
+            esc(WA.slotCount("lessons"))} lessons · <b>${esc(cx.slotsDone)}</b> of ${
             esc(WA.slotCount("exams"))} exams</div>`;
         })()
       : "");
@@ -174,10 +180,13 @@ WA.renderInstructor = async function (view, me, opts) {
      control now IS: five mutually exclusive answers to a single question, and
      the browser gives arrow-key navigation, the group role and the
      screen-reader wording for free.
-     THE THIN RULE before the fifth option is not decoration. The four above it
-     place a student on the fighter track or beside it; the fifth places him
-     firmly elsewhere. It is a different kind of statement, so it is not
-     allowed to look like the mere continuation of a list.
+     THE THIN RULE IS THE FIGHTER / OTHER SPLIT (round 14). «την γραμμη μεταξυ
+     recommended as alternate and recommended for other assignments» — it moved
+     up one, and the move is what turned it from a typographic hedge into the
+     one boundary this form is asked to draw: the THREE answers above it place a
+     student on the fighter track or immediately beside it; the TWO below it
+     place him somewhere else in the Air Force. It is drawn from
+     WA.LEVEL_SEP_AT, so the scale and the rule can never disagree.
      CLEARING: clicking the selected level again returns the student to "no
      view formed yet" — the same escape the round-8 chips had, which a radio
      group does not offer by itself, and the only way to un-say something the
@@ -209,12 +218,21 @@ WA.renderInstructor = async function (view, me, opts) {
           Choosing the selected one again clears it; leaving it unanswered says nothing either way.</div>
         <div class="lvlgroup" role="radiogroup"
              aria-label="Assessment for fighters" data-lvlgroup="${esc(sid)}">${levelGroup(sid)}</div>
+        ${/* ROUND 14 — THE PER-STUDENT SAVE IS GONE. «το save οχι για καθε
+             μαθητη, αλλα γενικα.» Round 10 argued for it («the card's OWN Save
+             announces the dirt») and the argument had one flaw the live form
+             makes obvious: an instructor answers a QUESTIONNAIRE about a class,
+             not twelve separate forms, and a Save per card asks him to perform
+             twelve acts to complete one. The objection round 10 raised against
+             a single button — "save which of them?" — is answered by the same
+             machinery the student form has had since round 9: DIRT IS MEASURED,
+             so the one button saves exactly the cards that differ from what is
+             stored, and re-stamps nothing else. */ ""}
         <div class="prop-foot">
           <label class="ck"><input type="checkbox" data-flew="${esc(sid)}" ${p.flew_with ? "checked" : ""}>
             I have flown with this student</label>
           <input type="text" placeholder="Comment (optional)" maxlength="500"
                  value="${esc(p.comment)}" data-comment="${esc(sid)}">
-          <button type="button" class="btn btn-primary btn-sm" data-save="${esc(sid)}">Save${asCO ? " as CO" : ""}</button>
           <span class="prop-st" data-st="${esc(sid)}">${p.savedAt
             ? "Saved ✓ " + esc(fmtDT(p.savedAt)) : "No assessment submitted yet."}</span>
           ${p.enteredBy === "admin"
@@ -249,6 +267,20 @@ WA.renderInstructor = async function (view, me, opts) {
       ${data.students.length
         ? data.students.map(stuCard).join("")
         : `<section class="card"><p class="hint">No active students yet.</p></section>`}
+    </div>
+    ${/* ROUND 14 — ONE SAVE, and it is the student form's floating pattern:
+         this form is one card per student and a dozen screens long, so a
+         button at the bottom is a button most of the class never scrolls to.
+         It says HOW MANY assessments it is about to write, because that is the
+         number the instructor is deciding about. */ ""}
+    <div class="savefloat" id="ins-float" hidden>
+      <span class="sf-hint" id="ins-float-hint">unsaved</span>
+      <button type="button" class="btn btn-primary" id="ins-float-save">Save</button>
+    </div>
+    <div class="savebar">
+      ${asCO ? backBtn : ""}
+      <button type="button" class="btn btn-primary" id="ins-save">Save</button>
+      <span class="st" id="ins-status">Assessments are kept only after you press Save.</span>
     </div>
     <div class="print-only" id="print-ins"></div>`;
 
@@ -339,23 +371,70 @@ WA.renderInstructor = async function (view, me, opts) {
       if (input) input.checked = on;          // a cleared answer unchecks all five
     }
   }
-  /* THE DIRTY SAVE (round 10 judgement). The student form's FLOATING Save
-     exists because that form is metres long and its Save scrolls away; this
-     one is a five-option question with its Save inside the same small card,
-     never more than a thumb away, and there is one card PER STUDENT — a
-     floating button would have to answer "save which of them?", either by
-     saving all (a batch write nobody asked for, and one that would re-stamp
-     rows the CO owns) or by guessing. So the card's OWN Save announces the
-     dirt instead: it goes accent-ringed the moment anything changes, which is
-     what the floating button was ever for. */
+  /* ── ROUND 14 — DIRT IS MEASURED, AND ONE BUTTON SAVES WHAT IS DIRTY ──────
+     «το save οχι για καθε μαθητη, αλλα γενικα.» The round-9 doctrine of the
+     student form, applied here: SAVED holds each card as it was last stored,
+     the card is dirty when it DIFFERS, and the one Save writes exactly the
+     dirty ones. Change something and change it back and the card leaves the
+     list, because the assessment really is the stored one again — which is
+     also what stops the general Save from re-stamping a row the CO owns and
+     the instructor never touched (owner-reclaim only happens where the
+     instructor actually answered). */
+  const SAVED = {};
+  const fp = (x) => JSON.stringify([x.level, !!x.flew_with, String(x.comment || "").trim()]);
+  for (const sid of Object.keys(P)) SAVED[sid] = fp(P[sid]);
+  function dirtyIds() {
+    return Object.keys(P).filter((sid) => fp(P[sid]) !== SAVED[sid]);
+  }
+  function nameOf(sid) {
+    const s = data.students.find((x) => x.person.id === sid);
+    return s ? WA.personName(s.person, true) : sid;
+  }
+  function stateOf(sid) {
+    const p = P[sid];
+    return { level: p.level, flew_with: !!p.flew_with, comment: String(p.comment || "").trim() };
+  }
+  function savedStateOf(sid) {
+    const a = JSON.parse(SAVED[sid]);
+    return { level: a[0], flew_with: a[1], comment: a[2] };
+  }
   function markDirty(sid) {
-    P[sid].dirty = true;
+    const d = fp(P[sid]) !== SAVED[sid];
+    P[sid].dirty = d;
     if (WA._insPrint) WA._insPrint();
     const st = root.querySelector(`[data-st="${sid}"]`);
-    st.className = "prop-st";
-    st.textContent = "Unsaved changes — press Save.";
-    const btn = root.querySelector(`[data-save="${sid}"]`);
-    if (btn) btn.classList.add("is-dirty");
+    if (st) {
+      st.className = "prop-st";
+      st.textContent = d
+        ? "Unsaved — it will be written by the Save button."
+        : (P[sid].savedAt ? "Saved ✓ " + fmtDT(P[sid].savedAt) : "No assessment submitted yet.");
+    }
+    const card = root.querySelector(`[data-stucard="${sid}"]`);
+    if (card) card.classList.toggle("is-dirty", d);
+    refreshSave();
+  }
+  function refreshSave() {
+    const n = dirtyIds().length;
+    const word = "Save " + n + " assessment" + (n === 1 ? "" : "s") + (asCO ? " as CO" : "");
+    for (const id of ["ins-save", "ins-float-save"]) {
+      const b = document.getElementById(id);
+      if (!b) continue;
+      b.textContent = n ? word : "Save" + (asCO ? " as CO" : "");
+      b.disabled = !n;
+    }
+    const f = document.getElementById("ins-float");
+    if (f) f.hidden = !n;
+    const h = document.getElementById("ins-float-hint");
+    if (h) h.textContent = n + " unsaved";
+    const st = document.getElementById("ins-status");
+    if (st && !st.classList.contains("ok") && !st.classList.contains("err")) {
+      st.textContent = n
+        ? n + " assessment" + (n === 1 ? "" : "s") + " changed — press Save."
+        : "Assessments are kept only after you press Save.";
+    }
+    /* the floating bar clears the sticky top bar, whatever height it wrapped
+       to on this screen (the round-9 measurement, not a hardcoded offset) */
+    if (f) f.style.top = (WA.measureTopbar() + 10) + "px";
   }
 
   root.addEventListener("click", async (ev) => {
@@ -374,13 +453,28 @@ WA.renderInstructor = async function (view, me, opts) {
       markDirty(sid);
       return;
     }
-    const save = ev.target.closest("[data-save]");
-    if (save) {
-      const sid = save.dataset.save;
-      const st = root.querySelector(`[data-st="${sid}"]`);
-      save.disabled = true;
-      st.className = "prop-st";
-      st.textContent = "Saving…";
+  });
+
+  /* ── ROUND 14 — THE ONE GENERAL SAVE ──────────────────────────────────────
+     ONE ACT, ONE STUDENT AT A TIME ON THE WIRE. There is deliberately no batch
+     RPC: wa.write_proposal carries the whole per-proposal contract — the level
+     normalisation, the owner-reclaim that clears the CO tag when the owner
+     answers, the CO stamp when the CO does — and a second write path would be
+     a second place for those rules to live. So the button iterates the DIRTY
+     cards over the RPC that already exists, and reports per card: an assessment
+     the server refuses leaves that one card unsaved and named, and the rest of
+     the class still lands. */
+  async function saveAll(ids) {
+    const st = $("ins-status");
+    const btns = [$("ins-save"), document.getElementById("ins-float-save")].filter(Boolean);
+    btns.forEach((b) => { b.disabled = true; });
+    st.className = "st";
+    st.textContent = "Saving " + ids.length + "…";
+    let ok = 0;
+    const failed = [];
+    for (const sid of ids) {
+      const cst = root.querySelector(`[data-st="${sid}"]`);
+      if (cst) { cst.className = "prop-st"; cst.textContent = "Saving…"; }
       try {
         const payload = { level: P[sid].level,
                           flew_with: P[sid].flew_with,
@@ -396,29 +490,96 @@ WA.renderInstructor = async function (view, me, opts) {
            database could ever disagree about is settled here */
         P[sid].level = WA.level(res.level) ? res.level : null;
         P[sid].dirty = false;
+        SAVED[sid] = fp(P[sid]);
         syncLevels(sid);
-        save.classList.remove("is-dirty");
-        st.className = "prop-st ok";
-        st.textContent = "Saved ✓ " + fmtDT(res.updated_at) +
-          (P[sid].level ? " — " + WA.levelLabel(P[sid].level) : " — no assessment recorded") +
-          (asCO ? " — tagged as entered by CO" : "");
-        if (WA._insPrint) WA._insPrint();
+        if (cst) {
+          cst.className = "prop-st ok";
+          cst.textContent = "Saved ✓ " + fmtDT(res.updated_at) +
+            (P[sid].level ? " — " + WA.levelLabel(P[sid].level) : " — no assessment recorded") +
+            (asCO ? " — tagged as entered by CO" : "");
+        }
+        const card = root.querySelector(`[data-stucard="${sid}"]`);
+        if (card) card.classList.remove("is-dirty");
         /* mirror the server's stamp: the OWNER saving clears it (db/schema.sql
            → wa.write_proposal), the CO saving sets it */
         const tag = root.querySelector(`[data-cotag="${sid}"]`);
-        if (asCO && !tag) {
-          st.insertAdjacentHTML("afterend",
+        if (asCO && !tag && cst) {
+          cst.insertAdjacentHTML("afterend",
             `<span class="cotag" data-cotag="${esc(sid)}" title="${esc(WA.CO_TIP)}">CO</span>`);
         } else if (!asCO && tag) tag.remove();
-        toast(asCO ? "Assessment saved as CO — it is tagged" : "Assessment saved");
+        ok++;
       } catch (e) {
-        st.className = "prop-st err";
-        st.textContent = "Save failed: " + e.message;
-        toast("Save failed: " + e.message, true);
+        failed.push({ sid, msg: e.message });
+        if (cst) { cst.className = "prop-st err"; cst.textContent = "Save failed: " + e.message; }
       }
-      save.disabled = false;
     }
-  });
+    if (WA._insPrint) WA._insPrint();
+    btns.forEach((b) => { b.disabled = false; });
+    refreshSave();
+    if (failed.length) {
+      st.className = "st err";
+      st.textContent = ok + " saved · " + failed.length + " refused — " +
+        nameOf(failed[0].sid) + ": " + failed[0].msg;
+      toast(failed.length + " assessment" + (failed.length === 1 ? "" : "s") + " could not be saved", true);
+      const card = root.querySelector(`[data-stucard="${failed[0].sid}"]`);
+      if (card) card.scrollIntoView({ block: "center" });
+    } else {
+      st.className = "st ok";
+      st.textContent = ok + " assessment" + (ok === 1 ? "" : "s") + " saved ✓ " +
+        fmtDT(new Date().toISOString()) + (asCO ? " — tagged as entered by CO" : "");
+      toast(asCO
+        ? ok + " assessment" + (ok === 1 ? "" : "s") + " saved as CO — they are tagged"
+        : ok + " assessment" + (ok === 1 ? "" : "s") + " saved");
+    }
+  }
+  /* the change list, then the write — «ποιος εγραψε … και σε σχεση με τι» */
+  async function confirmedSaveAll() {
+    const ids = dirtyIds();
+    if (!ids.length) return;
+    const before = {}, after = {};
+    for (const sid of ids) { before[sid] = savedStateOf(sid); after[sid] = stateOf(sid); }
+    const changes = WA.proposalChanges(before, after, nameOf);
+    const ans = await WA.confirmSave({
+      who: WA.personRankName(WA.me || {}),
+      onBehalf: asCO ? WA.personRankName(who) : "",
+      title: "Save " + ids.length + " assessment" + (ids.length === 1 ? "" : "s") + "?",
+      what: asCO
+        ? "These are recorded as this instructor’s assessments and tagged “entered by CO”. Every one of them is about FIGHTERS, on the five-level scale."
+        : "These are your assessments for the Wing Commander brief — one answer per student, about FIGHTERS, on the five-level scale.",
+      savedWord: "last saved",
+      changes,
+    });
+    if (ans === "keep") return;
+    if (ans === "discard") {
+      for (const sid of ids) {
+        const a = savedStateOf(sid);
+        P[sid].level = a.level;
+        P[sid].flew_with = a.flew_with;
+        P[sid].comment = a.comment;
+        syncLevels(sid);
+        const box = root.querySelector(`[data-comment="${sid}"]`);
+        if (box) box.value = a.comment;
+        const ck = root.querySelector(`[data-flew="${sid}"]`);
+        if (ck) ck.checked = a.flew_with;
+        markDirty(sid);
+      }
+      if (WA._insPrint) WA._insPrint();
+      toast(changes.length + " change" + (changes.length === 1 ? "" : "s") +
+        " discarded — the form is back to the last saved assessments");
+      return;
+    }
+    await saveAll(ids);
+  }
+  $("ins-save").addEventListener("click", confirmedSaveAll);
+  $("ins-float-save").addEventListener("click", confirmedSaveAll);
+  refreshSave();
+  if (!WA._insFloatHooked) {
+    WA._insFloatHooked = true;
+    window.addEventListener("resize", () => {
+      const f = document.getElementById("ins-float");
+      if (f) f.style.top = (WA.measureTopbar() + 10) + "px";
+    });
+  }
 
   root.addEventListener("input", (ev) => {
     const el = ev.target;
@@ -444,9 +605,11 @@ WA.renderInstructor = async function (view, me, opts) {
   if (asCO) {
     view.addEventListener("click", (ev) => {
       if (!ev.target.closest("[data-coback]")) return;
-      if (Object.values(P).some((x) => x.dirty) && !window.confirm(
-        "Some assessments have unsaved changes. Leave without saving?")) return;
-      for (const k of Object.keys(P)) P[k].dirty = false;
+      const n = dirtyIds().length;
+      if (n && !window.confirm(
+        n + " assessment" + (n === 1 ? " has" : "s have") +
+        " unsaved changes. Leave without saving?")) return;
+      for (const k of Object.keys(P)) { P[k].dirty = false; SAVED[k] = fp(P[k]); }
       location.hash = WA.adminHash();
     });
   }

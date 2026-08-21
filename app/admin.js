@@ -212,15 +212,96 @@ WA.renderAdmin = async function (view, me) {
     </div>
     <div class="print-only" id="print-brief"></div>`;
 
+  /* ══ ROUND 14 — THE LEFT PANEL ON THE DASHBOARD: THE JUDGEMENT ════════════
+     «Check the ADMIN dashboard too — if a left panel helps there
+      (Overview/Analysis/Brief/People as vertical nav), apply the same pattern.»
+
+     THE FOUR TABS STAY A HORIZONTAL CHIP ROW, and that is a ruling and not an
+     omission. A left panel answers ONE question — «where am I in this long
+     document, and what is in the rest of it» — and the four tabs are not a
+     document: each one REPLACES the whole content, so a vertical rail of them
+     could only ever highlight the row that is already lit. What it would cost
+     is real: ~220 px of width on every tab, for ever, and the two things this
+     dashboard most needs width for sit exactly there — the Overview's
+     thirteen-column table and the log tables in the analysis.
+
+     BUT THE PATTERN'S REAL HOME IN THE ADMIN IS THE STUDENT ANALYSIS, which IS
+     a document: ten cards, several screens, and the CO reading it is looking
+     for a section (the evaluations plot, the FAIL table, the flight log, the
+     assessment). So the panel goes THERE, listing that tab's cards and carrying
+     the same live states, mounted from the same WA.navMount the student form
+     uses. One component, two surfaces; the tabs keep the shape that suits a
+     view switch. */
+  const ANA_CARDS = [
+    { id: "ana-id", label: "Student" },
+    { id: "ana-cmp", label: "Comparison" },
+    { id: "ana-eval", label: "Evaluations" },
+    { id: "ana-fail", label: "FAIL & Almost Good" },
+    { id: "ana-air", label: "Airsickness" },
+    { id: "ana-other", label: "Other entries" },
+    { id: "ana-flights", label: "Flights" },
+    { id: "ana-fs", label: "F/S" },
+    { id: "ana-ground", label: "Ground" },
+    { id: "ana-assess", label: "Assessment" },
+  ];
+  function anaNavItems() {
+    const s = A.data && A.data.students[A.sel];
+    const plain = ANA_CARDS.map((c) => ({ id: c.id, label: c.label }));
+    if (!s) return plain;
+    const st = s._stats;
+    const cnt = (n) => ({ badge: String(n), tone: n ? "" : "muted" });
+    const bars = (sec) => {
+      const cn = WA.stateCounts(sec, s.record[sec]);
+      return { badge: cn.owed ? cn.owed + " owed" : (cn.n ? "all in" : "—"),
+               tone: cn.owed ? "" : (cn.n ? "good" : "muted"),
+               tip: WA.secLabel(sec) + " — " + WA.stateLine(sec, cn),
+               bars: [{ state: "done", n: cn.done }, { state: "started", n: cn.started },
+                      { state: "owed", n: cn.owed }, { state: "extra", n: cn.extra }] };
+    };
+    const gl = WA.stateCounts("lessons", s.record.lessons);
+    const gx = WA.stateCounts("exams", s.record.exams);
+    const a = s.assessment || { n: 0, mean: null };
+    const by = {
+      "ana-fail": cnt(st.fail + st.almost_good),
+      "ana-air": cnt(st.airsickness),
+      "ana-other": cnt(st.fpc + st.cef + st.nfs + st.sms),
+      "ana-flights": bars("flights"),
+      "ana-fs": bars("fs"),
+      /* the two ground blocks share one card, so their row carries the pair */
+      "ana-ground": {
+        badge: (gl.owed + gx.owed) ? (gl.owed + gx.owed) + " owed" : "all in",
+        tone: (gl.owed + gx.owed) ? "" : "good",
+        tip: "Ground lessons — " + WA.stateLine("lessons", gl) +
+             " · Ground exams — " + WA.stateLine("exams", gx),
+        bars: [{ state: "done", n: gl.done + gx.done },
+               { state: "started", n: gl.started + gx.started },
+               { state: "owed", n: gl.owed + gx.owed },
+               { state: "extra", n: gl.extra + gx.extra }],
+      },
+      "ana-assess": { badge: a.n ? "Ø " + WA.meanText(a.mean) : "—",
+                      tone: a.n ? "good" : "muted" },
+    };
+    return ANA_CARDS.map((c) => Object.assign({ id: c.id, label: c.label }, by[c.id] || {}));
+  }
+
   function render() {
     for (const c of view.querySelectorAll("#adm-tabs .chip"))
       c.classList.toggle("is-on", c.dataset.tab === A.tab);
     const el = $("adm-content");
+    /* the panel belongs to the analysis tab and to nothing else — a scroll
+       listener pointing at cards that no longer exist is the one bug this
+       component can have, so every redraw destroys it before it draws */
+    if (WA._nav) { WA._nav.destroy(); WA._nav = null; }
     if (!A.data) { el.innerHTML = `<div class="card"><p class="hint">Loading…</p></div>`; return; }
     if (A.tab === "overview") el.innerHTML = htmlOverview();
     else if (A.tab === "students") el.innerHTML = htmlAnalysis();
     else if (A.tab === "brief") el.innerHTML = htmlBrief();
     else el.innerHTML = htmlPeople();
+    const nav = document.getElementById("ana-nav");
+    /* the analysis cards carry their own ids, so the panel is told how to
+       find them instead of assuming the student form's "sec-" prefix */
+    if (nav) WA._nav = WA.navMount(nav, { items: anaNavItems(),
+      anchor: (id) => document.getElementById(id) });
   }
 
   /* ════════ OVERVIEW ════════ */
@@ -292,7 +373,12 @@ WA.renderAdmin = async function (view, me) {
        breakdown in the payload, so "7/12" cannot be re-derived for one class
        here. It therefore stays the whole squadron's number and says so out
        loud the moment a filter is on. */
-    const insRows = A.data.instructors.map((i) => {
+    /* ROUND 14 — SENIORITY, not the alphabet. The server already orders this
+       list (wa.seniority_key), and the client sorts it again with the SAME
+       comparator: the dashboard payload carries the country and the call sign,
+       so this surface can hold the order even against a cloud instance whose
+       schema has not been re-run yet. One comparator, both sides. */
+    const insRows = WA.sortBySeniority(A.data.instructors).map((i) => {
       const done = i.proposals_count, n = all.length;
       const badge = !i.active ? `<span class="badge badge-bad">revoked</span>`
         : done === 0 ? `<span class="badge badge-bad">nothing yet</span>`
@@ -891,7 +977,13 @@ WA.renderAdmin = async function (view, me) {
         <td title="${esc(WA.groundGroupLabel(e.group))}"><b>${esc(e.group || "—")}</b></td>
         <td>${esc(e.course || "—")}${c ? "" :
           (e.course ? `<span class="offcat" title="Not in the generated syllabus catalogue for this group">*</span>` : "")}</td>
-        <td>${esc(fmtD(e.date))}${e.end_date && e.end_date !== e.date ? " &ndash; " + esc(fmtD(e.end_date)) : ""}</td>
+        ${/* ROUND 14 — an END-ONLY lesson is a course that ran and finished on a
+             known day; "— – 30/04" reads as a broken range, so it is named */ ""}
+        <td>${e.date
+          ? esc(fmtD(e.date)) + (e.end_date && e.end_date !== e.date ? " &ndash; " + esc(fmtD(e.end_date)) : "")
+          : (e.end_date
+              ? `<span title="Recorded by its end date — the course ran and finished on this day">ended ${esc(fmtD(e.end_date))}</span>`
+              : `<span class="k">&mdash;</span>`)}</td>
         ${stateCell(r.state)}
         ${srcCell(e)}</tr>`;
     });
@@ -910,8 +1002,25 @@ WA.renderAdmin = async function (view, me) {
       }
       const x = WA.exam(e.exam);
       const has = e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade));
+      /* ROUND 14 — the row says WHICH ATTEMPT it is, and an ΕΕΘ says its
+         number: the CO reading two IN190 lines has to be able to tell the
+         re-sit from the first sitting, and a series row names no exam at all */
+      const ser = WA.examSeries(e);
+      const tn = ser ? 1 : WA.examTrial(e);
+      /* ONE trial badge, and its colour says whether this is the attempt the
+         verdict is read from: accented on the operative one, plain on the
+         attempts it displaced (which are kept and shown, and count for nothing
+         in that verdict — the round-11 pass rule, one section over) */
+      const showTrial = !ser && (tn > 1 || r.alt);
       return `<tr class="st-${esc(r.state)}">
-        <td title="${esc(WA.examLabel(e.exam))}"><b>${esc(e.exam || "—")}</b>${
+        <td title="${esc(ser ? ser.tip : WA.examLabel(e.exam))}"><b>${esc(
+          ser ? WA.examRowLabel(e) : (e.exam || "—"))}</b>${
+          ser ? ` <span class="badge" title="${esc(ser.tip)}">weekly theory</span>` : ""}${
+          showTrial ? ` <span class="badge${r.alt ? "" : " badge-acc"}" title="${esc(
+            WA.examTrialWord(tn) + (r.alt
+              ? " of this exam. It is kept and shown; the exam's verdict is read from the attempt it was PASSED on."
+              : " — this is the attempt the exam's verdict is read from."))}">${
+            esc(WA.examTrialWord(tn))}</span>` : ""}${
           x && x.cond ? ` <span class="badge badge-acc" title="Foreign SPs only — a HAF student does not owe this exam">foreign SPs only</span>` : ""}</td>
         <td>${esc(fmtD(e.date))}</td>
         ${has ? `<td class="num">${WA.pct(e.grade)}</td>`
@@ -1018,11 +1127,20 @@ WA.renderAdmin = async function (view, me) {
     const total = s.proposals.length;
     const flew = s.proposals.filter((p) => p.flew_with).length;
     const flewPct = total ? Math.round((flew / total) * 100) : 0;
-    const rows = LV.map((l) => {
+    /* ROUND 14 — THE SAME RULE THE FORM DRAWS, on the readout. The line sits
+       between «Recommended as Alternate» and «Recommended for Other
+       Assignments» and marks the FIGHTER / OTHER split, so the CO reading a
+       distribution sees the same boundary the instructor answered against —
+       and it is drawn from WA.LEVEL_SEP_AT, so the two cannot drift. */
+    const rows = LV.map((l, i) => {
       const names = (a.by_level || {})[l.id] || [];
-      return `<div class="lvrow${names.length ? "" : " is-empty"}">
+      return (i === WA.LEVEL_SEP_AT
+        ? `<div class="lvl-sep" role="separator" title="${esc(
+            "Above the line: the three fighter answers. Below it: the two that place the student elsewhere.")}"></div>`
+        : "") +
+        `<div class="lvrow${names.length ? "" : " is-empty"}">
         ${levelChip(l.id, true)}
-        <span class="lvnames">${names.length ? esc(names.join(", ")) : "—"}</span>
+        <span class="lvnames" title="${esc(WA.SENIORITY_TIP)}">${names.length ? esc(names.join(", ")) : "—"}</span>
         <span class="lvn">${names.length || ""}</span>
       </div>`;
     }).join("");
@@ -1062,12 +1180,13 @@ WA.renderAdmin = async function (view, me) {
       `<button type="button" class="chip${m.id === A.metric ? " is-on" : ""}" data-metric="${esc(m.id)}"
         title="${esc((m.tip ? m.tip + " " : "") + "(" + DIRWORD[m.dir] + ")")}">${esc(m.label)}</button>`).join("");
     const drill = s.proposals.length ? `
-      <details class="drill"><summary>Drill-down — every assessment of this student (${s.proposals.length})</summary>
+      <details class="drill"><summary>Drill-down — every assessment of this student (${s.proposals.length})
+        <span class="k" title="${esc(WA.SENIORITY_TIP)}">— in seniority order</span></summary>
         <div class="tblwrap" style="margin-top:8px"><table class="tbl">
           <thead><tr><th>Instructor</th><th>Duty</th><th>Leadership</th><th>Status</th>
             <th title="${esc(WA.LEVEL_TIP)}">Assessment (fighters)</th><th class="num">Weight</th>
             <th>Flew with</th><th>Comment</th><th>Source</th></tr></thead>
-          <tbody>${s.proposals.map((p) => `
+          <tbody>${WA.sortBySeniority(s.proposals).map((p) => `
             <tr><td><b>${esc(WA.personCall(p, true))}</b>${p.test_pilot ? ` <span class="badge" title="test pilot">TP</span>` : ""}</td>
               <td>${esc(p.duty || "—")}</td><td>${esc(p.leadership || "—")}</td><td>${esc(p.status || "—")}</td>
               <td>${levelChip(p.level)}</td>
@@ -1080,13 +1199,17 @@ WA.renderAdmin = async function (view, me) {
       `<option value="${esc(d.id)}"${A.evalSel === d.id ? " selected" : ""}>${esc(WA.evalLabel(d.id))}</option>`).join("");
 
     return `
+      <div class="pagelay" id="ana-lay">
+      ${WA.navHTML("ana-nav", anaNavItems(), {
+          title: "This student", aria: "Sections of this student's analysis" })}
+      <div class="lay-main" id="ana-main">
       <div class="ana-nav">
         <button type="button" class="btn arrowbtn" data-nav="-1" title="Previous student (←)">&#8592;</button>
         <span class="pos">${A.sel + 1} / ${students.length}</span>
         <span class="nm">${esc(WA.personName(s.person, true))}</span>
         <button type="button" class="btn arrowbtn" data-nav="1" title="Next student (→)">&#8594;</button>
       </div>
-      <div class="card">
+      <div class="card" id="ana-id">
         <div class="idhead">
           <span class="nm">${esc(WA.personName(s.person, true))}</span>
           <span class="meta">${esc([s.person.mn ? "MN " + s.person.mn : "", s.person.class ? "Class " + s.person.class : ""].filter(Boolean).join(" · "))}</span>
@@ -1102,14 +1225,14 @@ WA.renderAdmin = async function (view, me) {
             >&#9998; Edit record</button>
         </div>
       </div>
-      <div class="card">
+      <div class="card" id="ana-cmp">
         <h2>Comparison vs class</h2>
         <p class="hint">Click a metric — the chart shows this student against the class best, worst and average.
           Every count is derived from the student's dated entries.</p>
         <div class="chiprow" style="margin:10px 0">${chips}</div>
         <div class="chartbox">${fourBarSVG(s)}</div>
       </div>
-      <div class="card">
+      <div class="card" id="ana-eval">
         <h2>Evaluations ${WA.tipDot("evaluations")}</h2>
         <p class="hint">Evaluations are separate events, so they are compared <b>one checkride at a time</b> —
           never as an average, and never as a count. A re-flown checkride counts with the attempt the
@@ -1153,7 +1276,7 @@ WA.renderAdmin = async function (view, me) {
         <h3 style="margin-top:16px">Summary — every evaluation and FPC of this student</h3>
         ${evalSummary(s)}
       </div>
-      <div class="card">
+      <div class="card" id="ana-fail">
         <h2>FAIL &amp; ALMOST GOOD</h2>
         <h3>${esc(WA.secLabel("fail"))} ${WA.tipDot("fail")}
           <span class="cnt">${st.fail} ${st.fail === 1 ? "entry" : "entries"}</span></h3>
@@ -1162,26 +1285,26 @@ WA.renderAdmin = async function (view, me) {
           <span class="cnt">${st.almost_good} ${st.almost_good === 1 ? "entry" : "entries"}</span></h3>
         ${failTable(s, "almost_good")}
       </div>
-      <div class="card">
+      <div class="card" id="ana-air">
         <h2>Airsickness ${WA.tipDot("airsickness")}
           <span class="cnt">${st.airsickness} ${st.airsickness === 1 ? "entry" : "entries"}</span></h2>
         <p class="hint">When each incident happened and with whom.</p>
         ${airsickTable(s)}
       </div>
-      <div class="card">
+      <div class="card" id="ana-other">
         <h2>Other dated entries</h2>
         ${otherTables(s)}
       </div>
       ${/* ROUND 12 — THE LOG TABLES, at the end, in the form's own order.
            A grade left empty is NOT a gap in this table: it is a flight whose
            debrief has not landed, and the cell says so. */ ""}
-      <div class="card">
+      <div class="card" id="ana-flights">
         ${logBandBlock(s, "flights")}
       </div>
-      <div class="card">
+      <div class="card" id="ana-fs">
         ${logBandBlock(s, "fs")}
       </div>
-      <div class="card">
+      <div class="card" id="ana-ground">
         <h2>${esc(WA.secLabel("lessons"))} ${WA.tipDot("lessons")}
           <span class="cnt">${esc(WA.stateLine("lessons",
             WA.stateCounts("lessons", s.record.lessons)))}</span></h2>
@@ -1192,11 +1315,13 @@ WA.renderAdmin = async function (view, me) {
             WA.stateCounts("exams", s.record.exams)))}</span></h2>
         ${examsTable(s)}
       </div>
-      <div class="card">
+      <div class="card" id="ana-assess">
         <h2>Assessment for fighters</h2>
         <p class="hint">${esc(WA.LEVEL_TIP)}</p>
         ${assessBox(s, false)}
         ${drill}
+      </div>
+      </div>
       </div>`;
   }
 
@@ -1288,9 +1413,11 @@ WA.renderAdmin = async function (view, me) {
             ${(() => {
               const cl = WA.stateCounts("lessons", s.record.lessons);
               const cx = WA.stateCounts("exams", s.record.exams);
-              return `<b>${esc(cl.done)}</b> of ${esc(WA.slotCount("lessons"))} lessons` +
+              /* ROUND 14 — slotsDone, not done: an exam sat three times is ONE
+                 exam done, and «9 of 8» would be the arithmetic saying so */
+              return `<b>${esc(cl.slotsDone)}</b> of ${esc(WA.slotCount("lessons"))} lessons` +
                 (cl.started ? ` <span class="k">(+${esc(cl.started)} started)</span>` : "") +
-                ` · <b>${esc(cx.done)}</b> of ${esc(WA.slotCount("exams"))} exams` +
+                ` · <b>${esc(cx.slotsDone)}</b> of ${esc(WA.slotCount("exams"))} exams` +
                 (cx.lag ? ` <span class="k">· ${esc(cx.lag)} awaiting a result</span>` : "") +
                 (cl.extra + cx.extra ? ` <span class="k">· ${esc(cl.extra + cx.extra)} extra</span>` : "");
             })()}</div>
@@ -1369,7 +1496,8 @@ WA.renderAdmin = async function (view, me) {
       const politeAll = (ass.no_level || []).map((n) =>
         `<li>${esc(n)} has submitted but has not formed a view yet</li>`).join("") +
         s.not_submitted.map((n) => `<li>${esc(n)} has not submitted an assessment for this student yet</li>`).join("");
-      const comments = s.proposals.filter((p) => p.comment).map((p) =>
+      /* round 14 — the printed comments are in seniority order too */
+      const comments = WA.sortBySeniority(s.proposals).filter((p) => p.comment).map((p) =>
         `<li><b>${esc((p.rank ? p.rank + " " : "") + p.last_name)}:</b> ${esc(p.comment)}</li>`).join("");
       const prT = (head, rows) => rows.length
         ? `<table class="pr-t"><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>
@@ -1505,17 +1633,28 @@ WA.renderAdmin = async function (view, me) {
         const e = r.e, c = WA.lessonCourse(e.group, e.course);
         return `<tr><td>${esc(e.group || "—")}${WA.coTag(e)}</td>
           <td>${esc(e.course || "—")}${c ? "" : (e.course ? ` <span class="pr-n">(off-catalogue)</span>` : "")}</td>
-          <td>${esc(fmtD(e.date))}${e.end_date && e.end_date !== e.date ? " – " + esc(fmtD(e.end_date)) : ""}</td>
+          <td>${e.date
+            ? esc(fmtD(e.date)) + (e.end_date && e.end_date !== e.date ? " – " + esc(fmtD(e.end_date)) : "")
+            : (e.end_date ? "ended " + esc(fmtD(e.end_date)) : "—")}</td>
           <td>${esc(WA.rowStateDef(r.state).label)}</td></tr>`;
       });
       const examCn = WA.stateCounts("exams", s.record.exams);
       const examRows = WA.slotRows("exams", s.record.exams).filter((r) => r.e).map((r) => {
         const e = r.e;
         const has = e.grade !== null && e.grade !== undefined && e.grade !== "" && isFinite(Number(e.grade));
-        return `<tr><td>${esc(e.exam || "—")}${WA.coTag(e)}${
+        /* ROUND 14 ON PAPER — the trial and the ΕΕΘ number are part of the row's
+           NAME (WA.examRowLabel), because monochrome print has no badge colour
+           to tell a re-sit from the first sitting with */
+        const ser = WA.examSeries(e);
+        return `<tr><td>${esc(WA.examRowLabel(e))}${WA.coTag(e)}${
+            ser ? ` <span class="pr-n">(weekly theory)</span>` : ""}${
+            !ser && r.alt ? ` <span class="pr-n">(not the operative attempt)</span>` : ""}${
             (WA.exam(e.exam) || {}).cond ? ` <span class="pr-n">(foreign SPs only)</span>` : ""}</td>
-          <td>${esc(fmtD(e.date))}</td>
-          <td>${has ? WA.pct(e.grade) : `<span class="pr-n">awaiting the result</span>`}</td>
+          <td>${e.date ? esc(fmtD(e.date)) : `<span class="pr-n">not sat yet</span>`}</td>
+          ${/* an exam nobody has sat is not "awaiting" a result — it is waiting
+               to happen, and the Date cell beside this one already says so */ ""}
+          <td>${has ? WA.pct(e.grade)
+            : (e.date ? `<span class="pr-n">awaiting the result</span>` : `<span class="pr-n">&mdash;</span>`)}</td>
           <td>${esc(WA.rowStateDef(r.state).label)}</td></tr>`;
       });
       return `
@@ -1700,7 +1839,11 @@ WA.renderAdmin = async function (view, me) {
   function htmlPeople() {
     const ppl = A.people || [];
     const stu = ppl.filter((p) => p.role === "student");
-    const ins = ppl.filter((p) => p.role === "instructor");
+    /* ROUND 14 — the instructors block is in SENIORITY order: «HAF πρωτα, ITAF
+       μετα», call sign natural within each. admin_list_people already sends it
+       that way (wa.seniority_key); the same comparator runs here so the table
+       holds the order whatever the instance's schema version. */
+    const ins = WA.sortBySeniority(ppl.filter((p) => p.role === "instructor"));
     const adm = ppl.filter((p) => p.role === "admin");
     return `
       <div class="toolrow">
@@ -1714,7 +1857,8 @@ WA.renderAdmin = async function (view, me) {
         <div class="tblwrap"><table class="tbl">
           <thead><tr><th>Name</th><th>Details</th><th>Status</th><th>Token</th><th>Actions</th></tr></thead>
           <tbody>${peopleRows(stu, "student")}</tbody></table></div></div>
-      <div class="card"><h3>Instructors (${ins.length})</h3>
+      <div class="card"><h3>Instructors (${ins.length})
+        <span class="k" title="${esc(WA.SENIORITY_TIP)}">— seniority order</span></h3>
         <div class="tblwrap"><table class="tbl">
           <thead><tr><th>Name</th><th>Duty · Leadership · Status</th><th>Status</th><th>Token</th><th>Actions</th></tr></thead>
           <tbody>${peopleRows(ins, "instructor")}</tbody></table></div></div>
@@ -2018,15 +2162,30 @@ WA.renderAdmin = async function (view, me) {
               undefined, "", e.duration, stateOf(k, e, ix));
         });
       }
+      /* ROUND 14 — a lesson recorded by its END alone has an empty Date cell,
+         so Detail says which day it is: "ended 30/04/2026" and not a bare "to" */
       (r.lessons || []).forEach((e, ix) => add(s, "lessons", e,
         [WA.groundGroupLabel(e.group),
-         e.end_date && e.end_date !== e.date ? "to " + fmtD(e.end_date) : ""
+         e.end_date && e.end_date !== e.date
+           ? (e.date ? "to " + fmtD(e.end_date) : "ended " + fmtD(e.end_date)) : ""
         ].filter(Boolean).join(" — "),
         e.course, "", "", null, undefined, "", undefined, stateOf("lessons", e, ix)));
-      (r.exams || []).forEach((e, ix) => add(s, "exams", e,
-        [WA.examLabel(e.exam), (WA.exam(e.exam) || {}).cond ? "foreign SPs only" : ""
-        ].filter(Boolean).join(" — "),
-        e.exam, "", "", e.grade, undefined, "", undefined, stateOf("exams", e, ix)));
+      /* ROUND 14 — a spreadsheet reading two IN190 rows must be able to tell
+         the re-sit from the first sitting, and an ΕΕΘ names no exam at all. The
+         Flight-code column therefore carries WA.examRowLabel — the same name
+         every other surface prints — and the "Counts" column says which attempt
+         the verdict is read from, exactly as it does for a re-flown checkride. */
+      {
+        const exCL = WA.claims("exams", r.exams || []);
+        (r.exams || []).forEach((e, ix) => add(s, "exams", e,
+          [WA.examSeries(e) ? WA.examSeries(e).label + " — weekly theory exam" : WA.examLabel(e.exam),
+           WA.examTrial(e) > 1 && !WA.examSeries(e) ? WA.examTrialWord(WA.examTrial(e)) : "",
+           (WA.exam(e.exam) || {}).cond ? "foreign SPs only" : ""
+          ].filter(Boolean).join(" — "),
+          WA.examRowLabel(e), "", "", e.grade, undefined,
+          WA.examSeries(e) ? "" : (exCL.claimed[ix] ? "yes" : "no — another attempt counts"),
+          "", undefined, stateOf("exams", e, ix)));
+      }
     }
     download("wings-ahead-entries" + classSuffix() + "-" + stamp() + ".csv",
              "text/csv;charset=utf-8", csv(rows));
@@ -2040,7 +2199,9 @@ WA.renderAdmin = async function (view, me) {
     const rows = [["Student", "Class", "Instructor", "Call sign", "Country", "Test pilot",
       "Duty", "Leadership", "Status",
       "Assessment (fighters)", "Weight", "Flew with", "Comment", "Updated", "Entered by"]];
-    for (const s of visible()) for (const p of s.proposals) {
+    /* ROUND 14 — seniority order here too, so a printed export and the screen
+       list the squadron in the same sequence (WA.bySeniority) */
+    for (const s of visible()) for (const p of WA.sortBySeniority(s.proposals)) {
       const l = WA.level(p.level);
       rows.push([WA.personName(s.person, true), s.person.class,
         (p.rank ? p.rank + " " : "") + p.last_name,

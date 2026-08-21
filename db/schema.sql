@@ -1141,6 +1141,68 @@ language sql immutable as $$
   select case when p_id = any(array['JP190']::text[]) then true else false end
 $$;
 
+-- ══ ROUND 14 — THE ΕΕΘ SERIES, AND HOW MANY TRIALS AN EXAM MAY HAVE ════════
+-- «στα ground exam να εχουμε 2nd trial, 3rd και να μπορουμε να βαλουμε τα ΕΕΘ
+--  με ΕΕΘ 1, ΕΕΘ 2 κλπ»
+-- Two different things, stored differently because they ARE different:
+--   · a TRIAL is another attempt AT ONE OF THE EIGHT. Same exam, sat again, so
+--     it keeps the exam's identity and adds a number: `trial` 2 or 3. THE FIRST
+--     TRIAL IS WRITTEN AS NO KEY AT ALL, which is what makes every record from
+--     before this round correct without being rewritten.
+--   · an ΕΕΘ is a WEEKLY THEORY EXAM — an OPEN series the syllabus does not
+--     enumerate, so it names no exam and carries `series` + `series_no`.
+-- NOT part of the generated block: WA_EXAMS / wa.exam_ids() come out of the
+-- syllabus sources and the ΕΕΘ are not in them. They are the squadron's own
+-- weekly programme, and they are declared here by hand, on purpose.
+-- MIRROR: app/app.js → WA.EXAM_SERIES / WA.EXAM_TRIALS.
+create or replace function wa.exam_series() returns text[]
+language sql immutable as $$ select array['EETH']::text[] $$;
+create or replace function wa.exam_trials() returns int
+language sql immutable as $$ select 3 $$;
+
+-- ══ ROUND 14 — SENIORITY ORDER ════════════════════════════════════════════
+-- «τους εκπαιδευτες με σειρα αρχαιοτητας. HAF πρωτα, ITAF μετα.»
+-- Every list of instructors the application produces is ordered by this key and
+-- by nothing else. Two levels: the AIR FORCE (HAF, then ITAF, then any other
+-- named one alphabetically, then whoever the roster gave no country), and
+-- within each the CALL SIGN in NATURAL order — P-2 before P-14, never the
+-- string order that puts P-14 first. The call sign and not the rank decides,
+-- because the call sign is the squadron's own position (P-14 is the CO) while
+-- the rank is a grade; this is the FDMS Currency precedent unchanged. Whoever
+-- has no call sign sorts LAST WITHIN THEIR OWN AIR FORCE, by surname.
+-- It lives on the SERVER as well as in the client because the instructor
+-- picker's payload is surnames and nothing else — no country and no call sign
+-- ever leave the database for a student — so the ORDER is the only way the
+-- ruling can reach that list at all.
+-- MIRROR: app/app.js → WA.seniorityKey / WA.bySeniority.
+create or replace function wa.natkey(s text) returns text
+language sql immutable as $$
+  select coalesce((
+    select string_agg(case when t.m[1] ~ '^[0-9]+$' then lpad(t.m[1], 8, '0') else t.m[1] end,
+                      '' order by t.ord)
+    from regexp_matches(upper(coalesce(s, '')), '[0-9]+|[^0-9]+', 'g')
+         with ordinality as t(m, ord)), '')
+$$;
+create or replace function wa.seniority_key(p_country text, p_call_sign text,
+                                            p_last_name text, p_first_name text)
+returns text language sql immutable as $$
+  with x as (select upper(btrim(coalesce(p_country, ''))) as c,
+                    btrim(coalesce(p_call_sign, '')) as cs)
+  select (case x.c when 'HAF' then '0' when 'ITAF' then '1'
+                   when '' then '3' else '2' end)
+      || '|' || (case when x.c in ('HAF', 'ITAF', '') then '' else x.c end)
+      || '|' || (case when x.cs = '' then '1' else '0' end)
+      || '|' || wa.natkey(x.cs)
+      || '|' || upper(coalesce(p_last_name, ''))
+      || '|' || upper(coalesce(p_first_name, ''))
+  from x
+$$;
+-- the same key straight off a people row — the form every ORDER BY uses
+create or replace function wa.seniority_key(p public.people) returns text
+language sql immutable as $$
+  select wa.seniority_key(p.country, p.call_sign, p.last_name, p.first_name)
+$$;
+
 -- ── THE FIXED SOLO SLOTS (round 5, generated since round 12) ─────────────
 -- One slot per solo the stage prescribes — flow-chart Training Sections whose
 -- printed duration block says SOLO SORTIES > 0. F4301-06 prescribes TWO, so it
@@ -1680,7 +1742,13 @@ language sql immutable as $$
     -- FDMS treats as COURSES OF THEIR GROUP — they belong in `lessons`, and
     -- filing them here as well would make the two systems disagree about what a
     -- student is owed. ROUND 12b: EXAM · DATE · GRADE, no examiner, no note.
-    when 'exams'        then array['date','exam','grade','legacy','entered_by']
+    -- ROUND 14 — TRIAL and SERIES. `trial` is 2 or 3 and nothing else (the
+    -- first trial is written as no key at all, so nothing stored before this
+    -- round has to be rewritten); `series` + `series_no` are the ΕΕΘ weekly
+    -- theory exams, which name no `exam`. The two shapes are EXCLUSIVE and the
+    -- validator refuses a row that tries to be both.
+    when 'exams'        then array['date','exam','trial','series','series_no',
+                                   'grade','legacy','entered_by']
     else array[]::text[] end
 $$;
 
@@ -2114,9 +2182,26 @@ begin
             'the three-way verdict (pass / lagging / failed) was replaced by MISSION — «Θελω μονο mission complete, mission incomplete»');
 
         elsif k = 'lessons' then
-          perform wa.chk_entry_date(e, w);
-          -- A LESSON IS A BLOCK. date = start, end_date = end, null = one day.
+          -- ══ ROUND 14 — AN END DATE ALONE IS A VALID RECORD ═══════════════
+          -- «τα μαθηματα να δεχομαστε και μονο end date για την καταγραφη»
+          -- A lesson is a BLOCK: date = start, end_date = end. Round 12b asked
+          -- for the START on every row, which meant a course that a student
+          -- knows FINISHED on the 12th but cannot date the beginning of could
+          -- not be recorded at all — and it is the exact row round 13's open
+          -- item 2 named («a started ground lesson cannot be saved»): the ONLY
+          -- partial state a two-date row has is an end without a start, and it
+          -- was the one state the server refused. EITHER date is now enough;
+          -- neither is still refused, because a lesson with no date at all says
+          -- nothing that «this course is in the programme» does not already.
+          -- This is the ONE section where chk_entry_date does not apply.
+          perform wa.chk_bool(e->'legacy', w || '.legacy');
+          perform wa.chk_date(e->'date', w || '.date', false);
           perform wa.chk_date(e->'end_date', w || '.end_date', false);
+          perform wa.chk(wa.is_legacy(e)
+                         or wa.is_iso_date(e->>'date')
+                         or wa.is_iso_date(e->>'end_date'),
+                         w || '.date',
+                         'a ground lesson is recorded by its start date, its end date, or both — one of the two is required');
           perform wa.chk((e->>'end_date') is null or (e->>'date') is null
                          or (e->>'end_date') >= (e->>'date'),
                          w || '.end_date', 'a lesson cannot end before it started');
@@ -2156,15 +2241,66 @@ begin
                                 e->>'course'));
 
         elsif k = 'exams' then
-          perform wa.chk_entry_date(e, w);
-          perform wa.chk_text(e->'exam', w || '.exam', not wa.is_legacy(e), 40);
-          perform wa.chk((e->>'exam') is null or (e->>'exam') = any(wa.exam_ids()),
-                         w || '.exam',
-                         format('unknown ground exam — the list is %s',
-                                array_to_string(wa.exam_ids(), ' / ')));
-          perform wa.chk(wa.is_legacy(e)
-                         or nullif(trim(coalesce(e->>'exam', '')), '') is not null,
-                         w || '.exam', 'every exam row names which of the eight ground exams it was');
+          -- ══ ROUND 14 — TWO SHAPES, AND THEY ARE EXCLUSIVE ════════════════
+          -- Either the row is one of the EIGHT (exam + optional trial 2|3), or
+          -- it is an ΕΕΘ of the weekly series (series + series_no, no exam).
+          -- A row that tried to be both would be a fixed exam the eight do not
+          -- contain, and every count of "how many of the eight are done" would
+          -- disagree with every other.
+          perform wa.chk_bool(e->'legacy', w || '.legacy');
+          perform wa.chk_text(e->'series', w || '.series', false, 20);
+          perform wa.chk((e->>'series') is null or (e->>'series') = any(wa.exam_series()),
+                         w || '.series',
+                         format('unknown exam series — the list is %s',
+                                array_to_string(wa.exam_series(), ' / ')));
+          perform wa.chk(not ((e->>'series') is not null and (e->>'exam') is not null),
+                         w || '.series',
+                         'a row is either one of the eight ground exams or one of the ΕΕΘ series — never both');
+          if (e->>'series') is not null then
+            -- THE NUMBER IS THE NAME. An ΕΕΘ with no number cannot be told from
+            -- any other ΕΕΘ, so it is the one thing this shape requires; the
+            -- DATE and the GRADE are both nullable, because an ΕΕΘ is put on
+            -- the weekly programme before it is sat.
+            perform wa.chk_date(e->'date', w || '.date', false);
+            perform wa.chk_int(e->'series_no', w || '.series_no', 1, wa.section_cap('exams'));
+            -- coalesce, because an ABSENT key makes jsonb_typeof return SQL
+            -- NULL and a NULL predicate is not a failed one: without it the
+            -- «required» half of this rule never fired at all.
+            perform wa.chk(wa.is_legacy(e)
+                           or coalesce(jsonb_typeof(e->'series_no'), 'missing') = 'number',
+                           w || '.series_no',
+                           'every ΕΕΘ carries its number — ΕΕΘ 1, ΕΕΘ 2 … — because the number is its name');
+            perform wa.chk(not (e ? 'trial'), w || '.trial',
+              'an ΕΕΘ is not an attempt at one of the eight ground exams — it carries its series number, never a trial');
+          else
+            -- A PLANNED ATTEMPT MAY BE DATELESS (round 14). A minted 2nd or 3rd
+            -- trial says «a re-sit has been ordered» before it says when; the
+            -- FIRST trial still needs its date, because a first attempt with no
+            -- date is exactly the owed slot, and that stores nothing at all.
+            perform wa.chk_bool(e->'legacy', w || '.legacy');
+            perform wa.chk_date(e->'date', w || '.date', false);
+            perform wa.chk(wa.is_legacy(e) or (e ? 'trial')
+                           or wa.is_iso_date(e->>'date'),
+                           w || '.date',
+                           'the first sitting of a ground exam carries its date — a re-sit that has only been scheduled is recorded as a 2nd or 3rd trial');
+            perform wa.chk_text(e->'exam', w || '.exam', not wa.is_legacy(e), 40);
+            perform wa.chk((e->>'exam') is null or (e->>'exam') = any(wa.exam_ids()),
+                           w || '.exam',
+                           format('unknown ground exam — the list is %s',
+                                  array_to_string(wa.exam_ids(), ' / ')));
+            perform wa.chk(wa.is_legacy(e)
+                           or nullif(trim(coalesce(e->>'exam', '')), '') is not null,
+                           w || '.exam', 'every exam row names which of the eight ground exams it was, or the ΕΕΘ series it belongs to');
+            -- 2 AND 3, AND NOTHING ELSE. 1 is written as no key at all: a
+            -- stored 1 would be a second way of saying what the absence already
+            -- says, and two spellings of one fact is how a uniqueness rule gets
+            -- quietly bypassed.
+            perform wa.chk(not (e ? 'trial') or (e->>'trial') <> '1', w || '.trial',
+              'the first trial is written as no trial key at all — a stored 1 would be a second spelling of the same fact, and two spellings is how a uniqueness rule gets bypassed');
+            perform wa.chk_int(e->'trial', w || '.trial', 2, wa.exam_trials());
+            perform wa.chk(not (e ? 'series_no'), w || '.series_no',
+              'a series number belongs to an ΕΕΘ — one of the eight ground exams is numbered by its TRIAL');
+          end if;
           -- NULLABLE, for the same reason a flight's grade is: the result can
           -- take longer to arrive than the exam did to sit.
           perform wa.chk_grade(e->'grade', w || '.grade', false);
@@ -2200,6 +2336,33 @@ begin
                           from jsonb_array_elements(p->k) e2
                           where jsonb_typeof(e2) = 'object' and (e2->>'slot') is not null) t),
                        k, 'each solo slot may appear only once — the solo rows are fixed');
+      end if;
+
+      -- ══ ROUND 14 — ONE ROW PER (EXAM, TRIAL), AND ΕΕΘ NUMBERS ARE UNIQUE ══
+      -- The solo-slot precedent two blocks up, applied to the two new shapes.
+      -- Two rows both calling themselves «IN190, 2nd trial» are two results for
+      -- one sitting that can disagree, and the pass-attempt rule would have to
+      -- pick between them arbitrarily; two rows both calling themselves ΕΕΘ 3
+      -- make the number stop being a name. Both are closed here, on the server,
+      -- because the form's «next trial» / «next ΕΕΘ» affordances mint from
+      -- max+1 and a payload can always be hand-made.
+      if k = 'exams' then
+        perform wa.chk((select count(*) = count(distinct t.key) from (
+                          select coalesce(e2->>'exam', '-') || '|'
+                                 || coalesce(e2->>'trial', '1') as key
+                          from jsonb_array_elements(p->k) e2
+                          where jsonb_typeof(e2) = 'object'
+                            and (e2->>'series') is null
+                            and (e2->>'exam') is not null) t),
+                       k, 'two rows are the same trial of the same ground exam — each of the eight may be sat once per trial (1st, 2nd, 3rd)');
+        perform wa.chk((select count(*) = count(distinct t.key) from (
+                          select coalesce(e2->>'series', '-') || '|'
+                                 || coalesce(e2->>'series_no', '-') as key
+                          from jsonb_array_elements(p->k) e2
+                          where jsonb_typeof(e2) = 'object'
+                            and (e2->>'series') is not null
+                            and (e2->>'series_no') is not null) t),
+                       k, 'two rows carry the same ΕΕΘ number — the number is the name, so it identifies exactly one weekly exam');
       end if;
 
       -- SEQ MUST DISAMBIGUATE (round-12 verify finding 2, the solo precedent
@@ -2681,7 +2844,11 @@ begin
       -- ROUND 12b — the `absent` default is gone with the box: attendance,
       -- periods, the instructor and the note are no longer keys of a lesson, so
       -- wa.strip_entry drops any that a stored row still carries.
-      if not wa.is_iso_date(e->>'date') or coalesce(e->>'group', '') = '' then
+      -- ROUND 14 — EITHER date completes a lesson. A row recorded by its END
+      -- alone is a course that demonstrably ran, so it is no longer flagged as
+      -- an import that lost its date.
+      if (not wa.is_iso_date(e->>'date') and not wa.is_iso_date(e->>'end_date'))
+         or coalesce(e->>'group', '') = '' then
         e := e || jsonb_build_object('legacy', true);
       end if;
       arr := arr || jsonb_build_array(e);
@@ -2694,12 +2861,41 @@ begin
     for i in 0 .. jsonb_array_length(p->'exams') - 1 loop
       e := p->'exams'->i;
       if jsonb_typeof(e) <> 'object' then continue; end if;
-      -- the same narrowing repair, one catalogue over
-      if (e->>'exam') is not null and not ((e->>'exam') = any(wa.exam_ids())) then
-        e := (e - 'exam') || jsonb_build_object('exam', null, 'legacy', true);
+      -- ROUND 14 — THE TWO SHAPES, repaired the round-13 way: a value its
+      -- catalogue no longer contains is NULLED and the row FLAGGED, never
+      -- dropped and never guessed at.
+      if (e->>'series') is not null and not ((e->>'series') = any(wa.exam_series())) then
+        e := (e - 'series') || jsonb_build_object('series', null, 'legacy', true);
       end if;
-      if not wa.is_iso_date(e->>'date') or coalesce(e->>'exam', '') = '' then
-        e := e || jsonb_build_object('legacy', true);
+      if (e->>'series') is not null then
+        -- an ΕΕΘ names no exam and takes no trial; date AND grade are both
+        -- nullable, because a weekly exam is programmed before it is sat
+        if (e->>'exam') is not null then
+          e := (e - 'exam') || jsonb_build_object('exam', null, 'legacy', true);
+        end if;
+        e := e - 'trial';
+        if (e->>'series_no') is null then
+          e := e || jsonb_build_object('legacy', true);
+        end if;
+      else
+        e := e - 'series' - 'series_no';
+        if (e->>'exam') is not null and not ((e->>'exam') = any(wa.exam_ids())) then
+          e := (e - 'exam') || jsonb_build_object('exam', null, 'legacy', true);
+        end if;
+        -- trial 1 is written as NO KEY AT ALL, so a stored 1 (or anything
+        -- outside 2..3) is normalised away rather than kept as a second
+        -- spelling of what the absence already says
+        if jsonb_typeof(e->'trial') <> 'number'
+           or (e->>'trial')::numeric < 2
+           or (e->>'trial')::numeric > wa.exam_trials()
+           or (e->>'trial')::numeric <> trunc((e->>'trial')::numeric) then
+          e := e - 'trial';
+        end if;
+        -- a PLANNED trial may be dateless — see wa.validate_record
+        if (not wa.is_iso_date(e->>'date') and not (e ? 'trial'))
+           or coalesce(e->>'exam', '') = '' then
+          e := e || jsonb_build_object('legacy', true);
+        end if;
       end if;
       arr := arr || jsonb_build_array(e);
     end loop;
@@ -3200,13 +3396,21 @@ $$;
 -- that follows the surname out. One definition, three callers
 -- (get_student_form, admin_get_student_form and the standalone
 -- list_instructor_names), so the picker cannot drift between them.
+-- ROUND 14 — AND IT IS ORDERED BY SENIORITY. The payload is still surnames and
+-- nothing else, so the ORDER is the only channel the ruling («HAF πρωτα, ITAF
+-- μετα», call sign natural within each) has into this list: the client cannot
+-- re-sort what it cannot see. Two instructors sharing a surname collapse to one
+-- entry — the picker is a list of names — and it takes the SENIOR one's key, so
+-- a shared surname lands where the more senior of the two belongs.
 create or replace function wa.instructor_surnames() returns jsonb
 language sql stable as $$
   select coalesce((
-    select jsonb_agg(distinct p.last_name order by p.last_name)
-    from public.people p
-    where p.role = 'instructor' and p.active
-      and p.last_name is not null and btrim(p.last_name) <> ''), '[]'::jsonb)
+    select jsonb_agg(t.ln order by t.k, t.ln)
+    from (select p.last_name as ln, min(wa.seniority_key(p)) as k
+          from public.people p
+          where p.role = 'instructor' and p.active
+            and p.last_name is not null and btrim(p.last_name) <> ''
+          group by p.last_name) t), '[]'::jsonb)
 $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -3313,7 +3517,9 @@ begin
   return coalesce((
     select jsonb_agg(wa.person_json(p) || jsonb_build_object(
              'token', p.token, 'created_at', p.created_at)
-           order by p.role, p.last_name, p.first_name)
+           -- ROUND 14 — role first (the People table's three blocks), then
+           -- SENIORITY inside each: HAF before ITAF, call sign natural within
+           order by p.role, wa.seniority_key(p), p.last_name, p.first_name)
     from public.people p), '[]'::jsonb);
 end $$;
 
@@ -3605,7 +3811,8 @@ begin
                  'flew_with', pr.flew_with, 'comment', pr.comment,
                  'entered_by', pr.entered_by,
                  'updated_at', pr.updated_at)
-               order by ip.last_name)
+               -- ROUND 14 — seniority, not the alphabet (wa.seniority_key)
+               order by wa.seniority_key(ip), ip.last_name)
         from public.proposals pr
         join public.people ip on ip.id = pr.instructor_id and ip.active
         where pr.student_id = s.id), '[]'::jsonb),
@@ -3642,7 +3849,7 @@ begin
             from unnest(wa.level_keys()) k(lvl)
             left join lateral (
               select jsonb_agg(coalesce(i2.rank || ' ', '') || i2.last_name
-                               order by i2.last_name) as names
+                               order by wa.seniority_key(i2), i2.last_name) as names
               from public.proposals p2
               join public.people i2 on i2.id = p2.instructor_id and i2.active
               where p2.student_id = s.id and p2.level = k.lvl) c on true), '{}'::jsonb),
@@ -3650,7 +3857,8 @@ begin
           -- not the same silence. `no_level` = he submitted and formed no
           -- view; `not_submitted` (below) = he has not answered at all.
           'no_level', coalesce((
-            select jsonb_agg(coalesce(i2.rank || ' ', '') || i2.last_name order by i2.last_name)
+            select jsonb_agg(coalesce(i2.rank || ' ', '') || i2.last_name
+                             order by wa.seniority_key(i2), i2.last_name)
             from public.proposals p2
             join public.people i2 on i2.id = p2.instructor_id and i2.active
             where p2.student_id = s.id and p2.level is null), '[]'::jsonb))
@@ -3662,7 +3870,8 @@ begin
           where pr.student_id = s.id) x),
       'not_submitted', coalesce((
         -- active instructors with no proposal at all for this student
-        select jsonb_agg(coalesce(ip.rank || ' ', '') || ip.last_name order by ip.last_name)
+        select jsonb_agg(coalesce(ip.rank || ' ', '') || ip.last_name
+                         order by wa.seniority_key(ip), ip.last_name)
         from public.people ip
         where ip.role = 'instructor' and ip.active
           and not exists (select 1 from public.proposals pr
@@ -3679,7 +3888,8 @@ begin
   select coalesce(jsonb_agg(wa.person_json(p) || jsonb_build_object(
            'proposals_count', (select count(*) from public.proposals pr
                                where pr.instructor_id = p.id))
-         order by p.last_name), '[]'::jsonb)
+         -- ROUND 14 — the squadron's own order, everywhere it lists people
+         order by wa.seniority_key(p), p.last_name), '[]'::jsonb)
   into instructors
   from public.people p where p.role = 'instructor';
 
@@ -3697,7 +3907,8 @@ begin
   v := wa.auth_role(p_token, 'admin');
   return jsonb_build_object(
     'exported_at', now(),
-    'people', coalesce((select jsonb_agg(wa.person_json(p) order by p.role, p.last_name)
+    'people', coalesce((select jsonb_agg(wa.person_json(p)
+                          order by p.role, wa.seniority_key(p), p.last_name)
                         from public.people p), '[]'::jsonb),
     'student_records', coalesce((select jsonb_agg(jsonb_build_object(
                           'student_id', r.student_id,

@@ -1080,6 +1080,164 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .linkcell { font-family: Consolas, monospace; font-size: 11px; color: var(--muted); }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   ROUND 14 — THE LEFT NAVIGATION PANEL, AND THE LAYOUT THAT HOLDS IT.
+   ──────────────────────────────────────────────────────────────────────────
+   «θα ηθελα στο wings ahead να προσθεσουμε στα αριστερα ενα navigation panel»
+
+   THE LAYOUT IS A TWO-COLUMN GRID and the panel is STICKY INSIDE IT — not
+   fixed to the viewport. Sticky keeps the rail in the document, so it cannot
+   sit on top of a page margin or fight the top bar's measured height for
+   position; `--topbar-h` (published by WA.measureTopbar) is the only number it
+   needs, and the bar wraps to two rows on a phone without the rail noticing.
+
+   WHAT HAPPENS TO THE WIDE-SEC BREAKOUT. Round 12b let the four table cards
+   escape the 760 px reading column with `left:50%; translateX(-50%)`, measured
+   against the VIEWPORT. Inside the grid that would centre them on the page and
+   push them under the rail, so within a .pagelay the breakout is turned off and
+   the CONTENT COLUMN does the job instead: `.lay-read` keeps ordinary cards at
+   760 px (a stack of labelled fields is easier to read narrow) and lets the
+   table cards fill the column, which is the same ~1140 px they had before.
+
+   UNDER 900 px IT IS THE SAME <ul> IN A DIFFERENT SHAPE — a one-line
+   horizontally-scrolling strip of pills, and the burger opens it into a
+   wrapped grid of all of them. One list, two shapes: no second copy of the
+   markup that could drift from the first.
+   ══════════════════════════════════════════════════════════════════════════ */
+.pagelay {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  width: min(1420px, 100%);
+  margin: 0 auto;
+  padding: 0 12px;
+}
+.pagelay > .lay-main { min-width: 0; }
+/* the student form's own .wrap becomes the column: it keeps the bottom room
+   the fixed save bar needs and gives up its own centring to the grid */
+.pagelay > .wrap.lay-main { max-width: none; margin: 0; padding: 14px 0 90px; }
+.pagelay .card.wide-sec { width: auto; left: auto; transform: none; }
+/* .lay-read — the READING COLUMN modifier (the student form). Ordinary cards
+   stay 760 px and centred; the table cards fill the column. */
+.pagelay.lay-read > .lay-main > .card:not(.wide-sec) { max-width: 760px; margin-left: auto; margin-right: auto; }
+
+.secnav {
+  position: sticky;
+  top: calc(var(--topbar-h, 56px) + 12px);
+  align-self: start;
+  max-height: calc(100vh - var(--topbar-h, 56px) - 28px);
+  display: flex; flex-direction: column; min-height: 0;
+  margin-top: 14px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 8px;
+  z-index: 5;
+}
+.sn-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 8px; }
+.sn-burger {
+  display: none; align-items: center; gap: 7px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 11px; font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.sn-burger:hover { border-color: var(--accent); }
+.sn-burger .sn-ic { font-size: 13px; line-height: 1; }
+.sn-head .sn-t {
+  font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted);
+}
+.sn-sum { font-size: 10.5px; color: var(--muted); margin-left: auto; }
+.sn-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; }
+.sn-row {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  background: transparent; color: var(--text); border: 1px solid transparent;
+  border-radius: 8px; padding: 5px 7px; font: inherit; font-size: 12.5px;
+  cursor: pointer; text-align: left;
+}
+.sn-row:hover { background: var(--hover); border-color: var(--line); }
+.sn-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* WHERE THE READER IS — the accent bar, not a fill: the row must stay legible
+   and the panel must not look like fourteen buttons one of which is pressed */
+.sn-row.is-here {
+  background: var(--accent-soft); border-color: rgba(var(--accent-rgb), 0.45); font-weight: 600;
+}
+.sn-lbl { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the tiny state — four washes in proportion, the same tokens the rows wear */
+.sn-bars {
+  display: flex; flex: 0 0 34px; height: 6px; border-radius: 999px; overflow: hidden;
+  border: 1px solid var(--line);
+}
+.sn-bars i { display: block; min-width: 2px; }
+.sn-bars i.st-done { background: rgba(var(--good-rgb), 0.85); }
+.sn-bars i.st-started { background: rgba(var(--good-rgb), 0.38); }
+.sn-bars i.st-owed { background: var(--st-owed); }
+.sn-bars i.st-extra { background: rgba(var(--mustard-rgb), 0.85); }
+.sn-st {
+  flex: 0 0 auto; font-size: 10.5px; color: var(--muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.sn-st.is-good { color: var(--good); }
+.sn-st.is-muted { opacity: 0.5; }
+
+@media (max-width: 900px) {
+  .pagelay { display: block; padding: 0; width: auto; }
+  .pagelay > .wrap.lay-main { max-width: 760px; margin: 0 auto; padding: 14px 12px 90px; }
+  .pagelay.lay-read > .lay-main > .card:not(.wide-sec) { max-width: none; }
+  /* the round-12b breakout comes back — there is no rail to collide with */
+  .pagelay .card.wide-sec {
+    width: min(1140px, 96vw); left: 50%; transform: translateX(-50%);
+  }
+  .secnav {
+    position: sticky; top: var(--topbar-h, 56px); margin: 0; z-index: 9;
+    border-radius: 0; border-left: none; border-right: none; border-top: none;
+    padding: 6px 10px; max-height: none;
+  }
+  .sn-head { padding: 0 0 6px; }
+  .sn-burger { display: inline-flex; }
+  .sn-head .sn-t { font-size: 12.5px; text-transform: none; letter-spacing: 0; color: var(--text); }
+  /* THE PILLS STRIP — one line, pushed left and right with a thumb */
+  .sn-list {
+    display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: thin; padding-bottom: 2px;
+  }
+  .sn-li { flex: 0 0 auto; }
+  .sn-row {
+    border: 1px solid var(--line); background: var(--panel-2);
+    border-radius: 999px; padding: 5px 11px; white-space: nowrap;
+  }
+  .sn-lbl { overflow: visible; }
+  .sn-bars { flex-basis: 22px; }
+  /* the burger opens the SAME list into a wrapped grid of all of them */
+  .secnav.is-open .sn-list { flex-wrap: wrap; overflow: visible; max-height: 46vh; overflow-y: auto; }
+}
+
+/* ── the confirmation dialog (round 14) ────────────────────────────────────
+   «ενα μηνυμα επιβεβαιωσης ποιος εγραψε … και σε σχεση με τι». It borrows the
+   person-editor's veil and modal so there is one dialog surface in the app;
+   what it adds is the SIGNATURE line and the numbered change list, which
+   scrolls inside the dialog while the count stays in the header. */
+.modal.cfm { width: min(640px, 100%); }
+.cfm-who { font-size: 13px; margin-bottom: 8px; }
+.cfm-who .k { color: var(--muted); font-size: 12px; }
+.cfm-n {
+  margin-top: 10px; font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase;
+  color: var(--muted);
+}
+.cfm-list {
+  margin: 6px 0 0; padding: 8px 8px 8px 30px; font-size: 12.5px; line-height: 1.6;
+  max-height: 42vh; overflow-y: auto;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+}
+.cfm-list li { margin: 2px 0; }
+.cfm-list li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
+.cfm-list.is-warn { border-color: rgba(var(--bad-rgb), 0.5); background: var(--bad-soft); }
+.modal.cfm .mfoot { flex-wrap: wrap; }
+
+/* ── round 14: the instructor card that has something unsaved in it ──────── */
+.stucard.is-dirty { border-left-color: var(--warn); }
+.stucard.is-dirty .prop-st { color: var(--warn); }
+/* ── round 14: a ground-exam row that is a TRIAL, and one that is an ΕΕΘ ─── */
+.ftbl .slotc.is-alt { opacity: 0.72; }
+.ftbl .slotc.serc b { letter-spacing: 0.3px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
    PRINT — the one place the palette must NOT apply: white paper, black ink,
    whatever theme is on screen. One page per student + class summary table.
    ══════════════════════════════════════════════════════════════════════════ */
@@ -1101,7 +1259,12 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
   html, body { background: #ffffff !important; color: #000000 !important; }
   body { background-image: none !important; display: block; }
   .topbar, .savebar, .savefloat, .tabs, .toolrow, .thm-pop, #toast, .veil,
+  /* round 14 — a table of contents is a screen affordance: on paper the
+     document IS its own contents, and the rail would print as a stray list */
+  .secnav,
   .screen-only { display: none !important; }
+  /* and the grid collapses, so the printed column is the whole page */
+  .pagelay { display: block !important; width: auto !important; padding: 0 !important; }
   .print-only { display: block; }
   main, .wrap, .wrap-wide { padding: 0; max-width: none; }
   .foot { display: none; }

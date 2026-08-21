@@ -956,6 +956,15 @@ four above place a student on the fighter track or beside it; the fifth places
 him firmly **elsewhere**. It is a different **kind** of statement, not merely the
 next step down, and it is not allowed to read as the continuation of a list.
 
+> **SUPERSEDED IN ROUND 14 (§4n·5)** — «την γραμμη μεταξυ recommended as
+> alternate and recommended for other assignments». The rule **moved up one**
+> (`WA.LEVEL_SEP_AT: 4 → 3`) and its rationale moved with it: it no longer marks
+> *the last level* off from *the list*, it marks the **fighter / other split** —
+> the **three** answers above it place a student on the fighter track or
+> immediately beside it, the **two** below it place him somewhere else in the Air
+> Force. The paragraph above records what the rule meant between round 10 and
+> round 14; §4n·5 is the standing rule.
+
 **Clearing:** clicking the level that is already selected returns the student to
 "no view formed yet" — the same escape the round-8 chips had, which a radio group
 does not offer by itself, and the only way to un-say something an instructor did
@@ -970,6 +979,16 @@ write nobody asked for, which would also re-stamp rows the CO owns) or guess.
 So the card's **own** Save announces the dirt instead — it gains an accent ring
 the moment anything changes and drops it on save, which is what the floating
 button was ever for.
+
+> **REVERSED IN ROUND 14 (§4n·6)** — «το save οχι για καθε μαθητη, αλλα γενικα».
+> The judgement above had one flaw the live form makes obvious: an instructor
+> answers a **questionnaire about a class**, not twelve separate forms, and a
+> Save per card asks him to perform twelve acts to complete one. The objection it
+> raises against a single button — *"save which of them?"* — is answered by the
+> round-9 machinery it was written beside: **dirt is measured**, so the one Save
+> writes exactly the cards that differ from what is stored and re-stamps nothing
+> else. The per-card Saves are gone; the floating Save is here, and it says how
+> many assessments it is about to write.
 
 ### RETIRED ON WRITE, FROZEN IN THE TABLE
 
@@ -2397,13 +2416,13 @@ schema — that is the schema this app needs, and nothing more.
 ### OPEN ITEMS RAISED BY THIS ROUND
 
 1. **The ordering change is the one to rule on** — see the flag above.
-2. **A `started` ground lesson cannot be saved.** A lesson has only `date` and
-   `end_date`, so the only partial state is *an end date with no start date* —
-   and round 12b's rule (unchanged) refuses that row by name. The colour is
-   therefore honest but transient there. The same is not true of flights or
-   exams, where *started* saves happily (*awaiting debrief* / *awaiting a
-   result*). If the squadron wants a lesson to be markable as *booked* before it
-   has a start date, that is a key, not a colour.
+2. ~~**A `started` ground lesson cannot be saved.**~~ **CLOSED IN ROUND 14
+   (§4n·2).** A lesson has only `date` and `end_date`, so the only partial state
+   is *an end date with no start date* — and round 12b's rule refused that row by
+   name. The command's own instruction («τα μαθηματα να δεχομαστε και μονο end
+   date για την καταγραφη») makes it a **complete** record instead: either date
+   completes a ground lesson, so the one partial state the row can have is no
+   longer the one state the server refuses.
 3. **`JP190` is seeded for everybody.** It is `cond: true` — *foreign SPs only* —
    and a HAF student does not owe it, yet it counts in the 8 and shows as owed
    with its *foreign SPs* badge. FDMS's own `SchedReady` never reads that flag
@@ -2415,6 +2434,616 @@ schema — that is the schema this app needs, and nothing more.
    page-level sideways scroll, blocks closed until touched), but if a student on
    an old handset finds it heavy, the answer is a per-block *"show owed"* toggle,
    not a smaller syllabus.
+
+## 4n. Round 14 (2026-08-21) — THE PANEL, THE PLANNED ROW, AND THE SIGNATURE
+
+### THE MORNING BATCH, VERBATIM (2026-08-21)
+
+> 1. «θα ηθελα στο wings ahead να προσθεσουμε στα αριστερα ενα navigation panel»
+> 2. «τα μαθηματα να δεχομαστε και μονο end date για την καταγραφη»
+> 3. «στα ground exam να εχουμε 2nd trial, 3rd και να μπορουμε να βαλουμε τα ΕΕΘ
+>    με ΕΕΘ 1, ΕΕΘ 2 κλπ»
+> 4. «τους εκπαιδευτες με σειρα αρχαιοτητας. HAF πρωτα, ITAF μετα»
+> 5. «την γραμμη μεταξυ recommended as alternate and recommended for other
+>    assignments»
+> 6. «το save οχι για καθε μαθητη, αλλα γενικα»
+> 7. «οταν πατησει το γενικο save ή το ειδικο να του βγαζουμε ενα μηνυμα
+>    επιβεβαιωσης ποιος εγραψε (απο το link, o Maj ⟨ΟΝΟΜΑ⟩) και σε σχεση με τι.
+>    Ετσι θα μπορει ο χρηστης να επιβεβαιωσει. Επισης θα μπορει να απορριψει. Αν
+>    θελει να απορριψει θα τον ρωταμε αν θελει σιγουρα να απορριψει τις 1,2,3
+>    αλλαγες»
+
+**REDACTION NOTE.** Item 7 names the Flight Commander by surname. The name is
+replaced by `⟨ΟΝΟΜΑ⟩` here and in the two source comments that quote the same
+sentence (`app/app.js`, `app/student.js`): **no real name enters a tracked file,
+ever.** Nothing else in the quotes is altered.
+
+---
+
+### 1. THE LEFT NAVIGATION PANEL
+
+The student form is **fourteen sections and about twelve thousand pixels** since
+round 13 pre-seeded the syllabus. Everything in it was reachable and nothing in
+it was findable: a student adding an NFS scrolled past the whole flight log to
+get there, and a CO entering data on somebody's behalf did it twice.
+
+The panel is the form's **table of contents** — one row per section card, click
+to go there — and each row carries **the one fact that section is about**, so it
+answers *what do I still owe* without being opened at all:
+
+| section kind | what the row says |
+|---|---|
+| the four slot sections (`flights` `fs` `lessons` `exams`) | the four-state bar, and **“N owed”** — the question the pre-seeded syllabus exists to answer |
+| the two fixed sections (`evaluations` `solo_flights`) | **“6/8”** — how many syllabus slots are flown |
+| everything else | the entry count, because for an NFS or an FPC the number *is* the fact (and zero is the good news) |
+
+Every state is read from **the same counters the section header prints**
+(`WA.stateCounts` / `cntHTML`) and never from a second count, and the panel is
+refreshed on the same beat as the header — `markDirty()`, so it moves **on the
+keystroke**, not on the next save.
+
+**IT IS ONE COMPONENT AND IT IS NOT THE FORM'S** — `WA.navHTML` /
+`WA.navMount(navEl, {items, anchor})` in `app.js`. It renders, tracks the
+scroll, and re-reads the items on demand; it never reads a record, because it
+must not have an opinion about what a section is. `WA._nav` is the one slot
+`teardownView()` destroys — a scroll listener that outlived its DOM is the one
+bug this component can have.
+
+**THE LAYOUT.** `.pagelay` is a two-column grid (`224px minmax(0,1fr)`) and the
+panel is **sticky inside it**, not fixed to the viewport: sticky keeps the rail
+in the document, so it cannot sit on a page margin or fight the top bar for
+position. `--topbar-h` (published by `WA.measureTopbar()`) is the only number it
+needs, and the bar wraps to two rows on a 375 px phone without the rail
+noticing.
+
+*What happens to the round-12b breakout.* The four table cards escaped the
+760 px reading column with `left:50%; translateX(-50%)`, measured against the
+**viewport**. Inside the grid that would centre them on the page and push them
+under the rail, so within a `.pagelay` the breakout is **turned off** and the
+content column does the job instead: `.lay-read` keeps ordinary cards at 760 px
+and lets the table cards fill the column — measured **999 px at a 1280 px
+viewport**, against `min(1140px, 96vw)` before. Below the break the breakout is
+restored, because there is no rail to collide with.
+
+**UNDER 900 px IT IS THE SAME `<ul>` IN A DIFFERENT SHAPE** — a one-line
+horizontally-scrolling **strip of pills** (measured 1479 px of pills scrolling
+inside 355 px), and the **burger** opens it into a wrapped grid of all fourteen.
+One list, two shapes: a phone gets the pills without a second copy of the markup
+that could drift from the first. Tapping a pill closes the panel — the section
+you asked for must not open underneath the list you asked it from.
+
+**TWO THINGS THE SCROLL DOES THAT ARE NOT DECORATION.**
+
+1. **The offset is measured, and below the break it includes the strip.** Above
+   the break only the top bar has to be cleared; below it the panel is a *second*
+   sticky strip, so its height counts too — otherwise every jump lands the
+   section's heading behind the very pills that asked for it. Verified: at
+   375 px every jump lands at `top: 154` against a nav bottom of `140`.
+2. **`behavior:"smooth"` is advisory, so the landing is confirmed.** Some
+   engines — including this round's own emulation mode — ignore it outright and
+   the page simply never moves, which would make the whole panel look broken
+   while every other part of it worked. `go()` therefore re-checks 250 ms later
+   and jumps instantly if **nothing has moved at all**; a real smooth scroll has
+   travelled by then, so this never interrupts one. And smooth is capped at
+   `WA.NAV_SMOOTH_MAX = 2400 px`: animating a jump from the top to Ground exams
+   across twelve thousand pixels is not *smooth*, it is a four-second wait, and a
+   table of contents exists to **take you there**. `prefers-reduced-motion`
+   switches the animation off at any distance.
+
+#### THE ADMIN DASHBOARD — THE JUDGEMENT
+
+> *«Check the ADMIN dashboard too — if a left panel helps there
+> (Overview/Analysis/Brief/People as vertical nav), apply the same pattern.»*
+
+**THE FOUR TABS STAY A HORIZONTAL CHIP ROW**, and that is a ruling and not an
+omission. A left panel answers **one** question — *where am I in this long
+document, and what is in the rest of it* — and the four tabs are not a document:
+each one **replaces** the whole content, so a vertical rail of them could only
+ever highlight the row that is already lit. What it would cost is real: ~220 px
+of width on every tab, for ever, and the two things this dashboard most needs
+width for sit exactly there — the Overview's **thirteen-column** table and the
+log tables in the analysis.
+
+**BUT THE PATTERN'S REAL HOME IN THE ADMIN IS THE STUDENT ANALYSIS**, which *is*
+a document: **ten cards**, several screens, and the CO reading it is looking for
+a section (the evaluations plot, the FAIL table, the flight log, the
+assessment). So the panel goes **there**, listing that tab's cards with the same
+live states, mounted from the same `WA.navMount`. One component, two surfaces;
+the tabs keep the shape that suits a view switch. The panel is destroyed and
+re-mounted on every tab switch and on every student change, so its rows always
+describe the student on screen (`Ground = 56 owed`, `Ø 9.33` — proven live).
+
+---
+
+### 2. A GROUND LESSON: THE END DATE ALONE IS A VALID RECORD
+
+> «τα μαθηματα να δεχομαστε και μονο end date για την καταγραφη»
+
+A lesson is a **block**: `date` = start, `end_date` = end. Round 12b asked for
+the START on every row, which meant a course a student knows **finished** on the
+12th but cannot date the beginning of could not be recorded at all. **Either
+date now completes the row; both is the normal case; neither is still refused**,
+because a lesson with no date at all says nothing that *this course is in the
+programme* does not already say — and that is the owed slot, which stores
+nothing.
+
+**AND IT CLOSES ROUND 13'S OPEN ITEM 2.** That item read:
+
+> *«A `started` ground lesson cannot be saved. A lesson has only `date` and
+> `end_date`, so the only partial state is an end date with no start date — and
+> round 12b's rule (unchanged) refuses that row by name. The colour is therefore
+> honest but transient there.»*
+
+The one partial state a two-date row can have was **the one state the server
+refused**. It is now the state the command asked for, so the quirk is not
+worked around — it is gone.
+
+Where the rule lives, all four in the same words:
+
+| | |
+|---|---|
+| server | `wa.validate_record` → *«a ground lesson is recorded by its start date, its end date, or both — one of the two is required»*. This is the **one** section where `wa.chk_entry_date` does not apply. |
+| server, on read | `wa.migrate_record` no longer flags an end-only row as a lost-date import |
+| client | `COMPLETE.lessons`, `buildPayload` (same sentence), `missingOf` (a missing `date` is not a missing fact here) |
+| colour | `WA.rowDone('lessons')` → `isD(date) ‖ isD(end_date)`, so **end-only is green** |
+| order | `WA.rowDate(sec,e)` — the date a row is filed under; an end-only lesson sorts by its end date instead of behind every course that has not started |
+| readouts | the drill-down prints **“ended 30/04/2026”** and the entries CSV the same, not a broken range `— – 30/04` |
+
+`end < start` is still refused when both exist.
+
+---
+
+### 3. GROUND EXAMS: TRIALS, AND THE ΕΕΘ SERIES
+
+> «στα ground exam να εχουμε 2nd trial, 3rd και να μπορουμε να βαλουμε τα ΕΕΘ με
+> ΕΕΘ 1, ΕΕΘ 2 κλπ»
+
+**TWO DIFFERENT THINGS ARRIVE IN ONE SENTENCE**, and they are stored differently
+because they *are* different:
+
+| | a **TRIAL** | an **ΕΕΘ** |
+|---|---|---|
+| what it is | another attempt **at one of the eight** | a **weekly theory exam** — an open series the syllabus does not enumerate |
+| identity | the exam's own id **+ `trial` 2 or 3** | `series:'EETH'` + `series_no` 1, 2, 3 … and **no `exam`** |
+| how many | at most three, **one row per (exam, trial)** | unlimited within the section cap (200) |
+| minted by | **“+ 2nd trial”** on the exam's own row | **“+ ΕΕΘ n”** in the section header, `max + 1` |
+| date · grade | date may be empty on a **planned** (2nd/3rd) trial; the 1st still needs it | **both nullable** — it is programmed before it is sat |
+
+**THE FIRST TRIAL IS WRITTEN AS NO KEY AT ALL.** That is what makes every record
+from before this round correct without being rewritten, and it is enforced in
+both directions: `wa.migrate_record` normalises a stored `1` away on read, and
+`wa.validate_record` refuses `trial:1` by name — *«a stored 1 would be a second
+spelling of the same fact, and two spellings is how a uniqueness rule gets
+bypassed»*.
+
+#### WHICH TRIAL WEARS THE SLOT — THE EVALUATIONS' RULE, ONE SECTION OVER
+
+The colour of an exam slot follows the **operative attempt**, decided exactly as
+round 11 decided it for the eight checkrides (`WA.evalOperativeOf`): **PASS is
+the filter and it runs first, LATEST is only the tiebreak**, and a slot with no
+pass at all falls back to the latest attempt so a student who has failed twice
+still shows a number rather than an em dash. `WA.examOperativeIx` is that rule
+over exam rows, with the tiebreak reading **date → trial number → stored order**
+(*the later attempt*, when two re-sits share a day).
+
+It **has to** be the same rule: a re-sat exam and a re-flown checkride are the
+same fact about the same student, and two rules would let the brief and the form
+disagree about whether IN190 is done. `WA.claims` is the one line where the two
+doctrines meet — first-in-stored-order for the flight logs and the lessons (a
+re-fly is not the planned pass), the **operative trial** for the exams (three
+attempts at *one* slot, not three passes at it).
+
+#### NEITHER IS MUSTARD, AND WHY IT NEEDED TWO PREDICATES
+
+`extra` means *beyond the syllabus's one planned pass*. Neither of these is:
+a 2nd trial is a re-sit the squadron ordered, an ΕΕΘ is on the weekly programme.
+Getting that right took **two questions that sound alike and are not**:
+
+- **`WA.rowMinted`** — *did somebody CREATE this row with an affordance?* (a
+  series row, or a trial ≥ 2). A minted row is a **report** even when it is
+  empty (*a re-sit has been ordered*), so it is stored, it is never mistaken for
+  a seeded placeholder, and the click never silently undoes itself on the next
+  save. A **blank trial-1 row IS** the seeded placeholder. → `slotUntouched`,
+  `claims`.
+- **`WA.rowPlanned`** — *should it wear the mustard?* **Every** attempt at one of
+  the eight is within the plan, whichever trial it is: when a 2nd trial passes it
+  takes the slot, and the failed **first** attempt it displaces is not suddenly
+  an off-catalogue extra — it is *the first trial*, and it is shown as one,
+  directly beneath its slot. Only a row naming no known exam is an extra here.
+  → `rowState`.
+
+A **planned row with nothing in it is OWED**, not started: minting ΕΕΘ 4 or a 2nd
+trial of IN190 puts it on the programme, and *«in the programme, nothing
+recorded yet»* is the sentence the grey wash already carries. And a blank planned
+row **never takes the slot** from the attempt that has something in it.
+
+#### WHERE THE ROWS GO, AND WHAT THEY ARE CALLED
+
+`WA.slotRows('exams', …)` emits: each of the eight slots (held by its operative
+attempt) **with its other trials immediately beneath it**, then **the ΕΕΘ series
+in number order after the eight fixed slots**, then the true extras. Every
+surface names a row with the one helper, `WA.examRowLabel` — *“IN190 · 2nd
+trial”*, *“ΕΕΘ 3”* — the student's table, the CO's drill-down, the **printed
+brief** (monochrome has no badge colour to tell a re-sit from a first sitting)
+and the **entries CSV**, whose *Counts* column now says which attempt the verdict
+is read from, exactly as it does for a re-flown checkride.
+
+#### THE EXAMS SECTION'S “+ ADD” IS NOW THE ΕΕΘ
+
+The generic **+ Add** is gone from that header and it is not a loss: all eight
+ground exams are seeded, the list is closed server-side, and a re-sit is now a
+**trial** minted on its own row — so the only exam row a student can
+legitimately need to *create* is the next weekly ΕΕΘ. A generic add could only
+have produced a duplicate trial-1, which the new uniqueness rule refuses.
+The affordance also disappears from an exam **nobody has sat**: there is no
+second trial of an exam that has not had a first.
+
+#### AND THE COUNT THAT HAD TO GROW A SECOND NAME
+
+`WA.stateCounts` gains **`slotsDone`** — how many *slots* are complete, which is
+not the same number as how many *rows* are: an exam sat three times is **one**
+exam done. Every «X of 8» sentence (the instructor card, the CO's brief line)
+now reads `slotsDone`; every «done X» still reads `done`. Without it a student
+with a re-sit would have read **“9 of 8 exams”**.
+
+---
+
+### 4. INSTRUCTOR SENIORITY ORDER — ONE COMPARATOR, EVERY LIST
+
+> «τους εκπαιδευτες με σειρα αρχαιοτητας. HAF πρωτα, ITAF μετα»
+
+Every surface that lists instructors sorted them **alphabetically by surname** —
+an order the squadron does not use for anything. The squadron's order is
+seniority, and it has three levels:
+
+1. **The air force.** HAF, then ITAF, then any other named one alphabetically
+   (so a third lands somewhere definite rather than wherever the roster inserted
+   it), then whoever the roster gave no country.
+2. **The call sign, in NATURAL order** — P-2 before P-14, never the string order
+   that puts P-14 first. The call sign and **not the rank** decides, because the
+   call sign is the squadron's own position (P-14 is the CO) while the rank is a
+   grade. This is the **FDMS Currency precedent**, unchanged.
+3. **No call sign sorts last within its own air force**, by surname — such a
+   person is not un-ranked, they are un-numbered.
+
+**IT LIVES IN TWO PLACES BECAUSE IT HAS TO.** `WA.seniorityKey` / `WA.bySeniority`
+on the client, `wa.seniority_key(people)` (over `wa.natkey`, which pads digit
+runs to eight) on the server. The instructor **picker's payload is surnames and
+nothing else** — no country and no call sign ever leave the database for a
+student — so the **order is the only channel** the ruling has into that list, and
+`wa.instructor_surnames()` applies it. `WA.insNames` correspondingly **stopped
+sorting**: round 9 re-sorted alphabetically one line after the server had
+applied the squadron's order, and threw it away.
+
+**THE SORT SITES SWEPT** (`grep` over every `.sort(` / `order by` in the repo):
+
+| where | before | now |
+|---|---|---|
+| `wa.instructor_surnames()` — the picker behind every “who” box | `order by last_name` | seniority (grouped by surname, taking the **senior** key where two share one) |
+| `admin_dashboard` → `proposals` (the drill-down) | `order by ip.last_name` | seniority |
+| `admin_dashboard` → `by_level` / `no_level` / `not_submitted` names | `order by i2.last_name` | seniority |
+| `admin_dashboard` → `instructors` (the Overview strip) | `order by p.last_name` | seniority |
+| `admin_list_people` (the People table) | `role, last_name, first_name` | `role`, then **seniority** inside each block |
+| `admin_export` → `people` | `role, last_name` | `role`, then seniority |
+| `admin.js` Overview submissions strip · People table · analysis drill-down · assessments CSV · printed brief comments | alphabetical | `WA.sortBySeniority` |
+
+The client sorts **as well as** the server on every surface whose payload carries
+the country and the call sign, so the order holds even against a cloud instance
+whose schema has not been re-run yet. Every other `.sort(` in the app is a date,
+a syllabus position, a class name or a metric value — none of them lists people.
+
+---
+
+### 5. THE ASSESSMENT FORM: THE LINE MOVED UP ONE
+
+> «την γραμμη μεταξυ recommended as alternate and recommended for other
+> assignments»
+
+`WA.LEVEL_SEP_AT: 4 → 3`. Until now the rule sat before the **fifth** level and
+said *the last one is a different kind of statement*. It now sits between
+**Recommended as Alternate (5)** and **Recommended for Other Assignments (3)**,
+and the move is what turns it from a typographic hedge into **the one boundary
+this form is asked to draw**:
+
+```
+    Strongly Recommended                            10  ┐
+    Recommended                                      8  ├─ the FIGHTER answers
+    Recommended as Alternate                         5  ┘
+    ────────────────────────────────────────────────────
+    Recommended for Other Assignments                3  ┐─ the REDIRECT answers
+    Strongly Recommended for Other Assignments       1  ┘
+```
+
+**The rationale in the spec changes with it**: the rule no longer separates *the
+last level* from *the list*; it separates the three answers that place a student
+on the fighter track or immediately beside it from the two that place him
+somewhere else in the Air Force. The scale itself, the weights and the "not one
+negative word" doctrine (§4j) are untouched.
+
+The same rule is now drawn on the **CO's readout** (`assessBox`), from the same
+`WA.LEVEL_SEP_AT`, so the boundary the CO reads a distribution against is the
+boundary the instructor answered against.
+
+---
+
+### 6. ONE GENERAL SAVE ON THE INSTRUCTOR FORM
+
+> «το save οχι για καθε μαθητη, αλλα γενικα»
+
+Round 10 argued for the per-card Save and the argument had one flaw the live
+form makes obvious: **an instructor answers a questionnaire about a class, not
+twelve separate forms**, and a Save per card asks him to perform twelve acts to
+complete one.
+
+The objection round 10 raised against a single button — *“save which of them?”,
+either by saving all (a batch write nobody asked for, and one that would
+re-stamp rows the CO owns) or by guessing* — is answered by the machinery the
+student form has had since round 9: **dirt is measured**. `SAVED[sid]` holds each
+card as it was last stored, the card is dirty when it **differs**, and the one
+Save writes exactly the dirty ones. Change something and change it back and the
+card leaves the list, because the assessment really is the stored one again —
+which is also what stops the general Save from re-stamping a proposal the CO
+owns and the instructor never touched.
+
+- the button **says how many**: *“Save 3 assessments”*, on both the floating
+  copy (the student form's pattern — this form is a dozen screens long) and the
+  bottom bar, and it is **disabled while nothing differs**;
+- a dirty card is marked in place (`.stucard.is-dirty`, warn-coloured left
+  border) and its status line says *“Unsaved — it will be written by the Save
+  button.”*;
+- **there is deliberately no batch RPC.** `wa.write_proposal` carries the whole
+  per-proposal contract — the level normalisation, the **owner-reclaim** that
+  clears the CO tag when the owner answers, the CO stamp when the CO does — and
+  a second write path would be a second place for those rules to live. The
+  button iterates the dirty cards over the RPC that already exists and **reports
+  per card**: an assessment the server refuses leaves that one card unsaved and
+  named, and the rest of the class still lands.
+
+---
+
+### 7. THE CONFIRMATION, AND THE ENUMERATED DISCARD
+
+> «οταν πατησει το γενικο save ή το ειδικο να του βγαζουμε ενα μηνυμα
+> επιβεβαιωσης ποιος εγραψε (απο το link, o Maj ⟨ΟΝΟΜΑ⟩) και σε σχεση με τι …
+> Επισης θα μπορει να απορριψει. Αν θελει να απορριψει θα τον ρωταμε αν θελει
+> σιγουρα να απορριψει τις 1,2,3 αλλαγες»
+
+**WHO COMES FROM THE LINK, WHICH IS THE WHOLE POINT.** Whoever holds a personal
+link **is** that person to this application; the one thing it can and must say
+back before a write is **whose name goes on it**. The header is the token's own
+record (`WA.me`) as **rank + surname** — *“1Lt ⟨SURNAME⟩”*, *“Cdt ⟨SURNAME⟩”* —
+the way the squadron writes it. On the CO's on-behalf twins it names **both**:
+*Signed by ⟨the CO⟩ · CO · on behalf of ⟨the student⟩*, because the tag the save
+leaves behind says exactly that.
+
+**AND WHAT — AS A NUMBERED LIST OF SENTENCES, NOT A PAYLOAD.** Built by comparing
+the form against the state it was **last saved** in, every item in the terms the
+user can see on screen: the section, the row named the round-12b way (its code /
+date, **never** a stored index), and what changed, old → new.
+
+```
+  Save 3 changes to your record?
+  Signed by Cdt ⟨SURNAME⟩
+  3 CHANGES
+   1. NFS · 01/06/2026 — added (date 01/06/2026)
+   2. Ground lessons · GT-⟨GROUP⟩ · ⟨COURSE⟩ · 27/04/2026 — date — → 27/04/2026
+   3. Ground exams · IN190 · 2nd trial · 20/05/2026 — grade 82 % → 91 %
+      [Keep editing]   [Discard changes]   [Confirm & save]
+```
+
+**ONE BUILDER FOR ALL THREE FORMS** — the student's, the CO's on-behalf twin and
+the instructor's general save — because three builders is three chances for the
+message and the write to disagree:
+
+- `WA.rowTitle(sec, e)` — what a row is CALLED (round 12b's naming, extracted so
+  the save refusals and the change list cannot drift);
+- `WA.rowIdent(sec, e)` — the identity two versions of one row share. Without it
+  a removed row would make every row below it read as changed, turning one
+  deletion into eighty edits in the dialog;
+- `WA.IDENT_FIELDS` — the fields that ARE the row's name, so an *added* line does
+  not read *“IN190 · 2nd trial — added (exam IN190, trial 2nd trial)”*. They are
+  still compared: changing one changes `rowIdent`, so it surfaces as a removal
+  and an addition, which is the honest description of moving a row from one
+  identity to another;
+- `WA.recordChanges(before, after, sections)` and `WA.proposalChanges(before,
+  after, nameOf)` — the two shapes the app can write;
+- `WA.confirmSave(opts)` — one promise, **three** answers.
+
+**THE SECOND QUESTION IS ASKED INSIDE THE SAME DIALOG**, so a discard can still
+be backed out of without the first list having to be rebuilt:
+
+```
+  Are you sure you want to discard changes 1-3?
+  They will be undone and the form will go back to the way it was last saved.
+   1. …  2. …  3. …
+      [No — go back]        [Yes, discard all 3]
+```
+
+`[No — go back]` returns to the change list. `[Yes]` restores the last-saved
+snapshot — the student form deep-copies the record, re-seeds the syllabus slots
+and redraws all fourteen sections; the instructor form restores each dirty
+card's level, checkbox and comment. `[Keep editing]` (and `Esc`) closes the
+dialog changing nothing, and the form stays dirty. Long lists **scroll inside
+the dialog** and the count stays in the header.
+
+The dialog opens for **both** Save buttons on the student form — *«το γενικο save
+ή το ειδικο»*: they are one act with two positions on the screen, and a dialog
+that appeared for only one of them would teach the student that the other one
+writes without asking.
+
+---
+
+### DATA-MODEL DELTA
+
+`wa.entry_keys('exams')` and `WA.ENTRY_KEYS.exams` gain **three keys**:
+
+| key | rule |
+|---|---|
+| `trial` | int **2..3** only — 1 is the absence of the key; refused by name if stored |
+| `series` | closed list, `wa.exam_series()` = `['EETH']`; **exclusive with `exam`** |
+| `series_no` | int 1..`wa.section_cap('exams')`; **required** on a series row — the number is the name |
+
+Two closed rules join the solo-slot precedent in `wa.validate_record`:
+**one row per (exam, trial)** and **ΕΕΘ numbers unique**. Both are enforced on
+the server because the form's affordances mint from `max+1` and a payload can
+always be hand-made. `wa.migrate_record` repairs the round-13 way — a value its
+catalogue no longer contains is **nulled and the row flagged**, never dropped
+and never guessed at.
+
+`wa.exam_ids()` and `WA_EXAMS` are **untouched**: they come out of the syllabus
+sources through `tools/gen-items-catalog.py` and the ΕΕΘ are not in them. The
+series is the squadron's own weekly programme, declared **by hand, outside the
+generated block**, on purpose.
+
+### AUDIT-TABLE DELTA (§4h)
+
+**No new dropdown.** The two new affordances are **buttons that mint a row**
+(“+ 2nd trial”, “+ ΕΕΘ n”) — the same shape as round 12's “↻ same-day re-fly”,
+and for the same reason: 1·2·3 and *max+1* are the whole of the choice, and a
+box would only let it be got wrong. The exam picker itself is unchanged and
+still closed to the eight.
+
+### DEPLOYMENT NOTE — **THE SCHEMA GOES FIRST**
+
+`db/schema.sql` **is** touched this round (`wa.natkey`, `wa.seniority_key`,
+`wa.exam_series`, `wa.exam_trials`, the exams and lessons branches of
+`wa.validate_record` and `wa.migrate_record`, `wa.entry_keys`, and seven
+`order by` sites). The gate is the §4l gate, unchanged in shape:
+
+1. **Run `db/schema.sql` on the cloud project first** (SQL editor, whole file,
+   idempotent — it is re-runnable and was run twice here to exit 0).
+2. **Then** push the app (`?v=20260821a → ?v=20260821b`, seven assets).
+
+In that order, because an app that sends `trial` / `series` to a schema that
+does not know them is refused by the key whitelist — by design — and a lesson
+saved with an end date alone would be refused by the old `chk_entry_date`. The
+reverse order is safe but useless: the new schema simply accepts what the old
+app already sent.
+
+**This round is COMMITTED LOCALLY AND NOT PUSHED** (the user's instruction),
+so the gate is stated here for whoever runs the deployment.
+
+### SELF-VERIFICATION — ROUND 14 (live, local stack, the real forms and the real RPCs)
+
+1. **`db/schema.sql` applies twice, `ON_ERROR_STOP=1`, exit 0** both times.
+   `wa.natkey('P-14') = 'P-00000014'`, `wa.natkey('P-2') = 'P-00000002'`.
+2. **The panel is live and it agrees with the headers.** All 13 section rows
+   present; the nav badge and the section's own `.cnt` were read side by side
+   and match on every section (`Evaluations 8/8` ⇄ *“8 of 8 flown”*,
+   `Flights 77 owed` ⇄ *“done 0 · started 0 · owed 77”*, …). Typing a date moves
+   the bar on the keystroke; clearing it moves it back **and the form reads
+   clean again** (`dirty:false`, floating Save hidden).
+3. **Scroll and spy.** Clicking a row lands the section at `topbar + 14`
+   (measured `top: 75` on the admin analysis, `154` at 375 px against a nav
+   bottom of `140` — it clears the sticky strip). `is-here` follows both the
+   click and a plain scroll. **Zero page-level sideways scroll** at 1000 px,
+   1280 px and 375 px (`body.scrollWidth ≤ innerWidth` in all three).
+4. **The 900 px collapse.** Burger appears (`display:flex`), the list becomes a
+   `nowrap` strip that scrolls **1479 px inside 355 px**, the burger toggles
+   `is-open` → `flex-wrap:wrap` and `aria-expanded`, and tapping a pill closes
+   it. Rows stay **37 px — one line**.
+5. **Lesson end-only.** `end_date` alone → row **green (`st-done`)**, section
+   *“done 1 · started 0 · owed 46”*, and it **saved**: stored as
+   `{"date":null,"group":…,"course":…,"end_date":"2026-04-30"}`. `⌫` returns it
+   to **owed** and the record to **clean**. Server probes: end-only **accepted**,
+   start-only **accepted**, neither **refused** by name, `end < start` **refused**.
+6. **Exam trials.** IN190 sat and failed (48) → the **“+ 2nd trial”** affordance
+   appears **on the keystroke** (it lives in the actions cell, which is the cell
+   a keystroke re-renders) and is absent on every unsat exam. Minting adds a
+   grey **2nd trial** row under the slot; filling it with **82** moves the slot
+   to it (`st-done`) and the failed **1st trial** renders beneath, tagged, and
+   **not mustard** — the pass-attempt rule, live.
+7. **ΕΕΘ.** Three mints → `ΕΕΘ 1 · 2 · 3` after the eight fixed slots, grey,
+   each with ✕, and the button re-labels itself **“+ ΕΕΘ 4”**. Counts:
+   *“done 2 · started 0 · owed 10”* (7 unclaimed slots + 3 ΕΕΘ).
+8. **Sparse storage held.** 12 form rows → **5 stored**: the two IN190 attempts
+   (the first with **no `trial` key**, the second with `trial:2`) and three ΕΕΘ
+   with `date:null, grade:null`. The seven untouched slots store nothing.
+9. **Server refusals, on fabricated payloads** — every one by name: duplicate
+   `(exam,trial)`; duplicate ΕΕΘ number; `trial:4`; `trial:1`; `exam` **and**
+   `series` on one row; unknown series `WEEKLY`; ΕΕΘ with no number; `trial` on
+   a series row; `series_no` on an exam row; a **first** trial with no date.
+   Accepted: a **dateless 2nd trial**, an ΕΕΘ with only its number.
+10. **Migrate / strip pass-through, both mirrors.** A fabricated stored record
+    carrying `note`, `pending`, `trial:1`, `trial:3`, a dateless `trial:2`, an
+    unknown series, a series row that also names an exam, a numberless ΕΕΘ, an
+    unknown exam and three lesson shapes produced **identical output from
+    `wa.migrate_record` and `WA.migrateRecord`** — retired keys stripped,
+    `trial:1` normalised away, the dateless `trial:2` kept and **not** flagged,
+    every unknown value nulled-and-flagged, the end-only lesson kept clean.
+11. **Caps.** 200 ΕΕΘ accepted (the section cap), **201 refused** — *“too many
+    entries”*.
+12. **Seniority, three lists compared side by side.** People table, Overview
+    submissions strip and the student form's datalist (surnames only, straight
+    off `list_instructor_names`) are in the **identical** order: HAF
+    `P-14 … P-24`, then ITAF `P-40, P-42`, then the three without a call sign,
+    last, by surname. The People header says *“— seniority order”*.
+13. **The separator.** Read off the live radio group: `Strongly Recommended ·
+    Recommended · Recommended as Alternate │ Recommended for Other Assignments ·
+    Strongly Recommended for Other Assignments`.
+14. **The general save.** Zero `[data-save]` buttons remain. Three cards changed
+    (a level, a *flew with*, a comment) → **“Save 3 assessments”** on both
+    buttons, 3 cards marked dirty, the dialog headed *“Signed by 1Lt ⟨SURNAME⟩”*
+    with the three changes enumerated in visible terms. After **Confirm & save**:
+    **`psql` says 3 proposals written and the total is still 9** — nothing else
+    was touched, and no proposal was fabricated for the other 22 students.
+15. **Discard, both forms.** Student: 3 changes → *“Are you sure you want to
+    discard changes 1-3?”* with the list repeated; **No** returns to the change
+    list; **Yes** reverts every one (the added NFS row gone, the lesson start
+    cleared, the exam grade back to 82) and the form reads **clean**. Instructor:
+    2 changes → *“…changes 1-2?”* → revert restores the radio, the checkbox and
+    the disabled button.
+16. **The CO on-behalf twin** carries the panel, the layout and the dialog:
+    *“Save 1 change to ⟨student⟩'s record?” · “Signed by ⟨CO⟩ · CO · on behalf of
+    ⟨student⟩”*, and **Keep editing** leaves the form dirty and unsaved.
+17. **CO surfaces.** The drill-down names the trial and the series
+    (`IN190 · 2nd trial`, `ΕΕΘ 1 · weekly theory`) and prints **“ended
+    30/04/2026”** for the end-only lesson; the **printed brief** carries the same
+    names in monochrome (`IN190 (not the operative attempt)`, `ΕΕΘ 1 (weekly
+    theory) · not sat yet`); the analysis panel re-reads per student
+    (`Ground = 56 owed`, `Ø 9.33`) and exists on **that tab only** (nav count 1
+    on Student analysis, 0 on Overview / Brief / People).
+18. **Layout arithmetic at 1280 px:** rail `224 px` ending at `x=236`, wide
+    section starting at `x=254` (**no overlap**), wide section `999 px`, ordinary
+    cards `760 px`, `body.scrollWidth 1265 ≤ 1280`.
+19. **`node --check` clean** on all four JS files. **Zero application console
+    errors** across the student form, the CO twin, the instructor form and all
+    four admin tabs, including the `beforeprint` builder (26 printed pages).
+20. **Contrast**: the panel uses only contract tokens (`--text` on
+    `--accent-soft`, `--muted`/`--good` on `--panel`, the four `--st-*` washes
+    round 13 already audited). Sampled across the palette catalogue the minimum
+    measured was **5.73:1**.
+21. **Hygiene**: demo data snapshotted before the round and **byte-restored**
+    after — the two `pg_dump`s differ **only** in `pg_dump`'s own random
+    `\restrict` nonce. 42 people, 3 records, 9 proposals, exactly as before.
+    No fixture people were created. **Privacy grep: 0 hits** for the Flight
+    Commander's surname in tracked files (the two source comments that quote the
+    directive carry `⟨ΟΝΟΜΑ⟩`).
+
+### OPEN ITEMS RAISED BY THIS ROUND
+
+1. **A trial is “done” even when it failed.** `WA.rowDone('exams')` is round 13's
+   rule — *sat AND marked* — so a first trial graded 48 % is **green**, and the
+   2nd trial that passed is green beside it. The pass/fail distinction is carried
+   by the badge (*“not the operative attempt”* on paper) and not by the colour.
+   That is consistent with round 13, and it may not be what the squadron wants
+   now that one exam can hold three rows: **should a non-operative attempt be
+   grey, or keep its own verdict?** One line in `rowState` either way.
+2. **`slotsDone` is not yet in the summary CSV.** The four state columns per slot
+   section still export `done · started · owed · extra · in syllabus`, where
+   `done` counts **rows**. For the exams that can now exceed the denominator in a
+   spreadsheet exactly as it did on screen before this round fixed the sentences.
+   A fifth column (`slots done`) is the honest fix; it was left out of this round
+   to avoid changing an export's column count without being asked.
+3. **The ΕΕΘ have no catalogue and therefore no denominator.** They are counted
+   as owed once minted, but nothing knows how many the programme prescribes —
+   *“3 owed”* means *three that somebody entered*, not *three of N*. If the
+   weekly programme has a fixed count per stage, it belongs in the generated
+   catalogue and the ΕΕΘ become slots like everything else.
+4. **The panel lists sections, not rows.** On a twelve-thousand-pixel form the
+   next question after *“take me to Ground exams”* is *“take me to the seven I
+   still owe”*. A per-section “jump to the first owed row” would be one more
+   click on the same component; it was not asked for and is not built.
 
 ## 4. Screens
 
@@ -2546,6 +3175,16 @@ schema — that is the schema this app needs, and nothing more.
 3. Admin link generated → CO adds people → distributes links.
 
 ## 7. Open items
+
+- **ΝΕΟ (Γύρος 14, §4n) — τέσσερα ανοιχτά σημεία του γύρου**: (1) μια αποτυχημένη
+  1η προσπάθεια εξέτασης είναι **πράσινη** («δόθηκε και βαθμολογήθηκε», ο κανόνας
+  του Γύρου 13) ενώ ο βαθμός της δεν μετράει — να μείνει έτσι ή η μη-λειτουργική
+  προσπάθεια να γίνει γκρι; (2) η στήλη `done` του summary CSV μετράει **γραμμές**
+  και όχι **θυρίδες**, οπότε με re-sits μπορεί να ξεπεράσει τον παρονομαστή —
+  προτείνεται πέμπτη στήλη `slots done`· (3) τα **ΕΕΘ δεν έχουν κατάλογο**, άρα
+  ούτε παρονομαστή («3 owed» = τρία που κατέγραψε κάποιος, όχι «3 από N»)· (4) το
+  panel οδηγεί σε **ενότητες**, όχι σε γραμμές — ένα «πήγαινέ με στην πρώτη γραμμή
+  που χρωστάω» είναι ένα κλικ παραπάνω στο ίδιο component.
 
 - ~~Weighted-score formula visible & adjustable? (default 3/2/1)~~ — ΑΠΑΝΤΗΘΗΚΕ
   στον Γύρο 10 (§4j): βάρη **10/8/5/3/1** ορισμένα από τη διοίκηση, τύπος ορατός
