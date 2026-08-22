@@ -583,9 +583,22 @@ it"* (a whole section omitted from the payload is caught by the same rule).
 The owner path **no longer strips stamps**: `wa.strip_stamps` is dropped and
 replaced by `wa.carry_stamps`, which preserves the stored provenance of every
 matched entry (admin stays admin, null stays null) and leaves everything the
-owner wrote unstamped. Diff-stamping is unchanged on the CO path; **the CO can
-still edit or delete his own entries, and the CO editing an OWNER entry
-re-stamps it admin — which locks it.** The record-level derived stamp follows:
+owner wrote unstamped. **Admin stamping** — the diff-stamp of the on-behalf
+path, called *«CO diff-stamping»* until round 17 — is unchanged; **the admin can
+still edit or delete his own entries, and the admin editing an OWNER entry
+re-stamps it admin — which locks it.**
+
+> **ROUND 17 RENAMING (2026-08-22) — READ THE WHOLE OF §4f WITH THIS
+> SUBSTITUTION.** «Ο admin δεν ειναι ο squadron CO, ειμαι εγω, ο developer.
+> ⟨SURNAME⟩. Διορθωσε το» (§4s·4). The mechanism is untouched to the byte —
+> `entered_by='admin'` was already the stored value — and only its NAME and the
+> words the user reads change: wherever this section says *the CO* / *the
+> Squadron CO* about **the holder of the admin link**, read **the admin** / **the
+> squadron administration**, and *«CO diff-stamping»* is **«admin stamping»**.
+> Where any section of this document says *Squadron CO* about **who may conduct
+> an FPC or a CEF, or who may put a student in ΚΕΠΕ** (§4e·5, 3-01 ΚΕΦ.2 §32β),
+> it means the real APPOINTMENT and is unchanged: that officer exists, and he is
+> not this application's admin. The record-level derived stamp follows:
 `wa.record_stamp` is now consulted on both paths, so a record keeps saying
 "contains CO-entered data" after its owner saves it; only the one case the
 entries cannot settle (a record the CO opened that nobody has filled) stays on
@@ -4084,6 +4097,440 @@ face**, on both surfaces and on paper, so the CO reading the count can read the
 answer straight off the table beneath it. The counter keeps its meaning and its
 tooltip; **no arithmetic changed**.
 
+## 4s. Round 17 (2026-08-22) — THE STUDENT RAIL, AND THE ADMIN STOPS BEING THE CO
+
+### THE TWO RULINGS, VERBATIM (2026-08-22)
+
+> **1.** «στο instructor recommendation θα ήθελα navigation panel με τους
+> μαθητές. Πράσινη χροιά όποιο έχει βάλει επιλογή, μουσταρδί ότι δεν έχει
+> επιλέξει κάτι ακόμη»
+
+> **2.** «Ο admin δεν ειναι ο squadron CO, ειμαι εγω, ο developer. ⟨SURNAME⟩.
+> Διορθωσε το»
+
+*(The surname of the second ruling is **redacted here and in every tracked
+file**, as it has been since round 14. The database carries the display name.
+That is its only home, and this round is the round that makes the database the
+only place the application reads it from.)*
+
+Two more items came from the round-16 verify list: **item 12** (a real defect in
+the trial badge) and **item 23** (a doc-nit, the last two inline copies of one
+test). Four changes in all, and **the server was not touched by any of them.**
+
+---
+
+### 1. THE STUDENT RAIL ON THE INSTRUCTOR FORM — *ruling 1*
+
+**IT IS THE ROUND-14 COMPONENT, NOT A SECOND ONE.** `WA.navHTML` /
+`WA.navMount` already served two surfaces (the student form's fourteen sections
+and the admin's ten analysis cards); the instructor form is the third, and it
+hands the panel the same `items` array everything else does. What it lists is
+**one row per student card**, in the order `data.students` arrives — the
+seniority / class order the cards themselves render in — so **the rail and the
+card list are literally the same array**: a filter or a grouping added here later
+moves both or neither. The cards gained an `id` (`ins-stu-⟨uuid⟩`) and the panel
+is told how to find them through its `anchor` option, exactly as the admin's
+analysis rail is. Sticky beside the reading column; under **900 px** it is the
+same `<ul>` as a one-line strip of pills with the burger opening it into a
+wrapped grid. `teardownView()` destroys it through the same single `WA._nav`
+slot — one view, one panel, no orphaned scroll listener.
+
+**THE ONE THING THE COMPONENT GREW: `rowTone`.** The state this rail carries is
+**binary** — an assessment is chosen or it is not — and a badge alone would say
+it in the smallest type on the row. `rowTone` is a **state id from
+`WA.ROW_STATES`** painted as a wash across the whole row. The caller names a
+STATE, never a colour, so the rail draws from the round-13 four-state contract
+and cannot invent a fifth:
+
+| the ruling's word | state id | token | what it means here |
+|---|---|---|---|
+| **πράσινη χροιά** | `done` | `--st-done` | a level is **currently selected** on that card |
+| **μουσταρδί** | `extra` | `--st-extra` | **no level chosen yet** |
+
+It is **opt-in**: the two round-14 rails pass no `rowTone` and are pixel-for-
+pixel what they were. `is-here` still wins over a tone (`:not(.is-here)` in the
+CSS) — **where the reader IS outranks what the row says about itself** — and the
+tone is carried a second time in POSITION, as a 3 px left edge, for a reader who
+cannot separate the two hues. On the pills below 900 px the edge is dropped (it
+clips to the pill radius and reads as a smudge); the wash, the border and the
+badge's own word carry it there.
+
+**WHAT COUNTS AS «HAVING PUT A CHOICE».** A **level**, and nothing else. Not a
+comment, not the flew-with tick — those are notes *about* a judgement, and an
+instructor who wrote a paragraph and chose no level has still said nothing the
+Wing Commander brief can average. The test is `P[sid].level`, which is the
+form's own working state, so the rail is truthful through **every** flow the
+form has:
+
+| flow | rail |
+|---|---|
+| **on load** | green for every stored level, mustard for the rest |
+| **choose a level** | that row turns green **on the click**, count +1 |
+| **click the chosen level again** (the round-10 clear gesture) | back to mustard, count −1 |
+| **dirty, unsaved** | green, and the row's tooltip says *«chosen, not saved yet»* |
+| **dialog → Discard** | every card is restored to its saved value and the rail follows card by card |
+| **general Save** | redrawn **after** the writes, from the server's own verdict (`wa.write_proposal` normalises the level) |
+
+**THE BADGE IS THE WEIGHT.** `10 · 8 · 5 · 3 · 1` — the number the brief
+averages, and the number the card already prints beside every level — with the
+level named in full in the row's tooltip. An unchosen row reads **«not yet»**,
+which is the same fact in a word for anyone the hue does not reach. The panel
+head carries **«7 of 25 chosen»** for the class.
+
+**ONE DEFECT THIS ROUND'S OWN VERIFICATION CAUGHT, IN THE BRANCH NOBODY LOOKS
+AT.** `.pagelay` is a two-column grid whose first column is the 224 px rail. An
+instructor with **no active students** gets no rail — and the form, as the first
+child, was then placed in THAT column and rendered **224 px wide**: a
+one-sentence card squeezed into the space of a missing panel. Measured on the
+running form (form column **999 px** railed · **760 px** centred with the
+fallback · **224 px** had the grid been left on), and fixed by making the wrapper
+a layout only when there is something to lay out — the empty form falls back to
+exactly the markup it had before this round, a plain `.wrap`.
+
+**RECORDED, NOT HIDDEN:** in the **Wilderness** palette `--good` is a
+yellow-green (142,207,98) and sits nearer the mustard (212,190,70) than in the
+other seven. The pair is still distinguishable, and — by the same discipline the
+MESA note at the top of `styles.css` sets out for `--warn` / `--mustard` — the
+row never relies on hue alone: the badge says *«not yet»* or a weight, the left
+edge repeats the state in position, and the tooltip says it in a sentence.
+
+---
+
+### 2. THE TRIAL BADGE COUNTED ROWS, NOT SITTINGS — *round-16 verify item 12*
+
+**THE DEFECT.** `WA.examTrialShown` decides whether an exam row wears
+*«1st trial»*, and round 16 (§4r·3) made it draw that word whenever the record
+holds **more than one sitting** of the exam. It counted with `WA.examTrialsOf`,
+which returns **every row naming that exam** — and since round 13 the student's
+form carries the **seeded flow-chart slot** for every exam nobody has sat. So a
+record holding a hand-made `{exam:'X', trial:2}` and **no trial 1** produced two
+"trials" of X: the minted re-sit, and the empty placeholder the form had just
+seeded beside it. The **empty owed row** — nothing typed in it, nothing stored
+for it, grey — wore **«1st trial»**. It named an attempt that had never been
+made.
+
+**THE FIX — the same question the sparse rule asks.** A row counts as a SITTING
+when `WA.slotUntouched('exams', row)` says it is not the untouched flow-chart
+placeholder. That predicate already knows every case: a written row, a legacy
+row, an admin-entered row, a minted trial, an ΕΕΘ — all of them are stored, all
+of them are reports, all of them count. Two clauses, because both halves of the
+sentence have to be true:
+
+```js
+WA.examSittingsOf = (list, examId) =>
+  WA.examTrialsOf(list, examId).filter((t) => !WA.slotUntouched("exams", t.e));
+
+WA.examTrialShown = function (list, e, alt) {
+  if (!e || WA.examSeries(e)) return false;
+  if (alt || WA.examTrial(e) > 1) return true;
+  if (WA.slotUntouched("exams", e)) return false;      // ← the row itself is not a sitting
+  return WA.examSittingsOf(list, e.exam).length > 1;    // ← nor is a placeholder beside it
+};
+```
+
+**ONE DEFINITION, BOTH SURFACES.** The student's exam row (`trialBadge`) and the
+admin's Student-analysis table read the same gate — the round-16 arrangement,
+unchanged — so the fix lands on both without either knowing about it.
+
+**PROVEN LIVE, WITH THE PAYLOAD THE FINDING NAMES.** `{"exams":[{"exam":"IN190",
+"trial":2}]}` written straight into a student record, opened on that student's
+own link:
+
+| row | before (round-16 gate) | after |
+|---|---|---|
+| the minted `trial:2` | «2nd trial» | **«2nd trial»** — kept |
+| the seeded IN190 placeholder | «1st trial» | **no badge** |
+
+and the two cases the word exists for are untouched, on the same form: a real
+**85 then 65** pair still reads *«1st trial»* / *«2nd trial»* (two sittings), and
+a **single** sitting still wears no trial word at all — which is what keeps the
+word off the other 199 rows.
+
+---
+
+### 3. `WA.examGraded`, AND NOW THERE ARE NO COPIES — *round-16 verify item 23*
+
+Round 16 extracted *«is there a mark at all?»* into `WA.examGraded` and left two
+inline copies of its four-clause test alive: `admin.js` → `gradedEx` (the
+entries-CSV Detail cell) and `student.js` → `examGradeTitle`'s local `has` (the
+grade box's tooltip). Both are gone; both call `WA.examGraded`.
+
+**BEHAVIOUR BYTE-IDENTICAL, AND MEASURED AS SUCH.** With a record built to
+exercise all four clauses — `85` · `65` · `null` · `0` · `"79"` (a string) ·
+`""` — across an exam with three trials, an off-catalogue exam and two ΕΕΘ:
+
+- **the entries CSV**: exported twice from the running dashboard, once with
+  `WA.examGraded` and once with the pre-round-17 inline expression swapped into
+  its place — **9 245 bytes, identical, 6 ground-exam rows**, verdicts intact
+  (*«passed (80 % or better)»*, *«not passed (below the 80 % ground-exam pass
+  mark)»*, and silence where the result is not in).
+- **the grade-box title**: all **13** exam-row titles on the student form,
+  rebuilt both ways — **identical**, including the graded tail *«85 % PASSES.»*.
+
+---
+
+### 4. THE ADMIN IS NOT THE SQUADRON CO — *ruling 2*
+
+> «Ο admin δεν ειναι ο squadron CO, ειμαι εγω, ο developer. ⟨SURNAME⟩.
+> Διορθωσε το»
+
+**THE LONG-OPEN QUESTION, CLOSED.** From round 4 to round 16 this application
+called the holder of the admin link *«the CO»* — in the stamp, in the lock note,
+in both on-behalf banners, on the People page, in the printed brief, in a CSV
+header and in something over a hundred tooltips. He never was. **He is the
+FLIGHT COMMANDER and the developer of this application**, and the squadron's
+Commanding Officer is a different officer who does different things — some of
+which this same application records.
+
+**WHAT THE MECHANISM DOES: NOTHING.** The stored value has been
+`entered_by='admin'` since round 4 — already neutral, already correct. **No
+migration, no schema change, not one byte of `db/schema.sql`.** The internal
+identifiers keep their names too, and that is deliberate: `.cotag`, `.colock`,
+`is-co`, `is-colock`, `WA.isCO`, `WA.CO_TIP`, `opts.asCO` are what the code calls
+its own variables, and renaming ~200 call sites would be a large diff that
+changes nothing anybody sees. **What the USER SEES is the whole of this change.**
+
+**THE IDENTITY IS NOW SAID IN EXACTLY TWO WAYS, AND NEVER IN A THIRD.**
+
+1. **A NAME — the admin person row's own rank + surname, read from the
+   DATABASE** through `WA.personRankName`, the same path the round-14
+   confirmation dialog has used since it was built. Only possible where the
+   admin himself is the reader (`WA.me` **is** his row), which is exactly the
+   three surfaces that ever wanted a name:
+   - the student form's on-behalf banner — *«Editing as ⟨Rank Surname⟩ — you are
+     filling in this record on behalf of …»*
+   - the instructor form's on-behalf banner — *«Entering as ⟨Rank Surname⟩ …»*
+   - the printed assessment sheet — *«· entered on their behalf by ⟨Rank
+     Surname⟩ (the squadron administration)»*
+   - and the save dialog's signature line, which already read *«Signed by ⟨Rank
+     Surname⟩»* and now wears an **ADMIN** chip beside it instead of a **CO** one.
+2. **A ROLE WORD — «the admin» / «the squadron administration»** — everywhere a
+   student or an instructor is the reader. **No RPC tells them the admin's
+   name**, and inventing one would be a second identity: the lock note, the
+   stamp tooltip, the record-level line, the save refusals and the landing page
+   all use the neutral word. New constants, one definition each:
+   `WA.ADMIN_TAG = "ADMIN"` · `WA.ADMIN_BODY = "the squadron administration"` ·
+   `WA.ADMIN_WORD = "the admin"` · `WA.adminRankName()`.
+
+**THE SWEEP, SURFACE BY SURFACE.**
+
+| where | was | is |
+|---|---|---|
+| the entry chip (every table, card, brief, drill-down) | `CO` | **`ADMIN`** |
+| the lock chip on a student's row | `🔒 CO` · `🔒 locked by CO` | **`🔒 ADMIN`** · **`🔒 locked by the admin`** |
+| `WA.CO_TIP` | *Entered by the squadron CO on behalf of the owner* | *Entered by **the squadron administration** …* |
+| `WA.CO_LOCK_TIP` | *Set by the squadron CO — locked … only the CO can change it* | *Set by **the squadron administration** … only **the admin** …* |
+| the record-level chip | `CO` / `+N CO` | **`ADMIN`** / **`+N ADMIN`** |
+| the record-level verdict for CSV (`WA.coWord`, `coSource.word`) | `CO` / `self+CO` | **`admin`** / **`self+admin`** |
+| the entries-CSV column | `CO-entered entries` | **`Admin-entered entries`** |
+| the two Save buttons on an on-behalf form | `Save as CO` | **`Save as admin`** |
+| the two on-behalf banners | *Editing / Entering **as CO*** | *Editing / Entering **as ⟨Rank Surname⟩*** |
+| the printed brief's per-student line | *record ENTERED BY THE CO* | *record ENTERED BY THE ADMIN* |
+| the printed class-summary legend | *“CO” marks a record the squadron CO entered in full* | *“ADMIN” marks a record **the squadron administration** entered in full* |
+| the three *enter-on-behalf* button tooltips | *tagged 'entered by CO'* | *tagged 'entered by the admin'* |
+| the student form's own hint | *visible to your instructors and the squadron CO* | *… and the **squadron administration*** |
+| the landing page | *contact the squadron CO* | *contact the **squadron administration*** |
+| the People page's admin row | the stored surname read **«Squadron CO»** | **the admin's own rank + surname from the row** |
+
+**AND THE REAL SQUADRON CO IS UNTOUCHED, BECAUSE HE EXISTS.** Three things in
+this application name that officer, and all three are **doctrine about an
+appointment**, not about the admin link. They stay word for word:
+
+- **`WA.FPC_EVALUATORS = ["Squadron CO", "DO"]`** — an FPC is conducted by the
+  Squadron CO or the DO **and by nobody else** (round 6, §4e·5), including the
+  server's own `wa.fpc_evaluators()`;
+- **`WA.EVALUATOR_ROLES`** — the CEF's evaluator datalist;
+- **the ΚΕΠΕ entry conditions** — *«Squadron CO / DO decision — reduced
+  performance»*, the opening sentence of 3-01 ΚΕΦ.2 §32β, in the section hint,
+  the SMS reason list and the two save refusals.
+
+The demo data proves the distinction rather than blurring it: an instructor row
+in the local database carries the duty **“Squadron Commander”**, and the printed
+brief shows an FPC conducted by **Squadron CO** — while the admin row beside
+them is a person with a rank and a surname of his own.
+
+**THE PEOPLE TABLE, AND THE ONE THING THE USER DOES HIMSELF.** The People page
+already printed `WA.personName(p, true)` for the admin row: the CODE was right
+and the DATA was wrong — the local demo row's `last_name` was the literal string
+**«Squadron CO»**. It has been renamed to a **fake developer identity** for
+testing — `Maj DELTA`, in the **Alfa / Bravo** convention of §4g, so that nobody
+can mistake the fixture for a person. **On the cloud instance the user sets his own name
+once, through the People tab's Edit button** — it is a person row like any other,
+and no tracked file will ever hold the value.
+
+**«CO diff-stamping» IS «ADMIN STAMPING».** §4f·9 now carries the renaming note
+and the ruling; the mechanism it describes did not move.
+
+---
+
+### THE TWO ROUND-16 DISPLAY DECISIONS, RATIFIED (no code)
+
+Both were built in round 16 on Claude's proposal, and the user did not object on
+22/08. They are recorded here as **standing unless the user overrules them**:
+
+**(a) THE NOT-PASSED CHIP LIVES IN THE EXAM-NAME CELL, AS ONE COMBINED LABEL.**
+A row that is both a named trial and a failed one wears **one** badge reading
+*«2nd trial · not passed»*, in the exam's own cell — not two chips, and not a
+second chip in the Grade column. One row, one verdict, one place to look.
+
+**(b) AN UNGRADED OPERATIVE HOLDER WEARS THE PLAIN «Xst trial» BADGE.** While
+the result is outstanding the badge is **plain** — no accent, no warning — and
+says the trial word alone. *«Not passed»* is **graded-and-below**, never *«has
+not passed yet»*: a row still waiting for its mark has not failed anything
+(§4r·4).
+
+---
+
+### WHAT WAS NOT TOUCHED
+
+- **`db/schema.sql` — not one byte.** No RPC signature, no column, no policy, no
+  server text. Asserted byte-identical at the end of the round.
+- **The two round-14 rails** — the student form's fourteen sections and the
+  admin's ten analysis cards render exactly as they did; `rowTone` is opt-in and
+  neither passes it.
+- **The stored provenance value** (`entered_by = 'admin'`), the lock rule, the
+  carry-stamps contract and every server refusal sentence.
+- **The four-state colour contract** (§4m) — round 17 borrows two of its tokens
+  and adds none.
+- **The doctrinal Squadron CO** in all three of its places, above.
+- **The syllabus course codes that begin «CO »** (`CO 101-105`, `CO 106-108`,
+  `CO 109`, `CO 110` — Basic/Advanced Contact, Night Flight, Landing Pattern):
+  they are catalogue identifiers and were never about anybody's appointment.
+
+### CACHE-BUSTER
+
+`?v=20260822b` on the five files this round touched — `styles.css`, `app.js`,
+`student.js`, `instructor.js`, `admin.js`. `config.js` and `items-catalog.js` are
+untouched and keep `?v=20260821b`. *(The bump proved itself during verification:
+the first load after the edits served a cached `index.html` and the old
+`instructor.js`, and the rail was simply absent.)*
+
+### DEPLOYMENT NOTE — **NO SCHEMA GATE THIS ROUND**
+
+Client-only. Deploy the five files; nothing on the database has to move first,
+and an instance running the round-16 schema serves round-17 code correctly. The
+**one** manual step on a cloud instance is the admin person row's name, set by
+the user through the People tab's **Edit** button (§4s·4).
+
+### SELF-VERIFICATION — ROUND 17 (live, local stack, the real forms and the real RPCs)
+
+Local stack, `http://localhost:8124/app/`, `supabase_db_WingsAhead`, real tokens,
+real RPCs. **Zero console messages of any kind on every screen visited.**
+
+**THE RAIL (instructor's own link, a class of 25 with 3 stored assessments)**
+
+1. **The rail IS the card list** — 25 rows, 25 cards, `sameOrder: true` over the
+   two id arrays, and every row's anchor resolves to its card.
+2. **Truthful on load, mixed** — 3 green, badged `5` · `8` · `10` (the weights
+   of the three levels that instructor has stored) · 22 mustard *«not yet»* ·
+   head reads **«3 of 25 chosen»**.
+3. **Click scrolls and marks** — row 15 clicked from the top: page 0 → 7 977 px,
+   the card's top at **75 px** against a measured 61 px top bar, the row marked
+   `is-here`.
+4. **A choice flips the row on the click** — `tone-extra` → `tone-done`, badge
+   `not yet` → `8`, tooltip gains *«chosen, not saved yet»*, head 3 → **4**.
+5. **Click-the-chosen-one-again returns it** — `tone-done` → `tone-extra`, badge
+   back to *«not yet»*, head back to **3**.
+6. **A comment and a flew-with tick are NOT a choice** — both typed and ticked on
+   a mustard row: the card goes dirty, the row **stays mustard**, the head stays
+   **«3 of 25 chosen»**.
+7. **Discard restores the saved truth** — one saved level cleared + one new
+   level chosen + one comment: dialog *«Save 3 assessments?»*, signature
+   *«Signed by Capt ⟨SURNAME⟩»*, three enumerated changes → *Discard* → *Yes* :
+   the three original greens are back, head **«3 of 25 chosen»**, 0 dirty cards,
+   Save disabled, float hidden.
+8. **The general Save keeps it truthful** — 2 chosen + 1 cleared, confirmed and
+   written over three real `save_proposal` calls: head **«4 of 25 chosen»**, the
+   greens are exactly the four the database now holds, **no tooltip says
+   «not saved yet»**, and a **full page reload reproduces the same four** from
+   the server.
+9. **900 px** — burger visible, the list is the horizontal pill strip, the row
+   wash survives (`--st-extra` = `rgba(107,84,0,.15)`, `--st-done` =
+   `rgba(15,115,80,.15)` in light), `is-here` still wins with the accent, the
+   left edge is dropped on pills. **`documentElement.scrollWidth === clientWidth`
+   — no horizontal scroll**, and no element overflows outside its own scroller.
+10. **375 px** — same, **no horizontal scroll** closed, open or after a jump; the
+    burger opens the wrapped grid, a pill click **closes the strip**, scrolls, and
+    the card clears the strip's bottom edge.
+11. **Keyboard** — every row is a real `<button>`, focusable, `:focus-visible`
+    outlined, activation scrolls and marks; the burger is a `<button>` carrying
+    `aria-expanded`; the panel carries `aria-label="Your students"` (and *«This
+    instructor's students»* on the admin's twin).
+12. **All 8 palettes × both modes** — green and mustard are distinct washes over
+    their own panel in every one, and the badge takes the palette's own `--good`
+    / `--mustard`. The Wilderness proximity is recorded above.
+13. **The two round-14 rails are unchanged** — the student form's 13 rows and the
+    admin analysis's 10 rows carry **no** `tone-` class.
+13b. **The no-students branch** — measured on the running page against the same
+    stylesheet: the fallback wrapper gives the form **760 px, centred** (the
+    pre-round-17 layout) where the grid would have given it **224 px**. The
+    defect and the fix are set out in §4s·1.
+
+**THE TRIAL BADGE (verify item 12)** — as tabulated in §4s·2: the fabricated
+`{exam:'IN190', trial:2}` payload written to a real record and read back on the
+student's own form; the seeded placeholder loses its badge, the minted re-sit
+keeps its own, a real two-sitting exam keeps both, a single sitting stays
+unbadged. The pre-round-17 predicate was evaluated **side by side** on the same
+rows to show which verdicts moved: **exactly one**.
+
+**THE CONSOLIDATION (verify item 23)** — as tabulated in §4s·3: the entries CSV
+byte-identical at 9 245 bytes over 6 ground-exam rows, and all 13 grade-box
+titles identical, each measured by swapping the pre-round-17 expression back into
+`WA.examGraded` and re-running the very same export and the very same render.
+
+**THE ADMIN IDENTITY (ruling 2)**
+
+14. **The admin's own dashboard** — `WA.adminRankName()` returns the row's
+    `rank + last_name` from the database; the People tab's **Admin** card prints
+    it, and **no «CO» text or tooltip survives anywhere on that tab**.
+15. **On-behalf, instructor form** — banner *«**ADMIN** Entering as ⟨Rank
+    Surname⟩ — you are filling in the assessments of ⟨Lt Col SURNAME⟩ …
+    tagged “entered by the admin”»*, button **«Save as admin»**, and the rail is
+    there with all 25 rows mustard (that instructor has assessed nobody).
+16. **On-behalf, student form** — banner *«**ADMIN** Editing as ⟨Rank Surname⟩ —
+    … tagged “entered by the admin” …»*, both Save buttons **«Save as admin»**.
+17. **The save dialog** — *«Signed by ⟨Rank Surname⟩ **ADMIN** on behalf of
+    ⟨Lt Col SURNAME⟩»*, the chip's tooltip reading *«Entered by the squadron
+    administration on behalf of the owner — not self-reported»*.
+18. **A student reading their own record** (a real record carrying one
+    admin-entered, locked entry) — chip **`ADMIN`**, lock chip **`🔒 ADMIN`**
+    with *«Set by the squadron administration — locked … only the admin can
+    change or remove it»*, the record-level note *«**ADMIN** 1 of 2 entries was
+    entered by the squadron administration on your behalf …»*, and the form's own
+    hint *«visible to your instructors and the squadron administration»*.
+19. **The printed brief** — *«self-report (+1 entered by the admin)»* per student
+    and the class-summary legend *«“ADMIN” marks a record the squadron
+    administration entered in full, “+N ADMIN” a self-reported record it added N
+    entries to»*. The printed instructor sheet reads *«· entered on their behalf
+    by ⟨Rank Surname⟩ (the squadron administration)»*.
+20. **What still says «CO», checked node by node across the admin dashboard, the
+    student form and the whole printed brief** — and every hit is one of the
+    three legitimate kinds: a **stored FPC evaluator value** (*Squadron CO*), the
+    **doctrinal FPC / ΚΕΠΕ tooltips**, the **syllabus course codes** *CO 101-105
+    · CO 106-108 · CO 109 · CO 110*, and one **instructor's own stored comment**
+    that happens to use the word. **Nothing the application itself writes calls
+    the admin the CO any more.**
+
+**HYGIENE**
+
+21. Every fixture removed: the fabricated student record row **deleted** (that
+    student had none before, and has none now); the three demo proposals of the
+    test instructor **restored from a backup table, byte for byte** — same ids,
+    same `created_at`, same `updated_at`, same comments — and the backup table
+    dropped. `public.student_records` holds the same three rows with the same
+    timestamps it held before the round.
+22. **Privacy grep clean** — no name, MN, call sign or token reached a tracked
+    file. The known pre-existing set of §4q·12 / §4r is unchanged, and the demo
+    admin rename lives **only in the local database**.
+23. **`db/schema.sql` asserted byte-identical** (hash before = hash after).
+
+### OPEN ITEMS RAISED BY THIS ROUND
+
+- **None that block anything.** One thing is recorded rather than opened: in the
+  **Wilderness** palette the `done` green and the `extra` mustard are nearer each
+  other than in the other seven. The row never leans on hue alone (badge word,
+  left edge, tooltip), so this is a note for a future palette pass, not a defect.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -4104,7 +4551,8 @@ tooltip; **no arithmetic changed**.
    slot is stored NOWHERE**; a slot row is cleared (⌫) rather than deleted, and
    the extras — repeats, FCF, CEF, same-day re-flies, off-catalogue rows — render
    after the slots in date order. The same form, bound to somebody else, is what
-   the CO fills in on a student's behalf.
+   **the admin** fills in on a student's behalf (§4s·4 — the admin is the flight
+   commander and the developer, **not** the squadron CO).
 2. **Instructor form**: student list; per student a **compact card of their
    self-reported data** (counters, evaluations, solos, **and the round-12 flight
    log as one line per band — per-track counts, hours, how many sorties are
@@ -4115,7 +4563,7 @@ tooltip; **no arithmetic changed**.
    checkbox. **Round 14 (§4n·5): the thin rule sits between «Recommended as
    Alternate» and «Recommended for Other Assignments»** — it marks the
    **fighter / other split** (three answers above it, two below), not the last
-   level off from the list, and the CO's readout draws it from the same
+   level off from the list, and the admin's readout draws it from the same
    `WA.LEVEL_SEP_AT`. **Round 14 (§4n·6): there is ONE general Save**, not one
    per card — it names how many assessments differ from what is stored
    (*“Save 3 assessments”*, floating copy + bottom bar, disabled while nothing
@@ -4124,7 +4572,17 @@ tooltip; **no arithmetic changed**.
    belongs to and enumerating the changes. **Its own printable sheet** (round 8,
    round-10 content): one structured block per student — the assessment in words
    with its weight, flown-with, comment, and the student's reported record.
-3. **Admin dashboard** (CO) — THREE MODES (decision 2026-08-13):
+   **Round 17 (§4s·1): a LEFT NAVIGATION PANEL of the students** — the round-14
+   component (`WA.navHTML` / `WA.navMount`), one row per student card in the
+   order the cards render, click scrolls to the card and marks the row, sticky
+   beside the column and collapsing under 900 px to the pills + burger. Each row
+   is **tinted by whether an assessment has been CHOSEN**: green (`--st-done`)
+   where a level is currently selected — saved **or** pending — mustard
+   (`--st-extra`) where none is, with the level's **weight** as the row badge
+   («10») or *«not yet»*, and *«7 of 25 chosen»* in the panel head. A comment or
+   a flew-with tick is **not** a choice.
+3. **Admin dashboard** (the admin — **§4s·4: the admin is NOT the squadron
+   CO**) — THREE MODES (decision 2026-08-13):
    a. **Overview**: one row per student (key counters, the **weighted mean** with
       its five-segment distribution bar and `n/instructors`,
       completion status) + who has not submitted yet ·
@@ -4150,7 +4608,7 @@ tooltip; **no arithmetic changed**.
         eight checkrides, get the same four bars ON THAT checkride (each
         student contributes **the attempt the flight was characterised
         successful on** — round 11, §4k·3; it was "their latest graded attempt"
-        until then) with the contributing values printed underneath so the CO
+        until then) with the contributing values printed underneath so the admin
         can hand-check them — **round 8: the y-axis starts just below the lowest
         grade plotted, not at 0**; (b) **round 11: ONE plot of ALL EIGHT
         checkrides** in syllabus order, never in date order, as connected points
@@ -4177,7 +4635,7 @@ tooltip; **no arithmetic changed**.
         paper is monochrome, and where a row whose mission the squadron *did*
         record reads *"no percentage recorded"* rather than *"awaiting
         debrief"* — nobody is chasing that flight.
-        **Round 13 (§4m): the CO's tables are the STUDENT'S tables.** The owed
+        **Round 13 (§4m): the admin's tables are the STUDENT'S tables.** The owed
         rows are drawn from the same catalogue through the same `WA.slotRows`,
         so the order, the four colours and the four counts are identical on both
         sides of one record; each table gains a **State** column and the legend,
@@ -4198,12 +4656,13 @@ tooltip; **no arithmetic changed**.
         submitted an assessment for this student yet" (he has not looked).
         Drill-down list (who + **call sign**, duty, leadership, status, **the
         level chip + its weight**, flew_with, comment).
-      - **Prev / Next student arrows (and keyboard ←/→)** — the CO walks
+      - **Prev / Next student arrows (and keyboard ←/→)** — the admin walks
         student-by-student during the actual Wing Commander brief.
    c. **Brief mode**: presentation-friendly (large type, one student per
       screen, arrows) + **printable brief** (monochrome, one page per student
       + a summary ranking table per class).
-4. **No/invalid token**: neutral landing, no data, contact-the-CO hint.
+4. **No/invalid token**: neutral landing, no data, *contact-the-squadron-
+   administration* hint (round 17 — it was «contact the squadron CO»).
 
 ## 5. Non-negotiables
 
@@ -4219,9 +4678,42 @@ tooltip; **no arithmetic changed**.
 1. `gh repo create wingsahead --public` + Pages enable.
 2. supabase.com → New project (EU) → run our provided `schema.sql` →
    copy URL + anon key into `config.js`.
-3. Admin link generated → CO adds people → distributes links.
+3. Admin link generated → **the admin** adds people → distributes links.
+   The admin's own person row carries **his** rank + surname; every surface that
+   names the identity reads it from there (§4s·4). On a fresh cloud instance the
+   row is renamed once, through the People tab's **Edit** button.
 
 ## 7. Open items
+
+- **ΑΠΟΦΑΝΣΕΙΣ 2026-08-22 (Γύρος 17, §4s) — ΔΥΟ, ΚΑΙ Η ΔΕΥΤΕΡΗ ΚΛΕΙΝΕΙ ΤΟ
+  ΠΑΛΑΙΟΤΕΡΟ ΑΝΟΙΧΤΟ ΣΗΜΕΙΟ ΤΗΣ ΕΦΑΡΜΟΓΗΣ.**
+  1. **Navigation panel μαθητών στη φόρμα του εκπαιδευτή** (§4s·1). «στο
+     instructor recommendation θα ήθελα navigation panel με τους μαθητές.
+     Πράσινη χροιά όποιο έχει βάλει επιλογή, μουσταρδί ότι δεν έχει επιλέξει
+     κάτι ακόμη». Ίδιο component με τον Γύρο 14· **πράσινο** όπου υπάρχει
+     επιλεγμένο επίπεδο (αποθηκευμένο **ή** εκκρεμές), **μουστάρδι** όπου δεν
+     υπάρχει. Σχόλιο ή «flew with» **δεν** είναι επιλογή. Κεφαλίδα «7 of 25
+     chosen».
+  2. **Ο admin ΔΕΝ είναι ο Διοικητής Μοίρας** (§4s·4). «Ο admin δεν ειναι ο
+     squadron CO, ειμαι εγω, ο developer. ⟨SURNAME⟩. Διορθωσε το». Κάθε
+     ετικέτα που ονόμαζε τον κάτοχο του admin link «CO» λέει πλέον **«ADMIN» /
+     «the admin» / «the squadron administration»**, και όπου χωράει **όνομα**
+     διαβάζεται το **rank + επώνυμο της γραμμής του admin από τη ΒΑΣΗ**. Η
+     αποθηκευμένη τιμή `entered_by='admin'` **δεν άλλαξε** — καμία μετάπτωση,
+     καμία αλλαγή schema. Ο **πραγματικός** Διοικητής Μοίρας μένει αυτούσιος
+     όπου τον ονομάζει το δόγμα (FPC, CEF, ΚΕΠΕ). Στο cloud ο χρήστης βάζει το
+     όνομά του μόνος του, από το **Edit** της γραμμής του στο People.
+
+- **ΔΥΟ ΑΠΟΦΑΣΕΙΣ ΠΑΡΟΥΣΙΑΣΗΣ ΤΟΥ ΓΥΡΟΥ 16, ΕΠΙΚΥΡΩΜΕΝΕΣ 22/08 (χωρίς κώδικα).**
+  Χτίστηκαν στον Γύρο 16 με πρόταση του Claude και ο χρήστης δεν έφερε
+  αντίρρηση. **Ισχύουν έως ότου ο χρήστης τις ανατρέψει** (§4s, «THE TWO
+  ROUND-16 DISPLAY DECISIONS, RATIFIED»):
+  (α) το chip **«not passed»** ζει στο **κελί του ονόματος** της εξέτασης, ως
+  **ΕΝΑ** συνδυασμένο label («2nd trial · not passed») — όχι δεύτερο chip, όχι
+  στη στήλη του βαθμού·
+  (β) μια **αβαθμολόγητη** γραμμή που κρατά τη θέση φοράει το **απλό** badge
+  «Xst trial» (αναμονή) και **ποτέ** «not passed» — το «not passed» είναι
+  «βαθμολογήθηκε ΚΑΙ κάτω από τη βάση», ποτέ «δεν έχει περάσει ΑΚΟΜΗ».
 
 - **ΑΠΟΦΑΝΣΕΙΣ 2026-08-22 (Γύρος 16, §4r) — ΤΕΣΣΕΡΙΣ, ΚΑΙ ΚΛΕΙΝΟΥΝ ΠΕΝΤΕ ΣΗΜΕΙΑ.**
   1. **«Το Β» — το mint επιβιώνει του κλειδώματος του Διοικητή.** Σε γραμμή

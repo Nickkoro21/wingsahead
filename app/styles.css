@@ -1175,6 +1175,30 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 }
 .sn-st.is-good { color: var(--good); }
 .sn-st.is-muted { opacity: 0.5; }
+/* ── ROUND 17 — THE ROW WASH (`rowTone`) ───────────────────────────────────
+   «Πράσινη χροιά όποιο έχει βάλει επιλογή, μουσταρδί ότι δεν έχει επιλέξει
+    κάτι ακόμη». The tones are the FOUR-STATE tokens and nothing new: --st-done
+   is the green every finished row in this application already wears and
+   --st-extra the mustard, so a rail tint and a table row mean the same thing in
+   every palette and in both modes (the light mode darkens the mustard to hold
+   4.5:1 as text on its own wash — see the token block at the top of this file).
+   `:not(.is-here)` is the whole of the precedence rule: where the reader IS
+   outranks what the row says about itself, and the accent must not be washed
+   over by a state. The left edge carries the same fact a second time, in
+   POSITION rather than in hue, for a reader who cannot separate the two. */
+.sn-row.tone-done:not(.is-here) {
+  background: var(--st-done);
+  border-color: rgba(var(--good-rgb), 0.38);
+  box-shadow: inset 3px 0 0 rgba(var(--good-rgb), 0.85);
+}
+.sn-row.tone-extra:not(.is-here) {
+  background: var(--st-extra);
+  border-color: rgba(var(--mustard-rgb), 0.50);
+  box-shadow: inset 3px 0 0 rgba(var(--mustard-rgb), 0.90);
+}
+.sn-row.tone-done:not(.is-here):hover,
+.sn-row.tone-extra:not(.is-here):hover { border-color: var(--accent); }
+.sn-st.is-mustard { color: var(--mustard); }
 
 @media (max-width: 900px) {
   .pagelay { display: block; padding: 0; width: auto; }
@@ -1204,6 +1228,11 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
   }
   .sn-lbl { overflow: visible; }
   .sn-bars { flex-basis: 22px; }
+  /* the round-17 left edge is a RAIL affordance: on a pill it clips to the
+     radius and reads as a smudge, so the pill carries the tone in its wash and
+     its border alone (the badge's own word carries it a second time) */
+  .secnav .sn-row.tone-done:not(.is-here),
+  .secnav .sn-row.tone-extra:not(.is-here) { box-shadow: none; }
   /* the burger opens the SAME list into a wrapped grid of all of them */
   .secnav.is-open .sn-list { flex-wrap: wrap; overflow: visible; max-height: 46vh; overflow-y: auto; }
 }

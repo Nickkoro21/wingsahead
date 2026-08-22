@@ -101,7 +101,7 @@ WA.renderAdmin = async function (view, me) {
   /* how many records the students reported themselves and how many the CO
      entered for them — the one line the class summary owes the reader.
      A record the CO merely ADDED to stays in the self-reported count and is
-     named separately; folding it into "entered by CO" would say the student
+     named separately; folding it into "entered by the admin" would say the student
      never reported anything (round-4b fix). */
   function sourceLine(list) {
     const src = list.filter((s) => s.completion.has_record);
@@ -111,8 +111,8 @@ WA.renderAdmin = async function (view, me) {
     const adds = part.reduce((a, s) => a + s._src.n, 0);
     return (src.length - co) + " self-reported" +
       (part.length ? " (" + part.length + " with " + adds +
-        (adds === 1 ? " entry" : " entries") + " added by the CO)" : "") +
-      (co ? " · " + co + " entered by CO" : "");
+        (adds === 1 ? " entry" : " entries") + " added by " + WA.ADMIN_WORD + ")" : "") +
+      (co ? " · " + co + " entered by " + WA.ADMIN_WORD : "");
   }
 
   /* ── THE CLASS FILTER, IN THREE FUNCTIONS ─────────────────────────────────
@@ -389,7 +389,7 @@ WA.renderAdmin = async function (view, me) {
             : `<span class="badge badge-bad">not submitted</span>`}
             ${WA.coRecordTag(s._src)}</td>
           <td><button type="button" class="btn btn-sm" data-editrec="${esc(s.person.id)}"
-                title="Open this student's form and enter data on their behalf — every entry is tagged 'entered by CO'"
+                title="Open this student's form and enter data on their behalf — every entry is tagged 'entered by the admin'"
                 >&#9998; Edit record</button></td>
         </tr>`;
     }).join("");
@@ -794,7 +794,7 @@ WA.renderAdmin = async function (view, me) {
             <td>${r.flown ? esc(r.who || "—") : `<span class="k">not flown yet</span>`}</td>
             <td class="num">${WA.pct(r.grade)}</td>
             <td>${r.flown ? esc(fmtD(r.date)) : "—"}</td>
-            <td>${r.flown ? (r.co ? `<span class="cotag" title="${esc(WA.CO_TIP)}">CO</span>`
+            <td>${r.flown ? (r.co ? `<span class="cotag" title="${esc(WA.CO_TIP)}">${esc(WA.ADMIN_TAG)}</span>`
                                   : `<span class="k">self</span>`) : "—"}</td></tr>`).join("")}
         </tbody></table></div>`;
   }
@@ -810,7 +810,7 @@ WA.renderAdmin = async function (view, me) {
   /* the last cell of every entry table: who put this row in the record */
   function srcCell(e) {
     return `<td>${WA.isCO(e)
-      ? `<span class="cotag" title="${esc(WA.CO_TIP)}">CO</span>`
+      ? `<span class="cotag" title="${esc(WA.CO_TIP)}">${esc(WA.ADMIN_TAG)}</span>`
       : `<span class="k">self</span>`}</td>`;
   }
 
@@ -1275,10 +1275,10 @@ WA.renderAdmin = async function (view, me) {
             title="Entries recorded on an earlier version of the form. They are readable everywhere; the student is asked to complete them, and the round-6 rules refuse the next save until they are."
             >${st.legacy} entr${st.legacy === 1 ? "y" : "ies"} to correct</span>` : ""}
           ${s._src.any ? `<span class="badge badge-acc" title="${esc(s._src.tip)}">${
-            s._src.all ? (s._src.total ? "record entered by CO" : "record opened by CO")
-                       : s._src.n + " entr" + (s._src.n === 1 ? "y" : "ies") + " entered by CO"}</span>` : ""}
+            s._src.all ? (s._src.total ? "record entered by " + WA.ADMIN_WORD : "record opened by " + WA.ADMIN_WORD)
+                       : s._src.n + " entr" + (s._src.n === 1 ? "y" : "ies") + " entered by " + WA.ADMIN_WORD}</span>` : ""}
           <button type="button" class="btn btn-sm" data-editrec="${esc(s.person.id)}"
-            title="Open this student's form and enter data on their behalf — every entry is tagged 'entered by CO'"
+            title="Open this student's form and enter data on their behalf — every entry is tagged 'entered by the admin'"
             >&#9998; Edit record</button>
         </div>
       </div>
@@ -1400,8 +1400,8 @@ WA.renderAdmin = async function (view, me) {
         <div class="b-name">${esc(WA.personName(s.person, true))}</div>
         <div class="b-meta">${esc([s.person.mn ? "MN " + s.person.mn : "", s.person.class ? "Class " + s.person.class : ""].filter(Boolean).join(" · "))}
           ${s._src.any ? ` · ${WA.coRecordTag(s._src)} ${esc(s._src.all
-            ? "record entered by the CO"
-            : s._src.n + (s._src.n === 1 ? " entry" : " entries") + " entered by the CO")}` : ""}</div>
+            ? "record entered by " + WA.ADMIN_WORD
+            : s._src.n + (s._src.n === 1 ? " entry" : " entries") + " entered by " + WA.ADMIN_WORD)}` : ""}</div>
         <div class="card"><div class="kgrid">
           <span><span class="k">Solos</span> <b>${st.solos}</b></span>
           <span><span class="k">NFS</span> <b>${st.nfs}</b></span>
@@ -1566,7 +1566,7 @@ WA.renderAdmin = async function (view, me) {
         ? `<table class="pr-t"><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>
            <tbody>${rows.join("")}</tbody></table>`
         : `<p class="pr-none">None reported.</p>`;
-      /* the CO tag rides in the first cell of every printed row — small, and
+      /* the admin tag rides in the first cell of every printed row — small, and
          it costs the table no extra column (round-4 W2c) */
       /* the eight checkrides, always all eight — a printed brief that omits
          the ones nobody has flown hides half the picture (round 5) */
@@ -1742,9 +1742,9 @@ WA.renderAdmin = async function (view, me) {
             <span class="pr-brand-sub">364 MEA — student utilization</span></div>
           <h2>${esc(WA.personName(s.person, true))}</h2>
           <div class="pr-meta">${esc([s.person.mn ? "MN " + s.person.mn : "", s.person.class ? "Class " + s.person.class : ""].filter(Boolean).join(" · "))}
-            · ${s._src.all ? "record ENTERED BY THE CO"
+            · ${s._src.all ? "record ENTERED BY THE ADMIN"
               : "self-report" + (s._src.some
-                ? " (+" + s._src.n + " entered by the CO)" : "")}
+                ? " (+" + s._src.n + " entered by " + WA.ADMIN_WORD + ")" : "")}
             ${s.completion.has_record ? "updated " + esc(fmtDT(s.last_update)) : "NOT submitted"}
             · assessments in: ${ass.n}/${s.completion.instructors_total}</div>
           <div class="pr-sec">Reported record — counts derived from the dated entries</div>
@@ -1824,8 +1824,8 @@ WA.renderAdmin = async function (view, me) {
         <div class="pr-sec">Class ${esc(cls)} — summary ranking (weighted mean of the five-level
           assessment for fighters; weights 10 · 8 · 5 · 3 · 1)</div>
         <p class="pr-src">Records: ${esc(sourceLine(list))}
-          — &ldquo;CO&rdquo; marks a record the squadron CO entered in full,
-          &ldquo;+N CO&rdquo; a self-reported record he added N entries to.</p>
+          — &ldquo;${esc(WA.ADMIN_TAG)}&rdquo; marks a record ${esc(WA.ADMIN_BODY)} entered in full,
+          &ldquo;+N ${esc(WA.ADMIN_TAG)}&rdquo; a self-reported record it added N entries to.</p>
         <table class="pr-t"><thead><tr><th>#</th><th>Student</th>
           <th>Ø mean</th><th>Distribution</th><th>Assessments in</th>
           <th>FAIL</th><th>Almost Good</th><th>FPC</th><th>CEF</th></tr></thead><tbody>
@@ -1900,11 +1900,11 @@ WA.renderAdmin = async function (view, me) {
             <button type="button" class="btn btn-sm" data-edit="${esc(p.id)}">Edit</button>
             ${kind === "instructor" && p.active
               ? `<button type="button" class="btn btn-sm" data-editprop="${esc(p.id)}"
-                   title="Open this instructor's assessment form and fill it in on their behalf — every assessment is tagged 'entered by CO'"
+                   title="Open this instructor's assessment form and fill it in on their behalf — every assessment is tagged 'entered by the admin'"
                    >&#9998; Enter assessments as…</button>` : ""}
             ${kind === "student" && p.active
               ? `<button type="button" class="btn btn-sm" data-editrec="${esc(p.id)}"
-                   title="Open this student's form and enter data on their behalf — every entry is tagged 'entered by CO'"
+                   title="Open this student's form and enter data on their behalf — every entry is tagged 'entered by the admin'"
                    >&#9998; Edit record</button>` : ""}
             <button type="button" class="btn btn-sm" data-regen="${esc(p.id)}" title="New token — the old link stops working">Regenerate</button>
             ${p.role === "admin" ? "" : (p.active
@@ -2079,12 +2079,12 @@ WA.renderAdmin = async function (view, me) {
 
   /* NOTE (round-4 W3c): no "Evals" column — the count converges to eight for
      everyone and ranks nobody; the per-evaluation grade columns below are the
-     comparison. "Record entered by" says whether the CO filled it in. */
+     comparison. "Record entered by" says whether the admin filled it in. */
   function exportSummaryCSV() {
     const rows = [["MN", "Rank", "Last name", "First name", "Class",
       "Solos", "NFS", "SMS", "FAIL", "Almost Good", "Airsickness",
       "FPC", "CEF", "Entries to correct",
-      "Record entered by", "CO-entered entries"]
+      "Record entered by", "Admin-entered entries"]
       .concat(WA.EVALUATIONS.map((d) => d.id))
       /* ROUND 10 — the assessment travels as the MEAN plus the raw material it
          was computed from: the weight sum, the count, and one column per level
@@ -2109,8 +2109,8 @@ WA.renderAdmin = async function (view, me) {
       rows.push([s.person.mn, s.person.rank, s.person.last_name, s.person.first_name, s.person.class,
         st.solos, st.nfs, st.sms, st.fail,
         st.almost_good, st.airsickness, st.fpc, st.cef, st.legacy,
-        /* "CO" = every entry is the CO's · "self" = the owner's record, and
-           the next column says how many entries of it the CO added */
+        /* "admin" = every entry is the admin's · "self" = the owner's record,
+           and the next column says how many entries of it the admin added */
         s.completion.has_record || s._src.any ? s._src.word : "", s._src.n]
         /* ROUND 11 — the PASS ATTEMPT, raw, per checkride. A spreadsheet that
            averaged a column would otherwise be averaging failed re-flights. */
@@ -2264,13 +2264,15 @@ WA.renderAdmin = async function (view, me) {
            the same way — it simply has no trials for the Counts column to
            speak about. */
         const exCL = WA.claims("exams", r.exams || []);
-        const gradedEx = (e) => e.grade !== null && e.grade !== undefined &&
-          e.grade !== "" && isFinite(Number(e.grade));
+        /* ROUND 17 (R16 doc-nit, item 23) — «is there a mark at all?» is asked
+           by WA.examGraded and by nothing else. This was the last inline copy
+           of its four-clause test on the admin side; the export's words are
+           byte-identical, because the test is. */
         (r.exams || []).forEach((e, ix) => add(s, "exams", e,
           [WA.examSeries(e) ? WA.examSeries(e).label + " — weekly theory exam" : WA.examLabel(e.exam),
            WA.examTrial(e) > 1 && !WA.examSeries(e) ? WA.examTrialWord(WA.examTrial(e)) : "",
            (WA.exam(e.exam) || {}).cond ? "foreign SPs only" : "",
-           gradedEx(e) ? (WA.examPassed(e)
+           WA.examGraded(e) ? (WA.examPassed(e)
              ? "passed (" + WA.passMin("exams") + " % or better)"
              : "not passed (below the " + WA.passMin("exams") + " % ground-exam pass mark)") : ""
           ].filter(Boolean).join(" — "),

@@ -13,7 +13,7 @@
 
    ROUND-4 ENTER-ON-BEHALF: the SAME form, bound to somebody else. opts.asCO
    swaps the two RPCs for their admin_* twins (identical validation pipeline
-   server-side) and adds the "editing as CO" banner; nothing else forks.
+   server-side) and adds the "editing as the admin" banner; nothing else forks.
      opts = { asCO: true, targetId: <student uuid> }   (admin token only)
    ══════════════════════════════════════════════════════════════════════════ */
 
@@ -928,8 +928,8 @@ WA.renderStudent = async function (view, me, opts) {
     const leg = stillLegacy(sec, e);
     return (WA.isCO(e)
         ? (lock
-            ? `<span class="colock" title="${esc("This entry was set by the squadron CO. You can see it, and it stays on your record exactly as it is — only the CO can change or remove it.")}">&#128274; CO</span>`
-            : `<span class="cotag" title="Entered by the squadron CO">CO</span>`)
+            ? `<span class="colock" title="${esc(WA.CO_LOCK_TIP)}">&#128274; ${esc(WA.ADMIN_TAG)}</span>`
+            : `<span class="cotag" title="${esc(WA.CO_TIP)}">${esc(WA.ADMIN_TAG)}</span>`)
         : "") +
       (leg ? cflag("incomplete",
         "Recorded on an earlier version of this form — please complete " +
@@ -1207,7 +1207,7 @@ WA.renderStudent = async function (view, me, opts) {
       title="${esc("Sat again? This adds the " + WA.examTrialWord(next) +
         " of " + e.exam + " as its own row, directly under this one. Each of the eight may be sat up to " +
         WA.EXAM_TRIALS + " times and each trial is recorded once." +
-        (lk ? " The sitting above was entered by the squadron CO and stays locked — this re-sit is YOUR row, and you fill it in like any other." : ""))}"
+        (lk ? " The sitting above was entered by " + WA.ADMIN_BODY + " and stays locked — this re-sit is YOUR row, and you fill it in like any other." : ""))}"
       >+ ${esc(WA.examTrialWord(next))}</button>`;
   }
   /* ROUND 15 — THE TWO CELLS THAT CARRY THE VERDICT, EXTRACTED. The 80 % mark
@@ -1240,7 +1240,11 @@ WA.renderStudent = async function (view, me, opts) {
   }
   function examGradeTitle(e) {
     const g = e ? e.grade : null;
-    const has = !(g === null || g === undefined || g === "") && isFinite(Number(g));
+    /* ROUND 17 (R16 doc-nit, item 23) — the last inline copy of «is there a
+       mark at all?» on the student side, now asking the one definition every
+       other surface asks (WA.examGraded). The sentence is byte-identical: the
+       four clauses were the same four clauses. */
+    const has = WA.examGraded(e);
     /* an ΕΕΘ is a ground exam and is marked at the same 80 %, but it has no
        TRIALS — the series is not re-sat, the next week is the next number — so
        the re-sit clause is the one half of the sentence it must not wear */
@@ -1564,13 +1568,13 @@ WA.renderStudent = async function (view, me, opts) {
       slot && WA.slotEmpty(sec.id, e) ? " is-empty" : ""}" data-row="${esc(sec.id)}:${i}">
       ${leg ? `<p class="legnote">Recorded on an earlier version of this form &mdash; please complete
         ${esc(missingOf(sec.id, e).join(", ") || "the missing details")}. ${lock
-          ? "Only the squadron CO can change this entry, so ask him to complete it."
+          ? "Only " + WA.ADMIN_BODY + " can change this entry, so ask " + WA.ADMIN_WORD + " to complete it."
           : blocksSave(sec.id, e)
             ? "It stays readable everywhere in the meantime, but the record cannot be saved again until this is done."
             : "Nothing is lost in the meantime — the rest of the form saves as it is."}</p>` : ""}
       ${co ? `<p class="conote">${lock ? WA.coLockTag() : WA.coTag(e)} ${lock
-        ? "This entry was set by the squadron CO. You can see it, and it stays on your record exactly as it is &mdash; only the CO can change or remove it."
-        : "entered by the squadron CO"}</p>` : ""}
+        ? "This entry was set by " + WA.ADMIN_BODY + ". You can see it, and it stays on your record exactly as it is &mdash; only " + WA.ADMIN_WORD + " can change or remove it."
+        : "entered by " + WA.ADMIN_BODY}</p>` : ""}
       ${sec.row(e, i, meta)}</div>`;
   }
 
@@ -1950,10 +1954,11 @@ WA.renderStudent = async function (view, me, opts) {
     <div class="wrap lay-main" id="stu-form">
       ${asCO ? `
         <div class="cobar" role="note">
-          <span class="cotag">CO</span>
-          <div class="cotxt"><b>Editing as CO</b> &mdash; you are filling in this record on behalf of
+          <span class="cotag">${esc(WA.ADMIN_TAG)}</span>
+          <div class="cotxt"><b>Editing as ${esc(WA.adminRankName())}</b>
+            &mdash; you are filling in this record on behalf of
             <b>${esc(WA.personName(who, true))}</b>. What you <b>add or change</b> here is tagged
-            <b>&ldquo;entered by CO&rdquo;</b> and shown as such everywhere; entries you leave as they
+            <b>&ldquo;entered by ${esc(WA.ADMIN_WORD)}&rdquo;</b> and shown as such everywhere; entries you leave as they
             are stay ${esc(who.last_name || "the student")}&rsquo;s own. The tags clear the moment
             ${esc(who.last_name || "the student")} saves this form themselves.</div>
           ${backBtn}
@@ -1969,7 +1974,7 @@ WA.renderStudent = async function (view, me, opts) {
              calculated. The same rules apply as on the student&rsquo;s own form: an incomplete entry is refused
              here too. Remember to press <b>Save</b>.`
           : `Your self-reported training record. It is visible to your
-             instructors and the squadron CO. Every section is a list of dated entries &mdash; the counts are
+             instructors and the squadron administration. Every section is a list of dated entries &mdash; the counts are
              calculated for you. You can come back through the same link and edit at any time
              &mdash; remember to press <b>Save</b>.`}</p>
         <p class="hint" id="stu-legacy"></p>
@@ -1985,11 +1990,11 @@ WA.renderStudent = async function (view, me, opts) {
          validation, same button — it calls the one save() below. */ ""}
     <div class="savefloat" id="stu-float" hidden>
       <span class="sf-hint">unsaved changes</span>
-      <button type="button" class="btn btn-primary" id="stu-float-save">Save${asCO ? " as CO" : ""}</button>
+      <button type="button" class="btn btn-primary" id="stu-float-save">Save${asCO ? " as admin" : ""}</button>
     </div>
     <div class="savebar">
       ${asCO ? backBtn : ""}
-      <button type="button" class="btn btn-primary" id="stu-save">Save${asCO ? " as CO" : ""}</button>
+      <button type="button" class="btn btn-primary" id="stu-save">Save${asCO ? " as admin" : ""}</button>
       <span class="st" id="stu-status">All changes are kept only after you press Save.</span>
     </div>`;
 
@@ -2488,8 +2493,8 @@ WA.renderStudent = async function (view, me, opts) {
       for (const e of WA.filled(sec.id, S.data[sec.id])) { tot++; if (WA.isCO(e)) n++; }
     }
     $("stu-co").innerHTML = n
-      ? `<span class="cotag">CO</span> <b>${n} of ${tot} ${tot === 1 ? "entry" : "entries"} ${
-         n === 1 ? "was" : "were"} entered by the squadron CO</b>${asCO ? "" : " on your behalf"}
+      ? `<span class="cotag">${esc(WA.ADMIN_TAG)}</span> <b>${n} of ${tot} ${tot === 1 ? "entry" : "entries"} ${
+         n === 1 ? "was" : "were"} entered by ${esc(WA.ADMIN_BODY)}</b>${asCO ? "" : " on your behalf"}
          and ${n === 1 ? "is" : "are"} marked as such wherever the record is shown${
          n < tot ? `; the other ${tot - n} ${tot - n === 1 ? "is" : "are"} self-reported` : ""}. ${asCO
            ? (n === 1 ? "It is" : "They are") + " yours to edit or remove here; the student sees " +
@@ -3597,7 +3602,7 @@ WA.renderStudent = async function (view, me, opts) {
       if (miss > 0) {
         problems.unshift(WA.secLabel(sec.id) + ": " + miss +
           (miss === 1 ? " entry was" : " entries were") +
-          " set by the squadron CO and only the CO can change them — ask him to correct it; your save cannot go through without them");
+          " set by " + WA.ADMIN_BODY + " and only " + WA.ADMIN_WORD + " can change them — ask them to correct it; your save cannot go through without them");
       }
     }
     return { clean, rows, problems, leftovers, problemAt };
@@ -3649,8 +3654,8 @@ WA.renderStudent = async function (view, me, opts) {
       title: "Save " + changes.length + " change" + (changes.length === 1 ? "" : "s") +
              " to " + (asCO ? WA.personRankName(who) + "’s record" : "your record") + "?",
       what: asCO
-        ? "Everything below is written on this student’s record and tagged “entered by CO”."
-        : "Everything below is written on your own training record, which your instructors and the squadron CO can see.",
+        ? "Everything below is written on this student’s record and tagged “entered by " + WA.ADMIN_WORD + "”."
+        : "Everything below is written on your own training record, which your instructors and the squadron administration can see.",
       changes,
     });
     if (ans === "keep") return;
@@ -3747,14 +3752,14 @@ WA.renderStudent = async function (view, me, opts) {
       st.className = "st ok";
       CLEAN_ST = "Saved ✓ " + fmtDT(S.lastUpdate) +
         (asCO ? " — " + coN + " of " + coTot + " entr" + (coTot === 1 ? "y" : "ies") +
-          " tagged as entered by CO" : "") +
+          " tagged as entered by " + WA.ADMIN_WORD : "") +
         (leftovers.length ? " — " + leftovers.length + " earlier entr" +
           (leftovers.length === 1 ? "y is" : "ies are") + " still incomplete" : "");
       st.textContent = CLEAN_ST;
       toast(leftovers.length
         ? "Record saved — " + leftovers.length + " earlier entries still need a detail"
         : (asCO ? "Record saved — " + coN + " entr" + (coN === 1 ? "y" : "ies") +
-                  " tagged as entered by CO" : "Record saved"));
+                  " tagged as entered by " + WA.ADMIN_WORD : "Record saved"));
     } catch (e) {
       st.className = "st err";
       st.textContent = "Save failed: " + e.message;

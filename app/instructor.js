@@ -17,7 +17,7 @@
 
    ROUND-4 ENTER-ON-BEHALF: the SAME form, bound to another instructor.
    opts.asCO swaps the two RPCs for their admin_* twins (identical validation
-   server-side) and adds the "entering as CO" banner; nothing else forks.
+   server-side) and adds the "entering as the admin" banner; nothing else forks.
      opts = { asCO: true, targetId: <instructor uuid> }   (admin token only)
    ══════════════════════════════════════════════════════════════════════════ */
 
@@ -62,8 +62,8 @@ WA.renderInstructor = async function (view, me, opts) {
     const rec = WA.migrateRecord(s.record);
     const st = WA.recStats(rec);
     /* whose record this is, counted from the entries (round 4b) — "entered by
-       CO" is only true when ALL of it was; one CO addition to a student's own
-       record is an addition, and the badge says so */
+       the admin" is only true when ALL of it was; one admin addition to a
+       student's own record is an addition, and the badge says so */
     const src = WA.coSource(rec, s.entered_by);
     /* ROUND 5 — the eight checkrides and the eight solos are FIXED syllabus
        rows: the card shows every checkride, saying which are not flown yet,
@@ -89,7 +89,7 @@ WA.renderInstructor = async function (view, me, opts) {
        card before flying with the student, so what it owes them is the shape
        of the log — how much of each track has been flown, how many hours, and
        how many sorties are still waiting for a debrief. The rows themselves
-       are the CO's drill-down and the student's own form; a card that printed
+       are the admin's drill-down and the student's own form; a card that printed
        eighty of them would stop being readable at the moment it matters. */
     const logLine = ["flights", "fs"].map((k) => {
       const list = Array.isArray(rec[k]) ? rec[k] : [];
@@ -163,7 +163,8 @@ WA.renderInstructor = async function (view, me, opts) {
           ? `<span class="badge">upd. ${esc(fmtDT(s.last_update))}</span>` : `<span class="badge badge-warn">nothing submitted yet</span>`}
           ${src.any
             ? `<span class="badge badge-acc" title="${esc(src.tip)}">${esc(src.all
-                ? "entered by CO" : src.n + " entr" + (src.n === 1 ? "y" : "ies") + " by CO")}</span>`
+                ? "entered by " + WA.ADMIN_WORD
+                : src.n + " entr" + (src.n === 1 ? "y" : "ies") + " by " + WA.ADMIN_WORD)}</span>`
             : ""}</div>
         <div class="kgrid">
           <span><span class="k">Solos</span> <b>${st.solos}</b></span>
@@ -211,11 +212,71 @@ WA.renderInstructor = async function (view, me, opts) {
       </label>`).join("");
   }
 
+  /* ══════════════════════════════════════════════════════════════════════════
+     ROUND 17 — THE STUDENT RAIL, AND THE TWO COLOURS THAT ARE ITS WHOLE POINT.
+     ──────────────────────────────────────────────────────────────────────────
+     «στο instructor recommendation θα ήθελα navigation panel με τους μαθητές.
+      Πράσινη χροιά όποιο έχει βάλει επιλογή, μουσταρδί ότι δεν έχει επιλέξει
+      κάτι ακόμη» (2026-08-22)
+
+     THE SAME COMPONENT AS ROUND 14, one row per STUDENT CARD instead of one per
+     section: WA.navHTML / WA.navMount, told how to find a card (the cards carry
+     their own ids, exactly as the admin's analysis cards do) and handed a
+     `rowTone` — the one thing the component grew this round.
+
+     WHAT MAKES A ROW GREEN. A CHOICE, and nothing else: an assessment level
+     currently selected on that card, whether it is saved or still pending. Not
+     a comment, not the flew-with tick — those are notes ABOUT a judgement and
+     an instructor who wrote a comment and chose no level has still said nothing
+     the brief can average. So the test is P[sid].level, which is the form's own
+     working state and therefore truthful through every flow there is: a click
+     flips it, clicking the chosen level again clears it back to mustard, the
+     dialog's discard restores the saved value, and the general save replaces it
+     with the server's verdict.
+     THE COUNT IN THE HEAD is the same fact for the whole class — «7 of 9
+     chosen» — so the rail answers «how much of this is left?» without being
+     read row by row.
+     THE RAIL IS THE CARD LIST, LITERALLY: both are built from data.students in
+     the order it arrives (seniority / class order, as-is), so a filter or a
+     grouping added here later moves both or neither — they cannot drift.
+     ══════════════════════════════════════════════════════════════════════════ */
+  function hasChoice(sid) { return !!(P[sid] && P[sid].level); }
+  function navItems() {
+    return data.students.map((s) => {
+      const sid = s.person.id;
+      const lv = hasChoice(sid) ? WA.level(P[sid].level) : null;
+      const meta = [s.person.mn ? "MN " + s.person.mn : "",
+                    s.person.class ? "Class " + s.person.class : ""].filter(Boolean).join(" · ");
+      return {
+        id: sid,
+        /* rank + surname, the way the squadron says a name — the full name and
+           the class travel in the tip, where there is room for them */
+        label: WA.personRankName(s.person),
+        tip: WA.personName(s.person, true) + (meta ? " · " + meta : "") + " — " +
+             (lv ? lv.label + " (weight " + lv.w + ")" +
+                   (P[sid].dirty ? " — chosen, not saved yet" : "")
+                 : "no assessment chosen yet — this student is still owed one") +
+             ". Click to go to the card.",
+        /* the weight IS the assessment in one glyph — the number the brief
+           averages, and the one the card prints beside every level */
+        badge: lv ? String(lv.w) : "not yet",
+        tone: lv ? "good" : "mustard",
+        rowTone: lv ? "done" : "extra",
+      };
+    });
+  }
+  function navSummary() {
+    const n = data.students.length;
+    if (!n) return "";
+    return data.students.filter((s) => hasChoice(s.person.id)).length + " of " + n + " chosen";
+  }
+  function refreshNav() { if (WA._nav) WA._nav.refresh(navItems()); }
+
   function stuCard(s) {
     const sid = s.person.id;
     const p = P[sid];
     return `
-      <section class="card stucard" data-stucard="${esc(sid)}">
+      <section class="card stucard" id="ins-stu-${esc(sid)}" data-stucard="${esc(sid)}">
         <div class="stu-head">
           <span class="nm">${esc(WA.personName(s.person, true))}</span>
           <span class="meta">${esc([s.person.mn ? "MN " + s.person.mn : "", s.person.class ? "Class " + s.person.class : ""].filter(Boolean).join(" · "))}</span>
@@ -244,19 +305,32 @@ WA.renderInstructor = async function (view, me, opts) {
           <span class="prop-st" data-st="${esc(sid)}">${p.savedAt
             ? "Saved ✓ " + esc(fmtDT(p.savedAt)) : "No assessment submitted yet."}</span>
           ${p.enteredBy === "admin"
-            ? `<span class="cotag" data-cotag="${esc(sid)}" title="${esc(WA.CO_TIP)}">CO</span>` : ""}
+            ? `<span class="cotag" data-cotag="${esc(sid)}" title="${esc(WA.CO_TIP)}">${esc(WA.ADMIN_TAG)}</span>` : ""}
         </div>
       </section>`;
   }
 
+  /* NO STUDENTS, NO RAIL — AND THEN NO GRID EITHER. `.pagelay` is a two-column
+     grid whose first column is the 224 px rail; with the rail absent the form
+     would be placed in THAT column and rendered 224 px wide. So the wrapper is
+     only a layout when there is something to lay out, and the empty form falls
+     back to exactly the markup it had before this round: a plain `.wrap`. */
+  const railed = data.students.length > 0;
   view.innerHTML = `
-    <div class="wrap screen-only" id="ins-form">
+    <div class="${railed ? "pagelay lay-read" : "lay-none"}" id="ins-lay">
+    ${railed
+      ? WA.navHTML("ins-nav", navItems(), {
+          title: "Students",
+          aria: asCO ? "This instructor’s students" : "Your students" })
+      : ""}
+    <div class="wrap lay-main screen-only" id="ins-form">
       ${asCO ? `
         <div class="cobar" role="note">
-          <span class="cotag">CO</span>
-          <div class="cotxt"><b>Entering as CO</b> &mdash; you are filling in the assessments of
+          <span class="cotag">${esc(WA.ADMIN_TAG)}</span>
+          <div class="cotxt"><b>Entering as ${esc(WA.adminRankName())}</b>
+            &mdash; you are filling in the assessments of
             <b>${esc(WA.personName(who, true))}</b> &mdash; everything you save here is tagged
-            <b>&ldquo;entered by CO&rdquo;</b> and shown as such everywhere, until
+            <b>&ldquo;entered by ${esc(WA.ADMIN_WORD)}&rdquo;</b> and shown as such everywhere, until
             ${esc(who.last_name || "the instructor")} saves the same assessment themselves.</div>
           ${backBtn}
         </div>` : ""}
@@ -276,6 +350,7 @@ WA.renderInstructor = async function (view, me, opts) {
         ? data.students.map(stuCard).join("")
         : `<section class="card"><p class="hint">No active students yet.</p></section>`}
     </div>
+    </div>
     ${/* ROUND 14 — ONE SAVE, and it is the student form's floating pattern:
          this form is one card per student and a dozen screens long, so a
          button at the bottom is a button most of the class never scrolls to.
@@ -293,6 +368,20 @@ WA.renderInstructor = async function (view, me, opts) {
     <div class="print-only" id="print-ins"></div>`;
 
   const root = $("ins-form");
+  /* the rail, mounted once and refreshed from the SAME P the cards are drawn
+     from. WA._nav is the one slot teardownView() destroys — a scroll listener
+     that outlived its cards is the only bug this component can have. The cards
+     carry ids of their own, so the panel is told how to find them instead of
+     assuming the student form's "sec-" prefix (the admin rail's precedent). */
+  const insNavEl = document.getElementById("ins-nav");
+  if (insNavEl) {
+    WA._nav = WA.navMount(insNavEl, {
+      items: navItems(),
+      summary: navSummary,
+      anchor: (id) => document.getElementById("ins-stu-" + id),
+    });
+    WA._nav.summary(navSummary());
+  }
 
   /* ══════════════════════════════════════════════════════════════════════════
      THE PRINTED ASSESSMENT SHEET (round 8, rewritten for round 10).
@@ -353,7 +442,8 @@ WA.renderInstructor = async function (view, me, opts) {
         <h2>${esc(WA.personName(who, true))}</h2>
         <div class="pr-meta">${esc([who.duty, who.leadership, who.status].filter(Boolean).join(" · "))}
           · ${data.students.length} student${data.students.length === 1 ? "" : "s"}
-          · printed ${esc(fmtDT(new Date().toISOString()))}${asCO ? " · entered by the squadron CO" : ""}</div>
+          · printed ${esc(fmtDT(new Date().toISOString()))}${asCO
+            ? " · entered on their behalf by " + esc(WA.adminRankName()) + " (" + esc(WA.ADMIN_BODY) + ")" : ""}</div>
         ${pages || `<p class="pr-none">No active students.</p>`}
       </div>`;
   }
@@ -385,7 +475,7 @@ WA.renderInstructor = async function (view, me, opts) {
      the card is dirty when it DIFFERS, and the one Save writes exactly the
      dirty ones. Change something and change it back and the card leaves the
      list, because the assessment really is the stored one again — which is
-     also what stops the general Save from re-stamping a row the CO owns and
+     also what stops the general Save from re-stamping a row the admin owns and
      the instructor never touched (owner-reclaim only happens where the
      instructor actually answered). */
   const SAVED = {};
@@ -419,15 +509,19 @@ WA.renderInstructor = async function (view, me, opts) {
     }
     const card = root.querySelector(`[data-stucard="${sid}"]`);
     if (card) card.classList.toggle("is-dirty", d);
+    /* ROUND 17 — the rail is LIVE: a level chosen turns its row green on the
+       very click, clearing it returns the row to mustard, and the discard flow
+       (which comes through here card by card) puts back the saved truth. */
+    refreshNav();
     refreshSave();
   }
   function refreshSave() {
     const n = dirtyIds().length;
-    const word = "Save " + n + " assessment" + (n === 1 ? "" : "s") + (asCO ? " as CO" : "");
+    const word = "Save " + n + " assessment" + (n === 1 ? "" : "s") + (asCO ? " as admin" : "");
     for (const id of ["ins-save", "ins-float-save"]) {
       const b = document.getElementById(id);
       if (!b) continue;
-      b.textContent = n ? word : "Save" + (asCO ? " as CO" : "");
+      b.textContent = n ? word : "Save" + (asCO ? " as admin" : "");
       b.disabled = !n;
     }
     const f = document.getElementById("ins-float");
@@ -466,8 +560,8 @@ WA.renderInstructor = async function (view, me, opts) {
   /* ── ROUND 14 — THE ONE GENERAL SAVE ──────────────────────────────────────
      ONE ACT, ONE STUDENT AT A TIME ON THE WIRE. There is deliberately no batch
      RPC: wa.write_proposal carries the whole per-proposal contract — the level
-     normalisation, the owner-reclaim that clears the CO tag when the owner
-     answers, the CO stamp when the CO does — and a second write path would be
+     normalisation, the owner-reclaim that clears the admin tag when the owner
+     answers, the admin stamp when the admin does — and a second write path would be
      a second place for those rules to live. So the button iterates the DIRTY
      cards over the RPC that already exists, and reports per card: an assessment
      the server refuses leaves that one card unsaved and named, and the rest of
@@ -504,16 +598,16 @@ WA.renderInstructor = async function (view, me, opts) {
           cst.className = "prop-st ok";
           cst.textContent = "Saved ✓ " + fmtDT(res.updated_at) +
             (P[sid].level ? " — " + WA.levelLabel(P[sid].level) : " — no assessment recorded") +
-            (asCO ? " — tagged as entered by CO" : "");
+            (asCO ? " — tagged as entered by " + WA.ADMIN_WORD : "");
         }
         const card = root.querySelector(`[data-stucard="${sid}"]`);
         if (card) card.classList.remove("is-dirty");
         /* mirror the server's stamp: the OWNER saving clears it (db/schema.sql
-           → wa.write_proposal), the CO saving sets it */
+           → wa.write_proposal), the admin saving sets it */
         const tag = root.querySelector(`[data-cotag="${sid}"]`);
         if (asCO && !tag && cst) {
           cst.insertAdjacentHTML("afterend",
-            `<span class="cotag" data-cotag="${esc(sid)}" title="${esc(WA.CO_TIP)}">CO</span>`);
+            `<span class="cotag" data-cotag="${esc(sid)}" title="${esc(WA.CO_TIP)}">${esc(WA.ADMIN_TAG)}</span>`);
         } else if (!asCO && tag) tag.remove();
         ok++;
       } catch (e) {
@@ -523,6 +617,9 @@ WA.renderInstructor = async function (view, me, opts) {
     }
     if (WA._insPrint) WA._insPrint();
     btns.forEach((b) => { b.disabled = false; });
+    /* the server's verdict may differ from ours (wa.write_proposal normalises
+       the level), so the rail is redrawn from P AFTER the writes, not before */
+    refreshNav();
     refreshSave();
     if (failed.length) {
       st.className = "st err";
@@ -534,9 +631,9 @@ WA.renderInstructor = async function (view, me, opts) {
     } else {
       st.className = "st ok";
       st.textContent = ok + " assessment" + (ok === 1 ? "" : "s") + " saved ✓ " +
-        fmtDT(new Date().toISOString()) + (asCO ? " — tagged as entered by CO" : "");
+        fmtDT(new Date().toISOString()) + (asCO ? " — tagged as entered by " + WA.ADMIN_WORD : "");
       toast(asCO
-        ? ok + " assessment" + (ok === 1 ? "" : "s") + " saved as CO — they are tagged"
+        ? ok + " assessment" + (ok === 1 ? "" : "s") + " saved as admin — they are tagged"
         : ok + " assessment" + (ok === 1 ? "" : "s") + " saved");
     }
   }
@@ -552,7 +649,7 @@ WA.renderInstructor = async function (view, me, opts) {
       onBehalf: asCO ? WA.personRankName(who) : "",
       title: "Save " + ids.length + " assessment" + (ids.length === 1 ? "" : "s") + "?",
       what: asCO
-        ? "These are recorded as this instructor’s assessments and tagged “entered by CO”. Every one of them is about FIGHTERS, on the five-level scale."
+        ? "These are recorded as this instructor’s assessments and tagged “entered by " + WA.ADMIN_WORD + "”. Every one of them is about FIGHTERS, on the five-level scale."
         : "These are your assessments for the Wing Commander brief — one answer per student, about FIGHTERS, on the five-level scale.",
       savedWord: "last saved",
       changes,

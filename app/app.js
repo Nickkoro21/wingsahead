@@ -126,7 +126,7 @@ function renderLanding(el, invalid) {
       <p>${invalid
         ? "The personal link you used is invalid or has been revoked. No data is shown."
         : "This application works only through personal links."}
-        <br><br>Please contact the squadron CO to receive your personal link.</p>
+        <br><br>Please contact the squadron administration to receive your personal link.</p>
     </div>`;
 }
 
@@ -762,68 +762,113 @@ WA.pctRaw = function (v) {
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
-   ENTERED BY THE CO — the transparency stamp (round 4).
-   The squadron CO can enter data FOR a student or an instructor; every row
-   written that way carries entered_by:'admin', set server-side, and every
-   view that shows the row shows this tag. The owner saving their own form
-   clears it — reclaimed data is self-reported again.
+   ENTERED BY THE ADMIN — the transparency stamp (round 4, RENAMED round 17).
+   ──────────────────────────────────────────────────────────────────────────
+   ROUND 17 — THE ADMIN IS NOT THE SQUADRON CO. Ruling of 2026-08-22, verbatim:
+   «Ο admin δεν ειναι ο squadron CO, ειμαι εγω, ο developer. ⟨SURNAME⟩.
+    Διορθωσε το»
+   (the surname the ruling names is redacted here and in every tracked file —
+   the DATABASE carries the display name, which is its only home.)
+
+   The holder of the admin link is the FLIGHT COMMANDER and the developer of
+   this application. He is not the squadron's Commanding Officer, and for four
+   rounds every stamp, lock note, banner, chip, tooltip, print line and CSV
+   verdict said he was. The identity is now said in exactly two ways and never
+   in a third:
+     · WHERE A NAME FITS  — the admin person row's OWN rank + surname, read
+       from the database through WA.personRankName. That is only possible on
+       the surfaces the admin himself is looking at (WA.me is his own row):
+       the two on-behalf banners, the save signature, his printed sheet.
+     · WHERE A ROLE WORD FITS — the neutral «the admin» / «the squadron
+       administration». A student reading a lock note has never been told the
+       admin's name by any RPC, and inventing one would be a second identity.
+   WHAT DID NOT MOVE: the stored value stays entered_by='admin' (already
+   neutral — no migration, schema untouched), and the CSS/internal identifiers
+   (.cotag, .colock, is-co, is-colock, WA.isCO, asCO) keep their names. What
+   the USER SEES stops claiming CO-ness; what the code calls its own variables
+   is nobody's business but the code's.
+   AND THE REAL SQUADRON CO IS UNTOUCHED, because he exists: «Squadron CO» is
+   one of the two appointments that may conduct an FPC (WA.FPC_EVALUATORS,
+   round 6), one of the evaluator roles of a CEF, and the authority named in
+   the ΚΕΠΕ entry conditions of 3-01 ΚΕΦ.2 §32β. Those are DOCTRINE, they name
+   an appointment and not this application's admin, and they stay word for word.
+   ──────────────────────────────────────────────────────────────────────────
+   The admin can enter data FOR a student or an instructor; every row written
+   that way carries entered_by:'admin', set server-side, and every view that
+   shows the row shows this tag. The owner saving their own form clears it —
+   reclaimed data is self-reported again.
    ══════════════════════════════════════════════════════════════════════════ */
-WA.CO_TIP = "Entered by the squadron CO on behalf of the owner — not self-reported";
-/* ── THE CO'S EDITS PREVAIL (round 8) ──────────────────────────────────────
-   A row the CO wrote is not a suggestion. It is shown to its owner LOCKED:
+/* THE CHIP'S WORD — one constant, so the tag cannot say ADMIN on one surface
+   and something else on the next. It is the ROLE, in the neutral word: the
+   chip is read by students and instructors, who are never told a name. */
+WA.ADMIN_TAG = "ADMIN";
+/* the role word in a sentence, long and short */
+WA.ADMIN_BODY = "the squadron administration";
+WA.ADMIN_WORD = "the admin";
+/* WHO IS SIGNING, WHEN THE ADMIN IS THE ONE READING. WA.me is the token's own
+   record, so on the admin's own surfaces the name is available and is used;
+   anywhere else this is never called. */
+WA.adminRankName = function () {
+  return WA.personRankName(WA.me || {});
+};
+WA.CO_TIP = "Entered by " + WA.ADMIN_BODY + " on behalf of the owner — not self-reported";
+/* ── THE ADMIN'S EDITS PREVAIL (round 8) ───────────────────────────────────
+   A row the admin wrote is not a suggestion. It is shown to its owner LOCKED:
    readable, disabled, un-removable, and it must travel through the owner's
    next save fact for fact — the server refuses the save otherwise, naming the
-   rule. Only the CO can change or delete it (and the CO editing one of the
-   owner's rows makes it his, which locks that one too).
+   rule. Only the admin can change or delete it (and the admin editing one of
+   the owner's rows makes it his, which locks that one too).
    MIRROR: db/schema.sql → wa.carry_stamps. */
 WA.CO_LOCK_TIP =
-  "Set by the squadron CO — locked. It stays on your record exactly as it stands; only the CO can change or remove it.";
+  "Set by " + WA.ADMIN_BODY + " — locked. It stays on your record exactly as it stands; only " +
+  WA.ADMIN_WORD + " can change or remove it.";
 WA.coLockTag = function () {
-  return `<span class="colock" title="${esc(WA.CO_LOCK_TIP)}" aria-label="${esc(WA.CO_LOCK_TIP)}">&#128274; locked by CO</span>`;
+  return `<span class="colock" title="${esc(WA.CO_LOCK_TIP)}" aria-label="${esc(WA.CO_LOCK_TIP)}">&#128274; locked by ${esc(WA.ADMIN_WORD)}</span>`;
 };
 WA.isCO = function (e) { return !!(e && e.entered_by === "admin"); };
 WA.coTag = function (e) {
   return WA.isCO(e)
-    ? `<span class="cotag" title="${esc(WA.CO_TIP)}" aria-label="${esc(WA.CO_TIP)}">CO</span>` : "";
+    ? `<span class="cotag" title="${esc(WA.CO_TIP)}" aria-label="${esc(WA.CO_TIP)}">${esc(WA.ADMIN_TAG)}</span>` : "";
 };
 /* the same fact for CSV / plain-text surfaces */
-WA.coWord = function (e) { return WA.isCO(e) ? "CO" : "self"; };
+WA.coWord = function (e) { return WA.isCO(e) ? "admin" : "self"; };
 
 /* ── THE SOURCE OF A WHOLE RECORD (round 4b) ───────────────────────────────
-   A record is not "the CO's" because the CO touched it. 17 self-reported
-   entries and 1 CO addition is a SELF-REPORTED record with one CO addition,
+   A record is not "the admin's" because the admin touched it. 17 self-reported
+   entries and 1 admin addition is a SELF-REPORTED record with one addition,
    and every surface that summarises a record must say exactly that.
    MIRROR: db/schema.sql → wa.record_stamp / wa.co_entry_count / wa.entry_count.
    `stamp` is the record-level flag the server sends; it settles only the case
-   the entries cannot — an empty record the CO created for an owner who has
+   the entries cannot — an empty record the admin created for an owner who has
    never saved it. → { n, total, all, some, any, word, tip } */
 WA.coSource = function (rec, stamp) {
   const r = rec || {};
   let total = 0;
   for (const k of WA.COUNTED) total += WA.filled(k, r[k]).length;
-  const n = WA.coEntries(r).length;   /* the one place CO entries are counted */
+  const n = WA.coEntries(r).length;   /* the one place admin entries are counted */
   const all = total > 0 ? n === total : stamp === "admin";
   const some = n > 0 && !all;
   return {
     n, total, all, some, any: all || some,
-    /* the plain-text verdict for CSV: "CO" = all of it, "self+CO" = the
-       owner's record with CO additions (the count travels beside it) */
-    word: all ? "CO" : (some ? "self+CO" : "self"),
+    /* the plain-text verdict for CSV: "admin" = all of it, "self+admin" = the
+       owner's record with admin additions (the count travels beside it) */
+    word: all ? "admin" : (some ? "self+admin" : "self"),
     tip: all
-      ? (total ? "Every entry of this record was entered by the squadron CO on the owner's behalf"
-               : "This record was opened by the squadron CO — its owner has never saved it")
+      ? (total ? "Every entry of this record was entered by " + WA.ADMIN_BODY + " on the owner's behalf"
+               : "This record was opened by " + WA.ADMIN_BODY + " — its owner has never saved it")
       : some
         ? n + (n === 1 ? " entry was" : " entries were") +
-          " entered by the squadron CO on the owner's behalf — the other " +
+          " entered by " + WA.ADMIN_BODY + " on the owner's behalf — the other " +
           (total - n) + (total - n === 1 ? " is" : " are") + " self-reported"
         : "Self-reported by its owner",
   };
 };
-/* the chip that carries that verdict: filled "CO" = the whole record is the
-   CO's, hollow "+N CO" = N of its entries are and the rest is the owner's. */
+/* the chip that carries that verdict: filled "ADMIN" = the whole record is the
+   admin's, hollow "+N ADMIN" = N of its entries are and the rest is the
+   owner's. */
 WA.coRecordTag = function (src) {
   if (!src || !src.any) return "";
-  const label = src.all ? "CO" : "+" + src.n + " CO";
+  const label = src.all ? WA.ADMIN_TAG : "+" + src.n + " " + WA.ADMIN_TAG;
   return `<span class="cotag${src.all ? "" : " part"}" title="${esc(src.tip)}"
     aria-label="${esc(src.tip)}">${esc(label)}</span>`;
 };
@@ -2572,11 +2617,34 @@ WA.examGraded = function (e) {
    exam — §4o·5's «what counts as beside», read from the same counter that
    already names the trial in the save dialog — and a single sitting stays
    unbadged as to trial, which is what keeps the word off those 199 rows.
-   A SERIES ROW NEVER WEARS A TRIAL WORD: the ΕΕΘ are numbered, not re-sat. */
+   A SERIES ROW NEVER WEARS A TRIAL WORD: the ΕΕΘ are numbered, not re-sat.
+
+   ROUND 17 (R16 verify item 12) — AND WHAT IT COUNTS ARE SITTINGS, NOT ROWS.
+   The counter above was WA.examTrialsOf, which returns every row naming that
+   exam — INCLUDING the seeded flow-chart slot, which is not a sitting and is
+   not even stored. So a record holding a hand-made `{exam:'X', trial:2}` and
+   no trial 1 gave the EMPTY slot row of X two "trials", and the empty row —
+   nothing typed into it, nothing recorded against it, grey, owed — wore
+   «1st trial». It named an attempt that had never been made.
+   The gate now asks the same question the sparse rule asks: is this row a
+   REPORT (WA.slotUntouched says no to exactly the untouched flow-chart
+   placeholder, and yes to everything else — a written row, a legacy row, an
+   admin-entered row, a minted trial or ΕΕΘ, all of which are stored). TWO
+   clauses, because both halves of the sentence have to be true:
+     · the ROW ITSELF must be a sitting — an owed placeholder is not the
+       «1st trial» of anything, whatever sits beside it;
+     · and the RECORD must hold more than one sitting of that exam.
+   Everything the ruling put the word there for is untouched: a real 1st trial
+   beside a real 2nd still wears it (both are sittings), an alt row and any
+   trial > 1 short-circuit above this line and never reach the count. */
+WA.examSittingsOf = function (list, examId) {
+  return WA.examTrialsOf(list, examId).filter((t) => !WA.slotUntouched("exams", t.e));
+};
 WA.examTrialShown = function (list, e, alt) {
   if (!e || WA.examSeries(e)) return false;
   if (alt || WA.examTrial(e) > 1) return true;
-  return WA.examTrialsOf(list, e.exam).length > 1;
+  if (WA.slotUntouched("exams", e)) return false;
+  return WA.examSittingsOf(list, e.exam).length > 1;
 };
 WA.examNotPassed = function (e) {
   return WA.examGraded(e) && !WA.examPassed(e);
@@ -2891,19 +2959,32 @@ WA.sortBySeniority = function (list) {
    The student form is FOURTEEN SECTIONS and, since round 13 pre-seeded the
    syllabus, something over 180 rows long. Everything in it is reachable and
    nothing in it is findable: a student who wants to add an NFS scrolls past
-   the whole flight log to get there, and a CO entering data on somebody's
+   the whole flight log to get there, and the admin entering data on somebody's
    behalf does it twice. The panel is the form's table of contents — one row
    per section, click to go there, and each row carries THE ONE FACT that
    section is about, so the panel answers "what do I still owe?" without being
    opened at all.
 
-   IT IS ONE COMPONENT AND IT IS NOT THE FORM'S. The student form and the
-   admin's Student-analysis tab both mount it; neither knows how it works, and
-   both hand it the same shape:
-     items = [{ id, label, tip, badge, bars:[{state,n}], tone }]
+   IT IS ONE COMPONENT AND IT IS NOT THE FORM'S. The student form, the admin's
+   Student-analysis tab and (round 17) the instructor's assessment form all
+   mount it; none of them knows how it works, and all of them hand it the same
+   shape:
+     items = [{ id, label, tip, badge, bars:[{state,n}], tone, rowTone }]
    The panel renders, tracks the scroll, and re-reads the items on demand
    (refresh) — it never reads a record, because it must not have an opinion
    about what a section is.
+
+   ROUND 17 — `rowTone`, AND IT IS THE ONLY THING THIS COMPONENT GREW.
+   «Πράσινη χροιά όποιο έχει βάλει επιλογή, μουσταρδί ότι δεν έχει επιλέξει
+    κάτι ακόμη» (2026-08-22). The instructor's rail is one row per STUDENT, and
+   the fact it carries is binary — an assessment is chosen, or it is not — so a
+   badge alone would say it in the smallest type on the row. `rowTone` is a
+   state id from WA.ROW_STATES painted as a WASH ACROSS THE WHOLE ROW, in the
+   very tokens the four-state colour contract already owns (--st-done green,
+   --st-extra mustard): the caller names a state, never a colour, and the rail
+   can never invent a fifth. It is opt-in — the two round-14 rails pass nothing
+   and are pixel-for-pixel what they were — and `is-here` still wins over it,
+   because where the reader IS outranks what the row says.
 
    STICKY, AND UNDER 900 px IT IS THE SAME LIST IN A DIFFERENT SHAPE. Above the
    break it is a rail sticking below the top bar; below it, the SAME <ul> is a
@@ -2927,7 +3008,8 @@ WA.navItemHTML = function (it) {
   const bars = (it.bars || []).filter((b) => b.n > 0);
   return `
     <li class="sn-li">
-      <button type="button" class="sn-row" data-navto="${esc(it.id)}"
+      <button type="button" class="sn-row${it.rowTone ? " tone-" + esc(it.rowTone) : ""}"
+              data-navto="${esc(it.id)}"
               title="${esc(it.tip || it.label)}">
         <span class="sn-lbl">${esc(it.label)}</span>
         ${bars.length
@@ -3098,8 +3180,10 @@ WA.navMount = function (navEl, opts) {
    personal link IS that person to this application; the one thing it can and
    must say back before a write is WHOSE NAME goes on it. The header is the
    token's own record (WA.me) — rank + surname, the way the squadron writes it
-   — and where the CO is entering on somebody's behalf it names both: who is
-   writing, and whose record is being written.
+   — and where the admin is entering on somebody's behalf it names both: who is
+   writing, and whose record is being written. (Round 17: that name is the
+   ADMIN'S OWN, read from his person row, and the chip beside it says ADMIN —
+   the admin is the flight commander and the developer, never the squadron CO.)
 
    AND WHAT — AS A NUMBERED LIST OF SENTENCES, not a payload. The list is
    built by comparing the form against the state it was last saved in, and
@@ -3264,7 +3348,7 @@ WA.sameValue = function (a, b) {
   }
   return String(n(a)) === String(n(b));
 };
-/* THE CHANGE LIST OF ONE RECORD — the student form and its CO twin.
+/* THE CHANGE LIST OF ONE RECORD — the student form and its admin twin.
      before / after : two records in the migrated shape
      → ["Ground exams · IN190 · 2nd trial · 12/08/2026 — added (grade 78 %)", …] */
 WA.recordChanges = function (before, after, sections) {
@@ -3359,7 +3443,7 @@ WA.confirmSave = function (opts) {
       <div class="modal cfm" role="dialog" aria-modal="true" aria-labelledby="wa-cfm-h">
         <h3 id="wa-cfm-h">${esc(o.title || ("Save " + n + " change" + (n === 1 ? "" : "s") + "?"))}</h3>
         <p class="cfm-who">Signed by <b>${esc(o.who || "")}</b>${
-          o.onBehalf ? ` <span class="cotag" title="${esc(WA.CO_TIP || "")}">CO</span>
+          o.onBehalf ? ` <span class="cotag" title="${esc(WA.CO_TIP || "")}">${esc(WA.ADMIN_TAG)}</span>
             <span class="k">on behalf of <b>${esc(o.onBehalf)}</b></span>` : ""}</p>
         <p class="hint">${esc(o.what || "")}</p>
         <p class="cfm-n">${esc(n + (n === 1 ? " change" : " changes"))}</p>
