@@ -3147,6 +3147,23 @@ begin
   return o;
 end $$;
 
+-- ── THE LOCK REFUSAL, IN ONE PLACE ────────────────────────────────────────
+-- ROUND 17b. This sentence is the SERVER TWIN of the note the owner already
+-- reads on the locked row (app/student.js → rowHTML, built from WA.ADMIN_BODY
+-- «the squadron administration» + WA.ADMIN_WORD «the admin»). Round 17 changed
+-- the client's half and left the server's saying «the squadron CO … only the
+-- CO», so the one sentence a student is ever shown TWICE — once on the row,
+-- once when the save is refused — named two different people. It is a function
+-- and not two literals for exactly that reason: the refusal for the section
+-- that WAS submitted and the refusal for the section that was OMITTED are the
+-- same rule, and one definition cannot drift from itself.
+-- (The stored value stays entered_by='admin' and the internal names keep
+-- theirs — round 17's rule: what the USER SEES stops claiming CO-ness.)
+create or replace function wa.admin_lock_msg() returns text
+language sql immutable as $$
+  select 'this entry was set by the squadron administration and only the admin can change or remove it — it is shown on your form locked, and your save must leave it exactly as it stands'
+$$;
+
 -- the OWNER path (round 8): the submitted payload against the STORED record.
 -- Every entry the CO owns must still be there, fact for fact — matched by
 -- wa.entry_core exactly as the CO path matches, position first — and it comes
@@ -3201,13 +3218,12 @@ begin
       end if;
       arr := arr || jsonb_build_array(e);
     end loop;
-    -- EVERY CO ENTRY MUST HAVE BEEN CLAIMED. One that was not is one the owner
-    -- altered or dropped, and only the CO may do either.
+    -- EVERY ADMIN ENTRY MUST HAVE BEEN CLAIMED. One that was not is one the
+    -- owner altered or dropped, and only the admin may do either.
     for j in 0 .. n_old - 1 loop
       if not used[j + 1] and (od->j->>'entered_by') = 'admin'
          and not wa.slot_empty(k, od->j) then
-        perform wa.chk(false, format('%s[%s]', k, j),
-          'this entry was set by the squadron CO and only the CO can change it — it is shown on your form locked, and your save must leave it exactly as it stands');
+        perform wa.chk(false, format('%s[%s]', k, j), wa.admin_lock_msg());
       end if;
     end loop;
     o := o || jsonb_build_object(k, arr);
@@ -3219,8 +3235,7 @@ begin
     for j in 0 .. jsonb_array_length(p_old->k) - 1 loop
       if (p_old->k->j->>'entered_by') = 'admin'
          and not wa.slot_empty(k, p_old->k->j) then
-        perform wa.chk(false, format('%s[%s]', k, j),
-          'this entry was set by the squadron CO and only the CO can change it — it is shown on your form locked, and your save must leave it exactly as it stands');
+        perform wa.chk(false, format('%s[%s]', k, j), wa.admin_lock_msg());
       end if;
     end loop;
   end loop;
@@ -4097,8 +4112,25 @@ begin
 end $$;
 
 -- ── bootstrap: the admin person (created once; token survives re-runs) ─────
+-- ROUND 17b — THE SEED IS A ROLE, NOT A PERSON. «Ο admin δεν ειναι ο squadron
+-- CO, ειμαι εγω, ο developer» (2026-08-22). Round 17 stopped every SURFACE
+-- from calling the admin the CO and left the one place that says it in DATA:
+-- this seed, which wrote the surname «Squadron CO» into the row every fresh
+-- deployment reads its display name from — so a brand-new install introduced
+-- its own holder as the squadron's Commanding Officer before anybody typed a
+-- character. The seed now writes the NEUTRAL ROLE and nothing else: no rank,
+-- no given name, last_name = 'Admin'. WA.personRankName joins rank + surname,
+-- so every surface that prints the holder reads exactly «Admin» until he sets
+-- his own name.
+-- WHERE THE REAL NAME LIVES: in the DATABASE, set by the admin himself through
+-- People → Edit on the running instance. It never enters a tracked file — the
+-- privacy rule of round 9, unchanged.
+-- EXISTING INSTALLS ARE UNTOUCHED: the insert is guarded by `not exists`, so
+-- on any database that already has an admin row it does nothing at all, and a
+-- name already set (including one still reading «Squadron CO») is left exactly
+-- as it stands for its owner to correct through the same People → Edit.
 insert into public.people (role, rank, first_name, last_name)
-select 'admin', '', '', 'Squadron CO'
+select 'admin', '', '', 'Admin'
 where not exists (select 1 from public.people where role = 'admin');
 
 -- ═══════════════════════════════════════════════════════════════════════════

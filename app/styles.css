@@ -1184,8 +1184,30 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
    4.5:1 as text on its own wash — see the token block at the top of this file).
    `:not(.is-here)` is the whole of the precedence rule: where the reader IS
    outranks what the row says about itself, and the accent must not be washed
-   over by a state. The left edge carries the same fact a second time, in
-   POSITION rather than in hue, for a reader who cannot separate the two. */
+   over by a state.
+
+   ROUND 17b — WHAT ACTUALLY CARRIES THE STATE A SECOND TIME, MEASURED.
+   This note used to claim the 3 px left edge repeated the state «in POSITION
+   rather than in hue». It does not, and the two rules below say so in their
+   own declarations: `inset 3px 0 0` on BOTH tones, on the same edge of the
+   same box (measured on the running rail — both rows left 21, width 206,
+   height 28; both shadows `3px 0px 0px 0px inset`). The geometry is IDENTICAL
+   and ONLY THE COLOUR DIFFERS, so the edge is a second helping of the same
+   channel — a reinforcement of the hue, worth having because it is the most
+   saturated statement of it on the row, but not a second modality.
+   THE SECOND MODALITY IS THE BADGE WORD, and it always was: `.sn-st` reads the
+   weight digits «10 · 8 · 5 · 3 · 1» when a level is chosen and «not yet» when
+   none is, inside the button's own accessible name («2Lt ⟨SURNAME⟩ 3» ·
+   «Cdt IV ⟨SURNAME⟩ not yet»), so it reaches a screen reader and a monochrome
+   print as well as an eye. The tooltip says the same fact in a sentence.
+   THE KNOWN LIMIT, RECORDED RATHER THAN PAINTED OVER: in the Wilderness
+   palette --good is a yellow-green (142,207,98) and --mustard (212,190,70) is
+   close to it under protanopia — simulated (Viénot / Brettel–Mollon 1999) the
+   pair measures ΔE76 3.4 between the two row washes as painted on --panel
+   (ΔE2000 3.3 between the raw tokens, 3.0 across the painted 3 px edge),
+   against 13–14 in the other dark palettes. For a protanope that is the same
+   colour, and the edge does not help him because it IS that colour. The badge
+   word is what he reads, and it is why this rule is allowed to stand. */
 .sn-row.tone-done:not(.is-here) {
   background: var(--st-done);
   border-color: rgba(var(--good-rgb), 0.38);

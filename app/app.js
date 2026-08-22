@@ -3060,6 +3060,28 @@ WA.navMount = function (navEl, opts) {
   function go(secId) {
     const el = anchor(secId);
     if (!el) return;
+    /* ── ROUND 17b — COLLAPSE FIRST, THEN MEASURE. THE ORDER IS THE FIX. ────
+       On a phone the panel the reader just tapped is a strip they OPENED: the
+       burger turns the one-line pill strip into a wrapped grid, and the grid is
+       part of the flow (`position:sticky`), so everything below it — including
+       the card being asked for — sits that much further down the document.
+       This function used to measure `el.getBoundingClientRect()` and `offset()`
+       against the OPEN panel and close it AFTERWARDS. On paper the two errors
+       cancel — the offset is too big by the panel's extra height, and so is the
+       anchor's document position — but the browser's SCROLL ANCHORING then
+       compensates the collapse and pulls the page back by that same amount, so
+       what is left on screen is the error. Measured on the running app, every
+       pill landed its card the collapse-delta too low: 173.8 px instead of 14
+       on the 25-student instructor rail at 900 (delta 160) and 358.3 at 375
+       (delta 344); 37.5 and 183.5 on the 13-section student rail (deltas 24 and
+       170); 150.0 on the admin's 10-card analysis rail at 375 (delta 136).
+       Closing FIRST costs nothing — `getBoundingClientRect()` flushes the
+       pending layout on the very next line — and it is the same close that
+       always had to happen, moved to where its effect is measurable.
+       ONE COMPONENT, THREE RAILS: the student form, the admin's analysis cards
+       and the instructor's students all mount this function, so the fix lands
+       on all three without any of them knowing it happened. */
+    if (window.innerWidth <= WA.NAV_BREAK) setOpen(false);
     const y = Math.max(0, el.getBoundingClientRect().top + window.scrollY - offset());
     const from = window.scrollY;
     /* ── HOW FAR, AND WHETHER TO ANIMATE IT ────────────────────────────────
@@ -3087,9 +3109,9 @@ WA.navMount = function (navEl, opts) {
         }
       }, 250);
     }
-    /* on a phone the panel is a strip the reader just tapped: close it, or the
-       section they asked for opens underneath the list they asked it from */
-    if (window.innerWidth <= WA.NAV_BREAK) setOpen(false);
+    /* (the close that used to live here is now the FIRST thing this function
+       does — see the round-17b note above: it has to happen BEFORE the two
+       measurements, not after the scroll they produced.) */
     mark(secId);
   }
   function mark(secId) {

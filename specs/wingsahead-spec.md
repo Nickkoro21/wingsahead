@@ -578,8 +578,15 @@ with every control inside the row disabled and no remove button, and cannot
 modify or delete it. The owner's save must carry **every** CO entry through
 **unchanged** — matched fact for fact by `wa.entry_core`, position first, the
 same way the CO diff matches — and the server refuses a payload that alters or
-drops one, *"this entry was set by the squadron CO and only the CO can change
-it"* (a whole section omitted from the payload is caught by the same rule).
+drops one, *"this entry was set by **the squadron administration** and only
+**the admin** can change or remove it — it is shown on your form locked, and
+your save must leave it exactly as it stands"* (a whole section omitted from the
+payload is caught by the same rule). **Round 17b (R17 verify item B)** rewrote
+that sentence: round 17 changed the client's half of it and left the server
+still saying *«the squadron CO … only the CO»*, so the one sentence a student is
+ever shown twice — once on the locked row, once when the save is refused —
+named **two different people**. Both refusal sites now read it from **one**
+definition, `wa.admin_lock_msg()`, which cannot drift from itself.
 The owner path **no longer strips stamps**: `wa.strip_stamps` is dropped and
 replaced by `wa.carry_stamps`, which preserves the stored provenance of every
 matched entry (admin stays admin, null stays null) and leaves everything the
@@ -2552,6 +2559,19 @@ you asked for must not open underneath the list you asked it from.
    sticky strip, so its height counts too — otherwise every jump lands the
    section's heading behind the very pills that asked for it. Verified: at
    375 px every jump lands at `top: 154` against a nav bottom of `140`.
+   **ROUND 17b — AND THE COLLAPSE HAPPENS FIRST (R17 verify item 2).** That
+   verification was done with the strip **closed**; opened with the burger it
+   was wrong, and had been since round 14. The open panel is a wrapped grid **in
+   the flow**, so it pushes the whole document down by its own extra height;
+   `go()` measured both the anchor and `offset()` against it and only then
+   collapsed it, and Chrome's **scroll anchoring** then pulled the page back by
+   exactly the collapse delta — leaving the card that much too low. Measured on
+   the running app: **173.8 px instead of 14** on the 25-student instructor rail
+   at 900 px (delta 160), **358.3** at 375 px (delta 344), and **37.5 / 183.5**
+   on the 13-section student rail (deltas 24 / 170). The close is now the
+   **first** thing `go()` does — `getBoundingClientRect()` flushes the pending
+   layout on the very next line — so all three rails land at **14 px** under the
+   strip at both widths, burger open or shut. One component, three rails.
 2. **`behavior:"smooth"` is advisory, so the landing is confirmed.** Some
    engines — including this round's own emulation mode — ignore it outright and
    the page simply never moves, which would make the whole panel look broken
@@ -3957,7 +3977,9 @@ round changed. **`instructor.js` keeps `?v=20260821d`**; `styles.css`,
      the same ground exam — each of the eight may be sat once per trial (1st,
      2nd, 3rd)”*;
    * **(E) refused** — the CO's grade changed 72 → 92 → *“this entry was set by
-     the squadron CO and only the CO can change it …”*;
+     the squadron CO and only the CO can change it …”* — **the wording of the
+     time**; round 17b rewrote it to the admin sentence (§4b), and the refusal
+     itself is unchanged;
    * **(F) refused** — the CO's row **dropped** → the same refusal.
    The lock holds in both directions it can be broken; the mint passes through
    it. **`db/schema.sql` was not opened.**
@@ -4149,11 +4171,24 @@ and cannot invent a fifth:
 
 It is **opt-in**: the two round-14 rails pass no `rowTone` and are pixel-for-
 pixel what they were. `is-here` still wins over a tone (`:not(.is-here)` in the
-CSS) — **where the reader IS outranks what the row says about itself** — and the
-tone is carried a second time in POSITION, as a 3 px left edge, for a reader who
-cannot separate the two hues. On the pills below 900 px the edge is dropped (it
-clips to the pill radius and reads as a smudge); the wash, the border and the
-badge's own word carry it there.
+CSS) — **where the reader IS outranks what the row says about itself**.
+
+**WHAT CARRIES THE STATE A SECOND TIME — corrected in round 17b (R17 verify
+item 3).** This paragraph used to say the 3 px left edge repeated the tone *«in
+POSITION rather than in hue»*. **Measured on the running rail, that is false**:
+both rules declare `inset 3px 0 0` on the same edge of the same box (both rows
+`left 21 · width 206 · height 28`, both shadows `3px 0px 0px 0px inset`) — the
+**geometry is identical and only the colour differs**. The edge is therefore a
+**reinforcement of the hue** — the most saturated statement of it on the row,
+worth keeping — and **not** a second modality. The second modality is **the
+BADGE WORD**: `.sn-st` prints the weight digits **`10 · 8 · 5 · 3 · 1`** when a
+level is chosen and **«not yet»** when none is, *inside the button's own
+accessible name* (`2Lt ⟨SURNAME⟩ 3` · `Cdt IV ⟨SURNAME⟩ not yet`), so it reaches
+a screen reader and a monochrome print as well as an eye; the tooltip says the
+same fact in a sentence. On the pills below 900 px the edge is dropped (it clips
+to the pill radius and reads as a smudge); the wash, the border and **the badge's
+own word** carry it there — which is the arrangement the whole rail actually
+relies on, at every width.
 
 **WHAT COUNTS AS «HAVING PUT A CHOICE».** A **level**, and nothing else. Not a
 comment, not the flew-with tick — those are notes *about* a judgement, and an
@@ -4187,12 +4222,20 @@ fallback · **224 px** had the grid been left on), and fixed by making the wrapp
 a layout only when there is something to lay out — the empty form falls back to
 exactly the markup it had before this round, a plain `.wrap`.
 
-**RECORDED, NOT HIDDEN:** in the **Wilderness** palette `--good` is a
-yellow-green (142,207,98) and sits nearer the mustard (212,190,70) than in the
-other seven. The pair is still distinguishable, and — by the same discipline the
-MESA note at the top of `styles.css` sets out for `--warn` / `--mustard` — the
-row never relies on hue alone: the badge says *«not yet»* or a weight, the left
-edge repeats the state in position, and the tooltip says it in a sentence.
+**RECORDED, NOT HIDDEN — AND MEASURED IN ROUND 17b:** in the **Wilderness**
+palette `--good` is a yellow-green (142,207,98) and sits nearer the mustard
+(212,190,70) than in the other seven. Round 17 wrote *«the pair is still
+distinguishable»*; simulated for **protanopia** (Viénot / Brettel–Mollon 1999)
+it is not — the two row washes, as painted on Wilderness's `--panel`, measure
+**ΔE76 3.4** (ΔE2000 **3.3** between the raw tokens, **3.0** across the painted
+3 px edge) against **13–14** in the other dark palettes. **This is now a stated
+known limit, not a reassurance**, and the 3 px edge is no mitigation for it
+because the edge *is* that colour (see the correction above). What a protanope
+actually reads on the row is **the badge word** — *«not yet»* or the weight
+digit, in the button's accessible name — with the tooltip saying it in a
+sentence. By the same discipline the MESA note at the top of `styles.css` sets
+out for `--warn` / `--mustard`, that word is the reason the palette is allowed
+to stand; a future palette pass may still want to move Wilderness's `--good`.
 
 ---
 
@@ -4331,6 +4374,21 @@ changes nothing anybody sees. **What the USER SEES is the whole of this change.*
 | the student form's own hint | *visible to your instructors and the squadron CO* | *… and the **squadron administration*** |
 | the landing page | *contact the squadron CO* | *contact the **squadron administration*** |
 | the People page's admin row | the stored surname read **«Squadron CO»** | **the admin's own rank + surname from the row** |
+
+**ROUND 17b — THE LAST PLACE THAT STILL SAID IT WAS THE SEED (R17 verify item
+A).** Every row of the table above is a SURFACE, and round 17 fixed all of them
+while `db/schema.sql` went on writing the surname **«Squadron CO»** into the
+admin row a fresh deployment bootstraps — so a brand-new install introduced its
+own holder as the squadron's Commanding Officer before anybody typed a
+character, and the People page dutifully printed it. The seed now writes the
+**neutral role and nothing else**: `('admin', '', '', 'Admin')` — no rank, no
+given name — and `WA.personRankName` therefore reads exactly **«Admin»** on
+every surface until the holder sets his own name. **Existing installs are
+untouched**: the insert is guarded by `not exists`, so on any database that
+already carries an admin row it does nothing, and a name already stored (a
+«Squadron CO» among them) is left for its owner to correct through People →
+**Edit**. **The real name lives only in the database**, set on the running
+instance — never in a tracked file (the round-9 privacy rule).
 
 **AND THE REAL SQUADRON CO IS UNTOUCHED, BECAUSE HE EXISTS.** Three things in
 this application name that officer, and all three are **doctrine about an
@@ -4528,8 +4586,116 @@ titles identical, each measured by swapping the pre-round-17 expression back int
 
 - **None that block anything.** One thing is recorded rather than opened: in the
   **Wilderness** palette the `done` green and the `extra` mustard are nearer each
-  other than in the other seven. The row never leans on hue alone (badge word,
-  left edge, tooltip), so this is a note for a future palette pass, not a defect.
+  other than in the other seven. *(Round 17b amended this entry: the measured
+  protanopia margin is **ΔE76 3.4** and the row's only non-hue channel is the
+  **badge word** + tooltip — the 3 px left edge is a colour reinforcement, not a
+  positional one. It remains a note for a future palette pass, not a defect,
+  because the badge word carries the state on its own.)*
+
+---
+
+## 4s·b. Round 17b (2026-08-22) — THE R17 VERIFY SWEEP
+
+Four findings of the adversarial read of round 17. **Two of them are on the
+server**, so unlike round 17 this one carries a **schema gate**.
+
+| # | finding | where | what changed |
+|---|---|---|---|
+| **A** | the admin bootstrap seeded the surname **«Squadron CO»** — the exact claim the user overruled | `db/schema.sql`, the bootstrap insert | the seed writes the **role**: `('admin','','','Admin')`, no rank, no given name (§4s·4) |
+| **B** | the two server lock refusals still said *«the squadron CO … only the CO»* while the client twin said **admin** | `db/schema.sql`, `wa.carry_stamps` ×2 | both read **one** definition, `wa.admin_lock_msg()`, in the client's words (§4b) |
+| **2** | `go()` measured the landing against the **OPEN** burger panel and collapsed after — every pill landed the card a full collapse-delta low, on **all three** rails, since round 14 | `app/app.js`, `WA.navMount` → `go()` | **collapse first, then measure and scroll** (§ the round-14 nav note) |
+| **C** | the 3 px left edge was recorded as repeating the state *«in POSITION rather than in hue»* — measured false | `app/styles.css`, this spec | the record now says the second modality is the **badge word**; the edge is a colour reinforcement; the Wilderness protanopia margin is a stated limit (§4s·1) |
+
+**WHAT DID NOT MOVE.** No RPC signature, no column, no policy, no stored value
+(`entered_by = 'admin'`), no lock rule, no carry-stamps contract, no visual
+change of any kind — **C is a documentation correction with no CSS declaration
+touched**, and A affects **only databases that have no admin row yet**.
+
+**RESIDUAL, RECORDED AND NOT FIXED.** Two INTERNAL COMMENTS in `db/schema.sql`
+still use *«the Squadron CO»* as prose for the holder of the admin link —
+`wa.entry_count_by`'s note (*“a row a machine proposed is not a row the Squadron
+CO wrote”*, round 12) and the round-8 supremacy-inversion header (*“When the
+Squadron CO writes a line into a student's record…”*). They are comments: they
+execute nothing, no user ever reads them, and round 17's own rule leaves the
+code's private vocabulary alone (`is-co`, `WA.isCO`, `asCO`). They are left out
+of this round on purpose — **a gated schema diff should carry only what has to
+be run** — and named here so the next round can take them.
+
+**CACHE-BUSTER** — `?v=20260822c` on the two files this round touched,
+`styles.css` and `app.js`. `student.js`, `instructor.js` and `admin.js` keep
+`?v=20260822b`; `config.js` and `items-catalog.js` keep `?v=20260821b`.
+
+### DEPLOYMENT GATE — **SCHEMA FIRST, THIS TIME**
+
+`db/schema.sql` is touched. **The database moves before the code**: the user runs
+the new `schema.sql` on the cloud project, confirms it, and only then is the
+client deployed. The script is idempotent — re-running it on an instance that
+already has an admin row changes nothing about that row (the `not exists` guard),
+and no data is rewritten.
+
+### SELF-VERIFICATION — ROUND 17b (live, local stack, real RPCs)
+
+1. **FRESH BOOTSTRAP, on a throwaway database.** `schema.sql` run from empty into
+   `wa_boot_r17b`: exit **0**, `INSERT 0 1`, and the seeded row is
+   `role=admin · rank='' · first_name='' · last_name='Admin'` — one row, no
+   *«Squadron CO»* anywhere. **Run twice**: exit **0**, `INSERT 0 0`, **the token
+   survives**. `public.whoami()` on that fresh link returns
+   `{"rank":"","last_name":"Admin",…}`, and fed to the running client that row
+   prints **«Editing as Admin»** / **«Entering as Admin»** on the two on-behalf
+   banners and **«Signed by Admin ADMIN on behalf of …»** in the save dialog.
+2. **THE REFUSAL, BY REAL RPC.** On the throwaway database the admin wrote one
+   NFS entry on a student's behalf (stamped `entered_by:'admin'`); the owner's
+   own `public.save_student_record` was then refused **on both code paths** —
+   the altered entry (`carry_stamps` line 51) and the omitted section (line 63) —
+   each with *«WA: invalid payload — this entry was set by the squadron
+   administration and only the admin can change or remove it — it is shown on
+   your form locked, and your save must leave it exactly as it stands (nfs[0])»*;
+   saved back **unchanged** it is accepted and the stamp survives. Repeated
+   **over HTTP through PostgREST** against the local demo instance on a student
+   who really holds an admin-locked CEF row: the same sentence, on both paths,
+   and the stored record **byte-identical** after each (same `md5(data)`, same
+   `last_update`) — a refusal writes nothing. Read back in the browser through
+   the app's own `rpc()` on that student's own link, the message is the same, and
+   the note on the locked row above it reads *«This entry was set by the squadron
+   administration … only the admin can change or remove it.»* — **the two halves
+   of the sentence finally agree.**
+3. **THE LANDING, MEASURED.** Burger **open**, pill clicked, gap = card top −
+   nav bottom, against the 14 px the offset promises:
+
+   | rail | width | before (old order) | after |
+   |---|---|---|---|
+   | instructor · 25 students | 900 | **173.8** (delta 160) | **14.0** |
+   | instructor · 25 students | 375 | **358.3** (delta 344) | **14.3** |
+   | student · 13 sections | 900 | **37.5** (delta 24) | **13.5** |
+   | student · 13 sections | 375 | **183.5** (delta 170) | **13.9** |
+   | admin analysis · 10 cards | 375 | **150.0** (delta 136) | **14.0** |
+   | admin analysis · 10 cards | 900 | — (delta 24) | **14.3** |
+
+   Four or five pills per rail, top / middle / bottom of the document, ±0.5 px of
+   sub-pixel. The **only** row that does not reach 14 is the **last** card of the
+   instructor rail at 900 px (79.8): the document ends 66 px sooner than the gap
+   needs, and the old order gave 173.8 there too. **Above the break nothing
+   changed** — 1280 px still lands at 14.0 px under the top bar, because the new
+   line is guarded by `innerWidth <= WA.NAV_BREAK`.
+   *(Why it was wrong and not merely inelegant: the open panel is in the flow, so
+   it pushes the document down by its extra height and the two errors would have
+   cancelled — but Chrome's **scroll anchoring** compensates the collapse and
+   pulls the page back by exactly that delta, leaving the error on screen. Round
+   17's own item 10 checked only that the card «clears the strip's bottom edge»,
+   which 173.8 px does.)*
+4. **THE EDGE, MEASURED.** `.tone-done` and `.tone-extra` both compute
+   `3px 0px 0px 0px inset` on rows of identical box (`left 21 · width 206 ·
+   height 28`): **identical geometry, colour the only difference.** The badge
+   word is in the accessible name (`2Lt ⟨SURNAME⟩ 3` · `Cdt IV ⟨SURNAME⟩ not
+   yet`). Wilderness under protanopia (Viénot / Brettel–Mollon 1999): washes
+   **ΔE76 3.4**, tokens **ΔE2000 3.3**, painted edge **3.0** — against 13–14 in
+   Aegean, Nightfall and Tidal.
+5. **HYGIENE.** `schema.sql` run **twice against the local demo database**: exit
+   **0** both times, zero errors, and `people` (42) / `student_records` (3) /
+   `proposals` (9) **byte-identical fingerprints before and after**, tokens and
+   timestamps included. The demo admin row keeps the name it had. `node --check`
+   clean on all five scripts; **zero console messages** on every screen visited;
+   no horizontal scroll at 375 or 900. The throwaway database was dropped.
 
 ## 4. Screens
 
@@ -4681,7 +4847,9 @@ titles identical, each measured by swapping the pre-round-17 expression back int
 3. Admin link generated → **the admin** adds people → distributes links.
    The admin's own person row carries **his** rank + surname; every surface that
    names the identity reads it from there (§4s·4). On a fresh cloud instance the
-   row is renamed once, through the People tab's **Edit** button.
+   bootstrap seeds that row as the **role** — no rank, surname **«Admin»**
+   (round 17b) — and it is renamed once, through the People tab's **Edit**
+   button. That rename lives in the database and **only** there.
 
 ## 7. Open items
 
