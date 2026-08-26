@@ -94,8 +94,8 @@ WA.renderStudent = async function (view, me, opts) {
     flights: (e) => isDate(e.date) && !!txt(e.sortie) && !!txt(e.instructor) && !!e.track,
     fs: (e) => isDate(e.date) && !!txt(e.sortie) && !!txt(e.instructor) && !!e.track,
     /* ROUND 14 — EITHER date completes a lesson («τα μαθηματα να δεχομαστε και
-       μονο end date»); an ΕΕΘ is complete on its NUMBER, because the date and
-       the grade of a weekly exam are both allowed to arrive later. */
+       μονο end date»); a Weekly exam is complete on its NUMBER, because the
+       date and the grade of a weekly exam may both arrive later. */
     lessons: (e) => (isDate(e.date) || isDate(e.end_date)) && !!WA.groundGroup(e.group),
     exams: (e) => WA.examSeries(e)
       ? WA.examSeriesNo(e) !== null
@@ -246,7 +246,8 @@ WA.renderStudent = async function (view, me, opts) {
        no slot is not automatically a free-text extra any more: it may be the
        2nd or 3rd TRIAL of one of the eight (its exam is fixed — it is an
        attempt AT that exam, so the cell must print the exam and not offer a
-       picker), or an ΕΕΘ of the weekly series (whose identity is its number).
+       picker), or a Weekly exam of the weekly series (its identity is its
+       number).
        The operative trial is the one that holds the slot, so `alt` is exactly
        "a trial that is not the one the colour follows". */
     if (secId === "exams") {
@@ -261,12 +262,12 @@ WA.renderStudent = async function (view, me, opts) {
   }
   ensureSlots();
 
-  /* ── THE CO'S EDITS PREVAIL (round 8) ─────────────────────────────────────
-     An entry the squadron CO created or modified is LOCKED for its owner: it
-     is shown, marked, and every control inside it is disabled — the student
-     can neither change it nor remove it, and their save must carry it through
-     untouched (the server refuses otherwise, in the same words). The CO's own
-     form locks nothing: on that side every row is his to edit or delete.
+  /* ── THE ADMIN'S EDITS PREVAIL (round 8) ──────────────────────────────────
+     An entry the admin created or modified is LOCKED for its owner: it is
+     shown, marked, and every control inside it is disabled — the student can
+     neither change it nor remove it, and their save must carry it through
+     untouched (the server refuses otherwise, in the same words). The admin's
+     own form locks nothing: on that side every row is his to edit or delete.
      MIRROR: db/schema.sql → wa.carry_stamps. */
   const coLocked = (e) => !asCO && WA.isCO(e);
   /* the CO entries the record ARRIVED with, per section. Nothing in the UI can
@@ -961,8 +962,8 @@ WA.renderStudent = async function (view, me, opts) {
      colour is the answer, this is the word beside it (and paper, a colour-blind
      reader and a screen reader all get the same fact).
      ROUND 14b (verify finding 3) — THE WORD IS GENERIC, THE SENTENCE IS THE
-     ROW'S: an ΕΕΘ and a minted re-sit are grey for a reason that is not «the
-     printed flow chart prescribes it», and WA.rowStateTip says which. */
+     ROW'S: a Weekly exam and a minted re-sit are grey for a reason that is not
+     «the printed flow chart prescribes it», and WA.rowStateTip says which. */
   function stateChip(st, sec, e) {
     if (!st) return "";
     const d = WA.rowStateDef(st);
@@ -1099,8 +1100,8 @@ WA.renderStudent = async function (view, me, opts) {
   function groundActs(sec, i, e, m) {
     /* ROUND 14 — a SYLLABUS SLOT is cleared, never removed (it comes back the
        moment it is emptied, because the syllabus still prescribes it). A 2nd
-       trial and an ΕΕΘ are rows somebody ADDED — nothing re-creates them — so
-       they carry ✕ like any added row, or a trial minted by mistake would be
+       trial and a Weekly exam are rows somebody ADDED — nothing re-creates
+       them — so they carry ✕ like any added row, or a trial minted by mistake would be
        stuck in the table for ever. */
     const slot = m && m.slot && !m.alt && !m.series;
     const owed = m && m.state === "owed";
@@ -1117,7 +1118,7 @@ WA.renderStudent = async function (view, me, opts) {
      The grade is nullable for the same reason a flight's is: the result can
      take longer to arrive than the exam did to sit. */
   const EXAM_COLS = [
-    { t: "Exam", c: "c-ex", tip: "One of the eight ground-exam groups of the syllabus — or one of the ΕΕΘ weekly theory exams, which are numbered instead" },
+    { t: "Exam", c: "c-ex", tip: "One of the eight ground-exam groups of the syllabus — or one of the Weekly theory exams, which are numbered instead" },
     { t: "Date", c: "c-dt" },
     { t: "Grade", c: "c-gr", tip: "0-100, whole. Empty means the result is not in yet" },
     { t: "", c: "c-ac" },
@@ -1162,8 +1163,8 @@ WA.renderStudent = async function (view, me, opts) {
        counts for nothing in the exam's verdict, and a red mark on a displaced
        attempt would read as the exam's own answer (round 14's rule, kept) */
     const say = !meta.alt && bad;
-    /* the re-sit sentence is dropped on an ΕΕΘ exactly as the grade box drops
-       it (round 15): the weekly series is not re-sat, so a tip about which
+    /* the re-sit sentence is dropped on a Weekly exam exactly as the grade box
+       drops it (round 15): the weekly series is not re-sat, so a tip about which
        attempt counts is a sentence about something this row cannot have */
     const tip = (meta.alt
         ? WA.examTrialWord(t) + " of this exam. The colour of the exam above follows the attempt it was PASSED on — this row is kept and shown, and it counts for nothing in that verdict."
@@ -1245,7 +1246,7 @@ WA.renderStudent = async function (view, me, opts) {
        other surface asks (WA.examGraded). The sentence is byte-identical: the
        four clauses were the same four clauses. */
     const has = WA.examGraded(e);
-    /* an ΕΕΘ is a ground exam and is marked at the same 80 %, but it has no
+    /* a Weekly exam is a ground exam and is marked at the same 80 %, but it has no
        TRIALS — the series is not re-sat, the next week is the next number — so
        the re-sit clause is the one half of the sentence it must not wear */
     const ser = WA.examSeries(e);
@@ -1539,7 +1540,7 @@ WA.renderStudent = async function (view, me, opts) {
       blank: () => ({ date: "", end_date: "", group: "", course: "" }) },
 
     { id: "exams", table: true, cols: EXAM_COLS,
-      hint: "The eight ground-exam groups of the syllabus, one row each and all of them present from the first day: grey until the exam is sat, light green on the date alone, green once the result is in — whatever the result says, because the row asked for a mark and got one. Each of the eight may be sat up to THREE times — “+ 2nd trial” on the row adds the next attempt beneath it, and the row's colour follows the attempt it was PASSED on, exactly as a re-flown checkride does. A GROUND EXAM IS PASSED AT " + WA.passMin("exams") + " % (a flight at " + WA.passMin() + "): a 78 does not win the slot, and if no trial has reached " + WA.passMin("exams") + " the latest one stands for the exam. The ΕΕΘ weekly theory exams come after the eight: they are an open series, numbered ΕΕΘ 1, ΕΕΘ 2 …, and both their date and their grade may be left empty until they are known. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and go under Ground lessons: that is where the squadron's scheduler counts them.)",
+      hint: "The eight ground-exam groups of the syllabus, one row each and all of them present from the first day: grey until the exam is sat, light green on the date alone, green once the result is in — whatever the result says, because the row asked for a mark and got one. Each of the eight may be sat up to THREE times — “+ 2nd trial” on the row adds the next attempt beneath it, and the row's colour follows the attempt it was PASSED on, exactly as a re-flown checkride does. A GROUND EXAM IS PASSED AT " + WA.passMin("exams") + " % (a flight at " + WA.passMin() + "): a 78 does not win the slot, and if no trial has reached " + WA.passMin("exams") + " the latest one stands for the exam. The Weekly theory exams come after the eight: they are an open series, numbered Weekly 1, Weekly 2 …, and both their date and their grade may be left empty until they are known. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and go under Ground lessons: that is where the squadron's scheduler counts them.)",
       row: (e, i, m) => examRow(i, e, m),
       blank: () => ({ date: "", exam: "", grade: null }) },
   ];
@@ -1755,8 +1756,8 @@ WA.renderStudent = async function (view, me, opts) {
       return out;
     }
     /* ROUND 14 — the two sections where a missing `date` is not a missing
-       fact: a lesson recorded by its END alone is complete, and an ΕΕΘ is put
-       on the programme before it is sat. */
+       fact: a lesson recorded by its END alone is complete, and a Weekly exam
+       is put on the programme before it is sat. */
     const dateOptional =
       (sec === "lessons" && isDate(e.end_date)) ||
       (sec === "exams" && !!WA.examSeries(e));
@@ -1864,12 +1865,12 @@ WA.renderStudent = async function (view, me, opts) {
               /* the + Add lives inside each of the four tables — a single one
                  up here could not know which track it was adding to */
               ? `<span class="badge" title="Four tables, one per track — each has its own + Add">4 tables</span>`
-              /* ROUND 14 — THE EXAMS SECTION'S ADD BUTTON IS THE ΕΕΘ.
+              /* ROUND 14 — THE EXAMS SECTION'S ADD BUTTON IS THE WEEKLY EXAM.
                  The generic one is gone from here and it is not a loss: all
                  eight ground exams are seeded, the list is closed server-side,
                  and a re-sit is now a TRIAL minted on its own row. The only
                  exam row a student can legitimately need to CREATE is the next
-                 weekly ΕΕΘ, so that is the button, and it mints max + 1. */
+                 weekly exam, so that is the button, and it mints max + 1. */
               : sec.id === "exams"
                 ? `<button type="button" class="btn btn-sm btn-add" data-addseries="EETH"
                      title="${esc("Adds the next weekly theory exam — " +
@@ -2019,7 +2020,7 @@ WA.renderStudent = async function (view, me, opts) {
   function redraw(secId) {
     $("rows-" + secId).innerHTML = rowsHTML(secById(secId));
     $("cnt-" + secId).textContent = cntHTML(secId);
-    /* ROUND 14 — the ΕΕΘ button names the number it is about to mint, so it
+    /* ROUND 14 — the Weekly button names the number it is about to mint, so it
        has to be re-labelled the moment one is minted or removed */
     refreshSeriesBtn();
     applyLocks();
@@ -2576,7 +2577,7 @@ WA.renderStudent = async function (view, me, opts) {
         " added — the exam's colour follows the attempt it is PASSED on");
       return;
     }
-    /* ── ROUND 14 — MINT THE NEXT ΕΕΘ ──────────────────────────────────────
+    /* ── ROUND 14 — MINT THE NEXT WEEKLY EXAM ─────────────────────────────────
        «να μπορουμε να βαλουμε τα ΕΕΘ με ΕΕΘ 1, ΕΕΘ 2 κλπ» — an OPEN series, so
        the only question is the number and the only right answer is max + 1.
        Date and grade are deliberately left empty: a weekly exam is put on the
@@ -3180,7 +3181,7 @@ WA.renderStudent = async function (view, me, opts) {
        what round 14 said it was: this closure was a SECOND copy of 12b's rules
        and had already drifted from WA.rowLabel in four ways — no same-day `#2`
        (so a refusal about a re-fly named the row that was fine), no end-only
-       lesson date, an ΕΕΘ named "#7" because it carries no `exam`, and a raw
+       lesson date, a Weekly exam named "#7" because it carries no `exam`, and a raw
        solo slot key where the form prints a label. One namer, every surface. */
     const examNames = { trials: WA.examsWithTrials(
       (d.exams || []).filter((e) => !WA.slotOwed("exams", e))) };
@@ -3519,7 +3520,7 @@ WA.renderStudent = async function (view, me, opts) {
       }, e);
     });
     /* ROUND 14 — the two shapes, and the two closed rules the server enforces:
-       one row per (exam, trial), and ΕΕΘ numbers unique. Both are refused here
+       one row per (exam, trial), and Weekly numbers unique. Both are refused here
        first, in the same words, and named by the row the user can SEE. */
     const seenTrial = {}, seenSeries = {};
     d.exams.forEach((e, i) => {
@@ -3540,7 +3541,7 @@ WA.renderStudent = async function (view, me, opts) {
         seenSeries[k] = true;
         if (!intOK("exams", i, e, "grade", "the grade")) return;
         /* NEITHER the date NOR the grade is required — «date + grade nullable»:
-           an ΕΕΘ is put on the weekly programme before it is sat */
+           a Weekly exam is put on the weekly programme before it is sat */
         push("exams", {
           date: e.date || null,
           series: ser.id,
@@ -3714,7 +3715,7 @@ WA.renderStudent = async function (view, me, opts) {
                      /* round 12 — the log rows' own strings (12b: `mission`
                         replaced `verdict`, and `note` is gone from the four) */
                      "track", "kind", "mission", "group", "course", "exam",
-                     /* round 14 — the ΕΕΘ series id is a stored string too */
+                     /* round 14 — the Weekly series id is a stored string too */
                      "series",
                      "instructor_oid", "end_date"];
       for (const sec of SECTIONS) {

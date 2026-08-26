@@ -1000,6 +1000,19 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 /* the class-filter chip row of the Overview */
 .filterrow { margin: 0 0 10px; align-items: center; }
 .filterrow .chip .k { font-variant-numeric: tabular-nums; opacity: .75; }
+/* ROUND 18 — «Assessments open for: [class ▾]», inside the Instructor
+   submissions card. It WRITES a decision every instructor feels, so it is set
+   apart from the prose around it by a boxed strip rather than dropped in as one
+   more control: the reader must be able to see, without reading a word, that
+   this line is not the same kind of thing as the filter chips above the table.
+   Tokens only. */
+.scoperow {
+  display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap;
+  margin: 2px 0 8px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--accent-soft);
+}
+.scoperow .scopef { flex: 1 1 200px; max-width: 320px; }
+.scoperow > .k { align-self: center; }
 .card h3 .cnt {
   font-size: 11px; color: var(--muted); border: 1px solid var(--line);
   border-radius: 999px; padding: 1px 8px; font-weight: 400; margin-left: 6px;

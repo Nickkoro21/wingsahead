@@ -40,6 +40,59 @@ WA.renderInstructor = async function (view, me, opts) {
     return;
   }
 
+  /* ══════════════════════════════════════════════════════════════════════════
+     ROUND 18 — THIS FORM IS ABOUT ONE CLASS, AND IT SAYS WHICH.
+     ──────────────────────────────────────────────────────────────────────────
+     RULING (2026-08-26): «Τωρα τελειωνουν της 98Β, οποτε μονο για αυτους θελω
+     προτασεις … Θελουμε την σειρα την οποια τελειωνει, οχι ολες τις ενεργες.»
+
+     THE FILTER IS THE SERVER'S, NOT THIS FILE'S. `data.students` arrives
+     already narrowed (wa.instructor_dataset → wa.student_in_scope), which is
+     why the cards, the rail and the «N of M chosen» head all follow without a
+     single one of them being told about classes: they are all built from that
+     one list, and they were built from it before this round. A client-side
+     filter here would have been a fourth place to keep in step, and the one
+     place a stale tab could ignore.
+
+     WHAT THE CLIENT ADDS IS THE SENTENCE. An empty list means one of two very
+     different things — «no class is open for assessment» or «this class has
+     nobody in it» — and neither of them is «your link is broken», which is what
+     a blank page says. So the scope travels with the payload and the form
+     states it out loud, at the top, whether the list is empty or not: an
+     instructor must never have to GUESS which class he is answering about.
+
+     A SERVER THAT PREDATES THIS ROUND SAYS NOTHING, AND «NOTHING» IS NOT
+     «CLOSED». The key is ABSENT from an un-migrated instance's payload and NULL
+     on a migrated one with no class open — two different facts, and reading the
+     first as the second would print «assessments are closed» over a full list
+     of cards. The deployment gate moves the schema first, so this is a belt on
+     top of braces; it costs one comparison and it keeps the form from
+     contradicting itself if the two halves are ever deployed out of order.
+     ══════════════════════════════════════════════════════════════════════════ */
+  const scoped = data.assessment_class !== undefined;   /* a round-18 server? */
+  const scope = data.assessment_class || null;
+  const scopeLine = !scoped
+    ? ""
+    : scope
+      ? "Assessments are open for class " + scope + "."
+      : "Assessments are closed — no class is open for assessment at the moment.";
+  const SCOPE_TIP = scope
+    ? "The squadron assesses ONE class at a time — the one that is finishing. " +
+      scope + " is the class currently open, so these are its students and no others. " +
+      "Students of every other class are simply not asked about right now; nothing already " +
+      "submitted about them has been lost, and the admin can open a different class at any time."
+    : "No class is open for assessment at the moment. The admin opens one on the dashboard, " +
+      "and until then nothing can be recorded here. Everything already submitted is kept.";
+  /* the empty page, said in the terms of the reason it is empty */
+  const emptyLine = !scoped
+    ? "No active students yet."
+    : !scope
+      ? "There is nothing to assess yet. " + scopeLine +
+        " The squadron assesses one class at a time — the one that is finishing — and the admin has not opened one. " +
+        "Nothing you have submitted before has been lost: it is all still on the dashboard."
+      : "No active student is in class " + scope + " at the moment, so there is nothing to assess here. " +
+        "The class is open for assessment; it simply has nobody active in it.";
+
   /* per-student proposal working state */
   const P = {};
   for (const s of data.students) {
@@ -320,8 +373,9 @@ WA.renderInstructor = async function (view, me, opts) {
     <div class="${railed ? "pagelay lay-read" : "lay-none"}" id="ins-lay">
     ${railed
       ? WA.navHTML("ins-nav", navItems(), {
-          title: "Students",
-          aria: asCO ? "This instructor’s students" : "Your students" })
+          title: scope ? "Class " + scope : "Students",
+          aria: (asCO ? "This instructor’s students" : "Your students") +
+                (scope ? " — class " + scope : "") })
       : ""}
     <div class="wrap lay-main screen-only" id="ins-form">
       ${asCO ? `
@@ -338,8 +392,18 @@ WA.renderInstructor = async function (view, me, opts) {
         <div class="idhead">
           <span class="nm">${esc(WA.personName(who, true))}</span>
           <span class="meta">${esc([who.duty, who.leadership, who.status].filter(Boolean).join(" · "))}</span>
+          ${/* ROUND 18 — WHICH CLASS THIS FORM IS ABOUT, beside the name of the
+               person it belongs to, because those are the two facts that decide
+               what every card below means. */ ""}
+          ${scoped
+            ? `<span class="badge ${scope ? "badge-good" : "badge-warn"}"
+                title="${esc(SCOPE_TIP)}">${esc(scope
+                  ? "Class " + scope + " · " + data.students.length +
+                    " student" + (data.students.length === 1 ? "" : "s")
+                  : "Assessments closed")}</span>` : ""}
         </div>
-        <p class="hint" style="margin-top:6px">Utilization assessments for the Wing Commander brief.
+        <p class="hint" style="margin-top:6px">${scopeLine ? `<b>${esc(scopeLine)}</b> ` : ""}
+          Utilization assessments for the Wing Commander brief.
           For each student, ${asCO ? "record the one assessment this instructor makes" : "give the one assessment you make"}
           <b>about fighters</b>, on the five-level scale. The number beside each level is its weight
           &mdash; the brief averages them, so the scale says what it means without a single
@@ -348,7 +412,10 @@ WA.renderInstructor = async function (view, me, opts) {
       </section>
       ${data.students.length
         ? data.students.map(stuCard).join("")
-        : `<section class="card"><p class="hint">No active students yet.</p></section>`}
+        : `<section class="card">${scoped
+              ? `<h3>${esc(scope ? "Class " + scope + " is open — and empty"
+                                 : "Nothing to assess")}</h3>` : ""}
+             <p class="hint">${esc(emptyLine)}</p></section>`}
     </div>
     </div>
     ${/* ROUND 14 — ONE SAVE, and it is the student form's floating pattern:
@@ -441,10 +508,15 @@ WA.renderInstructor = async function (view, me, opts) {
           <span class="pr-brand-sub">364 MEA — utilization assessments (fighters)</span></div>
         <h2>${esc(WA.personName(who, true))}</h2>
         <div class="pr-meta">${esc([who.duty, who.leadership, who.status].filter(Boolean).join(" · "))}
+          ${/* ROUND 18 — the sheet says WHICH CLASS it covers. On paper this
+               matters more than on screen: a printed list of nine names with no
+               class on it is filed, found next term, and read as the whole
+               squadron. */ ""}
+          ${scoped ? "· " + esc(scope ? "class " + scope : "no class open for assessment") : ""}
           · ${data.students.length} student${data.students.length === 1 ? "" : "s"}
           · printed ${esc(fmtDT(new Date().toISOString()))}${asCO
             ? " · entered on their behalf by " + esc(WA.adminRankName()) + " (" + esc(WA.ADMIN_BODY) + ")" : ""}</div>
-        ${pages || `<p class="pr-none">No active students.</p>`}
+        ${pages || `<p class="pr-none">${esc(emptyLine)}</p>`}
       </div>`;
   }
   buildInsPrint();

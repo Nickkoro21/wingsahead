@@ -175,6 +175,43 @@ WA.renderAdmin = async function (view, me) {
   const CLASS_READONLY_TIP =
     "The classes are read-only here — they follow the members. A class appears because a student carries its name, and disappears when the last one stops; there is no list to maintain. Change a student's class under People & links.";
 
+  /* ══════════════════════════════════════════════════════════════════════════
+     ROUND 18 — «ASSESSMENTS OPEN FOR: [class ▾]»
+     ──────────────────────────────────────────────────────────────────────────
+     RULING (2026-08-26): «Τωρα τελειωνουν της 98Β, οποτε μονο για αυτους θελω
+     προτασεις. Στο μελλον θα επιλεγουμε για ποια ταξη θα στελνουμε προτασεις
+     αξιοποιησης με το WA στους εκπαιδευτες. Θελουμε την σειρα την οποια
+     τελειωνει, οχι ολες τις ενεργες.»
+
+     IT IS NOT A FILTER, AND THE TWO MUST NEVER BE CONFUSED. The chip row at the
+     top of this tab is a VIEWING filter: it narrows what the admin is looking
+     at, changes nothing for anybody else, and is remembered in this browser.
+     This control WRITES A DECISION to the server that reaches every instructor
+     in the squadron: it decides whose cards their form lists and whose
+     assessments the server will accept. One is what I see; the other is what
+     they may do.
+     SO IT DOES NOT SIT BESIDE THE CHIPS. It lives in the INSTRUCTOR
+     SUBMISSIONS card, which is the one place on this dashboard that is already
+     about the instructors' questionnaire — the card that answers «are they
+     done?», directly above the question it cannot answer without this: «done
+     with WHOM?». Its own card also gives the sentence room, and the tooltip
+     says out loud what it gates and what it does NOT.
+
+     WHAT IT NEVER DOES: hide or delete anything. Every assessment already
+     stored stays visible in this table, in the analysis cards, in the printed
+     brief and in all four exports, whatever class it belongs to. Moving the
+     scope to next term's class does not retire last term's work — it stops NEW
+     work being recorded for anybody outside the class that is finishing. */
+  const ASMT_NONE = "__none__";        /* the sentinel of «— none —» in the select */
+  const ASMT_TIP =
+    "WHO THE INSTRUCTORS ARE ASKED ABOUT — the class that is finishing, and only that one. " +
+    "It writes a decision to the server: the instructor form lists exactly this class's students, " +
+    "and the server REFUSES an assessment for anybody outside it, so a form left open on an old class cannot write. " +
+    "It is NOT the class filter above: that one only narrows what YOU see here. " +
+    "IT HIDES AND DELETES NOTHING — every assessment already stored stays visible in this table, in the analysis, " +
+    "in the printed brief and in every export, whatever class it belongs to. Choosing “— none —” closes the " +
+    "assessments entirely: instructors see an empty form that says so, and nothing already submitted is touched.";
+
   /* the filename suffix of a filtered export: "-98B", "-no-class", "" */
   function classSuffix() {
     const c = activeClass();
@@ -461,12 +498,68 @@ WA.renderAdmin = async function (view, me) {
           <p class="hint">${noRecord.length ? noRecord.join(", ")
             : (students.length ? "Everyone has submitted ✓" : "—")}</p></div>
         <div class="card"><h3>Instructor submissions</h3>
+          ${assessmentScopeHTML()}
           <p class="hint" style="line-height:2">${insRows || "No instructors yet."}</p>
           ${cls ? `<p class="hint"><b>Not filtered.</b> Each badge counts the assessments that
             instructor has submitted across <b>all ${all.length}</b> students — the payload carries
             no per-class breakdown, so this card cannot honestly be narrowed to
             ${esc(classLabel(cls))}.</p>` : ""}</div>
       </div>`;
+  }
+
+  /* ── THE SCOPE CONTROL (round 18) ─────────────────────────────────────────
+     THE OPTIONS ARE THE CLASSES THAT EXIST, plus «— none —». Same source as
+     the filter chips (classList, derived from the active students on every
+     draw), minus the «No class recorded» sentinel: the scope is a class NAME,
+     and there is no name to match on a student who carries none.
+     A STALE VALUE IS SHOWN AND MARKED, never silently swallowed. If the stored
+     class has lost its last active student the select still offers it, said out
+     loud — because reverting it to «all» would OPEN the assessments for the
+     whole squadron behind the admin's back, which is the one direction this
+     control must never move on its own. A stale scope stays CLOSED, and the
+     line under the select says why the form is empty. */
+  function assessmentScopeHTML() {
+    /* A SERVER THAT PREDATES THIS ROUND SAYS NOTHING, AND «NOTHING» IS NOT
+       «CLOSED». The key is ABSENT from an un-migrated instance's payload and
+       NULL on a migrated one with no class open. Read as the same thing, this
+       card would announce «the assessments are closed» about a server that is
+       in fact still asking every instructor about every student — a control
+       lying about the one thing it exists to state. The gate deploys the schema
+       first; this is what the dashboard says if it ever runs out of order. */
+    if (!A.data || A.data.assessment_class === undefined) {
+      return `<p class="hint"><b>This database has not been migrated yet.</b>
+        Assessments are still open for <b>every active student</b>, as they were
+        before this round. Run <code>db/schema.sql</code> on it and this card
+        gains the control that chooses ONE class.</p>`;
+    }
+    const cur = A.data.assessment_class || "";
+    const named = classList().filter((c) => c.id !== NO_CLASS);
+    const stale = cur && !named.some((c) => c.id === cur);
+    const n = named.reduce((a, c) => a + (c.id === cur ? c.n : 0), 0);
+    const opts = [`<option value="${esc(ASMT_NONE)}"${cur ? "" : " selected"}>— none —</option>`]
+      .concat(named.map((c) => `<option value="${esc(c.id)}"${c.id === cur ? " selected" : ""}
+                >${esc(c.label)} (${c.n})</option>`))
+      .concat(stale ? [`<option value="${esc(cur)}" selected>${esc(cur)} — nobody active</option>`] : [])
+      .join("");
+    return `
+      <div class="scoperow">
+        <label class="f scopef" title="${esc(ASMT_TIP)}">
+          <span>Assessments open for</span>
+          <select id="adm-asmt">${opts}</select>
+        </label>
+        <span class="k" title="${esc(ASMT_TIP)}">&#9432;</span>
+      </div>
+      <p class="hint">${cur
+        ? (stale
+            ? `<b>Class ${esc(cur)} is open, and no active student is in it.</b> Every instructor
+               form is empty and says so. Pick a class that has students, or “— none —”.`
+            : `Every instructor is being asked about <b>class ${esc(cur)}</b> and about nobody else
+               &mdash; ${n} student${n === 1 ? "" : "s"}. The server refuses an assessment for any
+               other class, so a form left open on last term's class cannot write into it.`)
+        : `<b>The assessments are closed.</b> No class is open, so every instructor form is empty
+           and says so, and no assessment can be recorded by anybody.`}
+        Nothing already submitted is affected: assessments of every class stay visible in the table
+        above, in the analysis, in the printed brief and in every export.</p>`;
   }
 
   /* ════════ STUDENT ANALYSIS ════════ */
@@ -921,8 +1014,8 @@ WA.renderAdmin = async function (view, me) {
      one question the CO actually asks — what is this student still owed — is
      answered without opening the student's own link. */
   /* ROUND 14b (verify finding 3) — the WORD is the four-state vocabulary, the
-     SENTENCE is the row's: an ΕΕΘ and a minted re-sit are grey because they are
-     on the programme, not because the flow chart prescribes them (they are not
+     SENTENCE is the row's: a Weekly exam and a minted re-sit are grey because
+     they are on the programme, not because the flow chart prescribes them (they are not
      in it), and unlike a flow-chart slot they ARE stored. WA.rowStateTip. */
   const stateCell = (st, sec, e) => {
     const d = WA.rowStateDef(st);
@@ -1036,8 +1129,8 @@ WA.renderAdmin = async function (view, me) {
       }
       const x = WA.exam(e.exam);
       const has = WA.examGraded(e);
-      /* ROUND 14 — the row says WHICH ATTEMPT it is, and an ΕΕΘ says its
-         number: the CO reading two IN190 lines has to be able to tell the
+      /* ROUND 14 — the row says WHICH ATTEMPT it is, and a Weekly exam says
+         its number: the CO reading two IN190 lines has to be able to tell the
          re-sit from the first sitting, and a series row names no exam at all */
       const ser = WA.examSeries(e);
       const tn = ser ? 1 : WA.examTrial(e);
@@ -1714,8 +1807,8 @@ WA.renderAdmin = async function (view, me) {
       const examRows = WA.slotRows("exams", s.record.exams).filter((r) => r.e).map((r) => {
         const e = r.e;
         const has = WA.examGraded(e);
-        /* ROUND 14 ON PAPER — the trial and the ΕΕΘ number are part of the row's
-           NAME (WA.examRowLabel), because monochrome print has no badge colour
+        /* ROUND 14 ON PAPER — the trial and the Weekly number are part of the
+           row's NAME (WA.examRowLabel), because monochrome print has no badge colour
            to tell a re-sit from the first sitting with */
         const ser = WA.examSeries(e);
         return `<tr><td>${esc(WA.examRowLabel(e, !!exNamed[String(e.exam || "").trim()]))}${WA.coTag(e)}${
@@ -2251,8 +2344,8 @@ WA.renderAdmin = async function (view, me) {
         ].filter(Boolean).join(" — "),
         e.course, "", "", null, undefined, "", undefined, stateOf("lessons", e, ix)));
       /* ROUND 14 — a spreadsheet reading two IN190 rows must be able to tell
-         the re-sit from the first sitting, and an ΕΕΘ names no exam at all. The
-         Flight-code column therefore carries WA.examRowLabel — the same name
+         the re-sit from the first sitting, and a Weekly exam names no exam at
+         all. The Flight-code column therefore carries WA.examRowLabel — the same name
          every other surface prints — and the "Counts" column says which attempt
          the verdict is read from, exactly as it does for a re-flown checkride. */
       {
@@ -2260,8 +2353,8 @@ WA.renderAdmin = async function (view, me) {
            bare percentages is read against whatever pass mark the reader
            remembers, and the ground exams' is 80 while every flight in the
            same file is judged at 60. So a graded exam row says which it is, in
-           Detail, for BOTH shapes: an ΕΕΘ is a ground exam too and is marked
-           the same way — it simply has no trials for the Counts column to
+           Detail, for BOTH shapes: a Weekly exam is a ground exam too and is
+           marked the same way — it simply has no trials for the Counts column to
            speak about. */
         const exCL = WA.claims("exams", r.exams || []);
         /* ROUND 17 (R16 doc-nit, item 23) — «is there a mark at all?» is asked
@@ -2269,7 +2362,13 @@ WA.renderAdmin = async function (view, me) {
            of its four-clause test on the admin side; the export's words are
            byte-identical, because the test is. */
         (r.exams || []).forEach((e, ix) => add(s, "exams", e,
-          [WA.examSeries(e) ? WA.examSeries(e).label + " — weekly theory exam" : WA.examLabel(e.exam),
+          /* ROUND 18 — the series' own Detail cell no longer repeats its name.
+             It read «ΕΕΘ — weekly theory exam» while the Flight-code column
+             beside it said «ΕΕΘ 3»; renamed to Weekly that becomes «Weekly —
+             weekly theory exam», a cell that says the same word twice and the
+             number not at all. The name is the Flight-code column's job; this
+             one says WHAT KIND OF ROW it is, which is what the eight get here. */
+          [WA.examSeries(e) ? "weekly theory exam" : WA.examLabel(e.exam),
            WA.examTrial(e) > 1 && !WA.examSeries(e) ? WA.examTrialWord(WA.examTrial(e)) : "",
            (WA.exam(e.exam) || {}).cond ? "foreign SPs only" : "",
            WA.examGraded(e) ? (WA.examPassed(e)
@@ -2449,8 +2548,34 @@ WA.renderAdmin = async function (view, me) {
   });
 
   /* the evaluation selector of the per-evaluation comparison */
-  adm.addEventListener("change", (ev) => {
+  adm.addEventListener("change", async (ev) => {
     if (ev.target.id === "evalsel") { A.evalSel = ev.target.value; render(); }
+    /* ── THE SCOPE, WRITTEN (round 18) ────────────────────────────────────
+       The one control on this dashboard whose effect is felt on somebody
+       else's screen, so it reports what it did in the words the instructors
+       will read. The select is disabled while the RPC is in flight (a second
+       change mid-write would race it), and a REFUSAL puts the select back to
+       the stored value rather than leaving it showing a choice the server did
+       not take — the reload does that for us, from the server's own answer. */
+    if (ev.target.id === "adm-asmt") {
+      const sel = ev.target;
+      const v = sel.value === ASMT_NONE ? null : sel.value;
+      sel.disabled = true;
+      try {
+        const res = await rpc("admin_set_assessment_class",
+                              { p_token: WA.token, p_class: v });
+        await load(false);
+        toast(res.assessment_class
+          ? "Assessments are open for class " + res.assessment_class + " — " +
+            res.students + " student" + (res.students === 1 ? "" : "s") +
+            ". Every instructor form now lists exactly them."
+          : "Assessments are closed — no class is open. Nothing already submitted is affected.");
+      } catch (e) {
+        toast("Could not change the scope: " + e.message, true);
+        await load(false);           /* redraw from the value the server still holds */
+      }
+      return;
+    }
     /* ROUND 9 — "Other…" reveals its free-text box in place (the modal is
        never re-rendered, so what is typed survives until Save) */
     const os = ev.target.closest && ev.target.closest("[data-other]");

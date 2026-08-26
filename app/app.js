@@ -90,7 +90,7 @@ const WA = { me: null, token: null };
    db/schema.sql — stays where it was written.
    ══════════════════════════════════════════════════════════════════════════ */
 WA.GRADE_PASS_MIN = 60;
-/* the ground exams — the 8 fixed groups AND the ΕΕΘ weekly series, which are
+/* the ground exams — the 8 fixed groups AND the Weekly series, which are
    ground exams too and are marked the same way */
 WA.EXAM_PASS_MIN = 80;
 /* WHICH NUMBER JUDGES THIS SECTION. One function, so a chip, a tooltip, a CSV
@@ -723,7 +723,7 @@ WA.SECTIONS_META = {
   flights:      { label: "Flights", tip: "The flight log — every sortie of the printed flow chart is a row here FROM THE FIRST DAY (round 13): grey while it is owed, light green once something is written in it, green when the row is complete and the mission was completed, mustard when it is beyond the syllabus's one planned pass (a repeat, an FCF, a CEF, a same-day re-fly). The grade may be left empty: a debrief sometimes takes a while, and the row says «awaiting debrief» rather than pretending the flight did not happen. Split into the four tracks; the eight checkrides are recorded in the Evaluations section, where the syllabus order applies to them. An untouched row is STORED NOWHERE — the record keeps only what actually happened." },
   fs:           { label: "F/S", tip: "The same log for the SIMULATOR — its own flow-chart sorties pre-seeded in the same four tracks, in the same four colours. Sim hours and flight hours are counted separately by the squadron, which is why they are two logs and not one." },
   lessons:      { label: "Ground lessons", tip: "The ground academics — the twelve theory groups of the programme and all 47 courses inside them, present as rows from the first day and grouped by their theory group. A lesson is a BLOCK, so it can carry an end date. A lesson is attended, not scored, so there is no grade here and no instructor. An untouched course is stored nowhere; a course the catalogue does not know goes in as an extra." },
-  exams:        { label: "Ground exams", tip: "The eight ground-exam groups of the syllabus, present as rows from the first day: grey until the exam is sat, light green on the date alone, green once the result is in — whatever the result says, because the row asked for a mark and got one. A GROUND EXAM IS PASSED AT " + WA.passMin("exams") + " % — a flight is passed at " + WA.passMin() + ", and these are two different examinations with two right numbers (ruling of 2026-08-21). The " + WA.passMin("exams") + " % decides which TRIAL stands for the exam, never whether the row is complete. The ΕΕΘ weekly theory exams are ground exams too and are marked the same way. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and belong under Ground lessons: that is where the squadron's scheduler counts them.)" },
+  exams:        { label: "Ground exams", tip: "The eight ground-exam groups of the syllabus, present as rows from the first day: grey until the exam is sat, light green on the date alone, green once the result is in — whatever the result says, because the row asked for a mark and got one. A GROUND EXAM IS PASSED AT " + WA.passMin("exams") + " % — a flight is passed at " + WA.passMin() + ", and these are two different examinations with two right numbers (ruling of 2026-08-21). The " + WA.passMin("exams") + " % decides which TRIAL stands for the exam, never whether the row is complete. The Weekly theory exams are ground exams too and are marked the same way. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and belong under Ground lessons: that is where the squadron's scheduler counts them.)" },
 };
 WA.secLabel = function (k) { return (WA.SECTIONS_META[k] || {}).label || k; };
 WA.secTip = function (k) { return (WA.SECTIONS_META[k] || {}).tip || ""; };
@@ -1101,7 +1101,7 @@ WA.ENTRY_KEYS = {
   lessons:      ["date", "end_date", "group", "course", "legacy", "entered_by"],
   /* ROUND 14 — TRIAL and SERIES. `trial` is 2 or 3 and nothing else: the first
      trial is written as no key at all, so every record from before this round
-     is already correct. `series`/`series_no` are the ΕΕΘ weekly exams, which
+     is already correct. `series`/`series_no` are the Weekly theory exams, which
      name no `exam` — the two shapes are exclusive and the server refuses a row
      that tries to be both. */
   exams:        ["date", "exam", "trial", "series", "series_no", "grade",
@@ -1191,8 +1191,8 @@ WA.rowStateDef = function (id) {
    The word is the same on every row — one vocabulary, and the four colours mean
    one thing — but the generic OWED sentence ends «It is a row of the printed
    flow chart, not something anybody reported», which is true of the 181 seeded
-   slots and FALSE of the two shapes round 14 added. An ΕΕΘ's own cell says the
-   syllabus does not enumerate them; a minted 2nd trial is a re-sit somebody
+   slots and FALSE of the two shapes round 14 added. A Weekly exam's own cell
+   says the syllabus does not enumerate them; a minted 2nd trial is a re-sit somebody
    ORDERED. Both wear the grey, correctly — «on the programme, nothing recorded
    yet» is exactly what they are — and both carried a chip that contradicted the
    tooltip two columns away, and got the one fact backwards that decides whether
@@ -1207,7 +1207,7 @@ WA.rowStateTip = function (sec, e, st) {
     ? "a planned weekly theory exam (" + WA.examRowLabel(e) + ")"
     : "a planned " + WA.examTrialWord(WA.examTrial(e)) + " of " + String(e.exam);
   const tail = ser
-    ? " The ΕΕΘ are not rows of the printed flow chart — the syllabus does not enumerate them, they are numbered in the order they are sat — and unlike a flow-chart slot this row IS stored: nothing but the record remembers that it was put on the programme."
+    ? " The Weekly exams are not rows of the printed flow chart — the syllabus does not enumerate them, they are numbered in the order they are sat — and unlike a flow-chart slot this row IS stored: nothing but the record remembers that it was put on the programme."
     : " A re-sit is ORDERED, not prescribed, so this is not a row of the printed flow chart — and unlike a flow-chart slot it IS stored: nothing but the record remembers that the squadron ordered it.";
   if (st === "owed") {
     return "Owed — " + what + ", on the programme and nothing recorded against it yet." + tail;
@@ -1285,8 +1285,9 @@ WA.slotKey = function (sec, e) {
     return WA.slotIndex(sec)[k] ? k : null;
   }
   if (sec === "exams") {
-    /* ROUND 14 — an ΕΕΘ names no exam and occupies no slot: the series is not
-       in the syllabus's enumerated eight, so there is nothing for it to claim.
+    /* ROUND 14 — a Weekly exam names no exam and occupies no slot: the
+       series is not in the syllabus's enumerated eight, so there is nothing
+       for it to claim.
        A TRIAL, on the other hand, keeps its exam's key on purpose — all three
        trials of IN190 compete for the IN190 slot and WA.claims hands it to the
        operative one (the pass-attempt rule), which is what makes the slot's
@@ -1302,8 +1303,8 @@ WA.slotKey = function (sec, e) {
    exams section behave.
 
    WAS IT MINTED?  — did somebody CREATE this row with an affordance: the next
-     ΕΕΘ, or the 2nd / 3rd trial of an exam. A minted row is a REPORT even when
-     it is empty («a re-sit has been ordered»), so it is stored, it is never
+     a Weekly exam, or the 2nd / 3rd trial of an exam. A minted row is a REPORT
+     even when it is empty («a re-sit has been ordered»), so it is stored, it is never
      mistaken for a seeded placeholder, and it never silently disappears on the
      next save. A blank trial-1 row, by contrast, IS the seeded placeholder.
      → WA.slotUntouched, WA.claims
@@ -1389,8 +1390,9 @@ WA.slotUntouched = function (sec, e) {
   if (!e || typeof e !== "object") return false;
   if (e.legacy || e.entered_by) return false;
   /* ROUND 14 — AND A PLANNED ROW IS A REPORT TOO. A minted 2nd trial and an
-     ΕΕΘ are rows somebody CREATED: they say «a re-sit has been ordered» and «a
-     weekly exam is on the programme», which is information no placeholder
+     Weekly exams are rows somebody CREATED: they say «a re-sit has been
+     ordered» and «a weekly exam is on the programme», which is information no
+     placeholder
      carries and which nothing but the record remembers. Treating them as
      placeholders would drop them from the payload on the next save and the
      student's click would quietly undo itself. Same disqualifier, same
@@ -1474,9 +1476,9 @@ WA.rowDate = function (sec, e) {
 /* THE ONE VERDICT every colour, count, legend and CSV cell reads */
 WA.rowState = function (sec, e, claimed) {
   if (WA.slotOwed(sec, e)) return "owed";
-  /* ROUND 14 — a numbered trial and an ΕΕΘ claim no slot and are not extras:
-     they are planned rows, and they are read exactly like a claimed one.
-     A PLANNED ROW WITH NOTHING IN IT IS OWED, not started: minting ΕΕΘ 4 or a
+  /* ROUND 14 — a numbered trial and a Weekly exam claim no slot and are not
+     extras: they are planned rows, and they are read exactly like a claimed one.
+     A PLANNED ROW WITH NOTHING IN IT IS OWED, not started: minting Weekly 4 or a
      2nd trial of IN190 puts it on the programme, and "in the programme,
      nothing recorded yet" is the exact sentence the grey wash already carries.
      Neither is a seeded placeholder though — both are STORED, because nothing
@@ -1507,8 +1509,8 @@ WA.stateCounts = function (sec, list, track) {
     if (track != null && (e.track || "") !== track) continue;
     const st = WA.rowState(sec, e, c.claimed[i]);
     /* a SEEDED PLACEHOLDER is counted from the catalogue below, never here —
-       but a stored row that reads `owed` (an ΕΕΘ nobody has sat yet) is a real
-       row and does count, which is why the test is the placeholder test and
+       but a stored row that reads `owed` (a Weekly exam nobody has sat yet) is
+       a real row and does count, which is why the test is the placeholder test and
        not the word */
     if (WA.slotOwed(sec, e)) continue;
     if (c.claimed[i]) { claimedN++; if (st === "done") out.slotsDone++; }
@@ -1524,7 +1526,7 @@ WA.stateCounts = function (sec, list, track) {
   }
   out.hours = Math.round(out.hours * 10) / 10;
   /* += , not = : the catalogue's untouched slots PLUS the stored rows that are
-     themselves owed (an ΕΕΘ on the programme and not yet sat) */
+     themselves owed (a Weekly exam on the programme and not yet sat) */
   out.owed += Math.max(0, WA.slotCount(sec, track == null ? null : track) - claimedN);
   return out;
 };
@@ -1551,7 +1553,7 @@ WA.slotRows = function (sec, list, track) {
     /* ROUND 14 — the planned rows that hold no slot. A NON-OPERATIVE TRIAL is
        filed under its own exam, so it renders directly beneath the slot it is
        an attempt at (the evaluations section's "another attempt at C4590",
-       one section over); an ΕΕΘ goes to its own list, after the eight. */
+       one section over); a Weekly exam goes to its own list, after the eight. */
     if (WA.rowPlanned(sec, e)) {
       if (WA.examSeries(e)) { series.push({ e, i }); return; }
       const k = WA.normLine(e.exam);
@@ -1560,8 +1562,8 @@ WA.slotRows = function (sec, list, track) {
     }
     extras.push({ e, i });
   });
-  /* the series in NUMBER order — the number is the name, so ΕΕΘ 2 must never
-     print above ΕΕΘ 1 because it was typed first */
+  /* the series in NUMBER order — the number is the name, so Weekly 2 must never
+     print above Weekly 1 because it was typed first */
   series.sort((a, b) => {
     const na = WA.examSeriesNo(a.e), nb = WA.examSeriesNo(b.e);
     if (na === null || nb === null) return na === nb ? a.i - b.i : (na === null ? 1 : -1);
@@ -1591,7 +1593,7 @@ WA.slotRows = function (sec, list, track) {
                  state: WA.rowState(sec, x.e, false) });
     }
   }
-  /* THE ΕΕΘ SERIES, after the eight fixed slots — «rendered after the 8 fixed
+  /* THE WEEKLY SERIES, after the eight fixed slots — «rendered after the 8 fixed
      slots» — and before the extras, which are the rows nobody planned at all */
   for (const x of series) {
     out.push({ def: null, series: WA.examSeries(x.e), no: WA.examSeriesNo(x.e),
@@ -1836,15 +1838,15 @@ WA.migrateRecord = function (rec) {
     const ser = WA.examSeriesDef(String(o.series || "").trim());
     if (o.series && !ser) { o.series = null; o.legacy = true; }
     if (ser) {
-      /* an ΕΕΘ names no exam and takes no trial number; the number is its name
-         and a row without one cannot be told from any other ΕΕΘ */
+      /* a Weekly exam names no exam and takes no trial number; the number is
+         its name and a row without one cannot be told from any other */
       if (o.exam) { o.exam = null; o.legacy = true; }
       delete o.trial;
       /* the key is DROPPED and not nulled, so this mirror and wa.migrate_record
          produce byte-identical rows (the house rule: change one, change both) */
       if (WA.examSeriesNo(o) === null) { delete o.series_no; o.legacy = true; }
       else o.series_no = WA.examSeriesNo(o);
-      /* date AND grade are nullable here — a minted ΕΕΘ is a planned row */
+      /* date AND grade are nullable — a minted Weekly exam is a planned row */
       return o;
     }
     if (o.exam && !WA.exam(o.exam)) { o.exam = null; o.legacy = true; }
@@ -2410,7 +2412,7 @@ WA.examLabel = function (id) {
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
-   ROUND 14 — TRIALS, AND THE ΕΕΘ SERIES.
+   ROUND 14 — TRIALS, AND THE WEEKLY SERIES.
    ──────────────────────────────────────────────────────────────────────────
    «στα ground exam να εχουμε 2nd trial, 3rd και να μπορουμε να βαλουμε τα ΕΕΘ
     με ΕΕΘ 1, ΕΕΘ 2 κλπ»
@@ -2424,8 +2426,8 @@ WA.examLabel = function (id) {
       A row with no `trial` key IS the first trial; nothing in the record has
       to be rewritten for that to be true, which is why 1 is written as null.
 
-   2. AN ΕΕΘ is a WEEKLY THEORY EXAM — an OPEN series the syllabus does not
-      enumerate. It has no place among the eight and no fixed count, so it
+   2. A WEEKLY EXAM is a WEEKLY THEORY EXAM — an OPEN series the syllabus does
+      not enumerate. It has no place among the eight and no fixed count, so it
       carries `series` ('EETH') and `series_no` (1, 2, 3 …) and no `exam` at
       all. The next one is max + 1: they are numbered, not dated, and the
       number is the name.
@@ -2442,15 +2444,39 @@ WA.examLabel = function (id) {
 
    NEITHER IS MUSTARD. The `extra` wash means «beyond the syllabus's one
    planned pass», and both of these are planned: a 2nd trial is ordered by the
-   squadron, an ΕΕΘ is on the weekly programme. They take the ordinary
+   squadron, a weekly exam is on the weekly programme. They take the ordinary
    done / started verdict of any written row (WA.rowPlanned).
    MIRROR: db/schema.sql → wa.exam_series() and the exams branch of
    wa.validate_record. Change one, change the other.
+
+   ══════════════════════════════════════════════════════════════════════════
+   ROUND 18 — THE SERIES IS CALLED «WEEKLY».
+   ──────────────────────────────────────────────────────────────────────────
+   COMMAND RULING (2026-08-26), verbatim:
+     «τα ερωτηματολογια ΕΕΘ 1,2,3 να τα βαλουμε ως Weekly 1,2,3»
+     — «the ΕΕΘ questionnaires 1,2,3, let us put them as Weekly 1,2,3».
+   OLD NAME → NEW NAME: **ΕΕΘ n → Weekly n**, on every surface a human reads —
+   the row label, the mint button, the badges and tips, the confirmation
+   dialog, the printed brief, the CSV cells, the admin table and the server's
+   own refusals.
+
+   THE STORED KEY IS UNTOUCHED AND THAT IS THE POINT. `id` below is still the
+   literal 'EETH', which is what `series` holds in every record already
+   written, what the CHECK on the server accepts and what the payload sends.
+   NOT ONE ROW IS MIGRATED: a record stored in round 14 renders «Weekly 3» the
+   instant this file loads, because `label` was always a LOOKUP and the number
+   was always the name. Renaming the key would have meant rewriting every
+   stored record to change a caption — and would have broken any instance still
+   serving the previous client. The word is data; the key is the contract.
+   MIRROR: db/schema.sql → wa.series_label().
    ══════════════════════════════════════════════════════════════════════════ */
 WA.EXAM_TRIALS = 3;
 WA.EXAM_SERIES = [
-  { id: "EETH", label: "ΕΕΘ", en: "EETH",
-    tip: "ΕΕΘ — the weekly theory exams. An OPEN series the syllabus does not enumerate: they are numbered ΕΕΘ 1, ΕΕΘ 2 … in the order they are sat, and both the date and the grade may be left empty until they are known. They are not one of the eight ground exams and they are not extras — they are planned. They ARE ground exams, so they are marked at the ground-exam pass mark: " + WA.passMin("exams") + " %, the same number as the eight (round 15)." },
+  /* `id` is the STORED key and never changes. `label` is what everybody
+     reads. `en` is the ASCII spelling of the stored key, kept for the file
+     names and log lines that must stay ASCII. */
+  { id: "EETH", label: "Weekly", en: "EETH",
+    tip: "Weekly — the weekly theory exams (the squadron's ΕΕΘ, renamed on 2026-08-26). An OPEN series the syllabus does not enumerate: they are numbered Weekly 1, Weekly 2 … in the order they are sat, and both the date and the grade may be left empty until they are known. They are not one of the eight ground exams and they are not extras — they are planned. They ARE ground exams, so they are marked at the ground-exam pass mark: " + WA.passMin("exams") + " %, the same number as the eight (round 15)." },
 ];
 WA.examSeriesDef = function (id) {
   return WA.EXAM_SERIES.find((s) => s.id === id) || null;
@@ -2474,7 +2500,7 @@ WA.EXAM_TRIAL_WORDS = ["", "1st trial", "2nd trial", "3rd trial"];
 WA.examTrialWord = function (n) {
   return WA.EXAM_TRIAL_WORDS[n] || (n + "th trial");
 };
-/* what this row IS CALLED, on every surface: "IN190 · 2nd trial", "ΕΕΘ 3"
+/* what this row IS CALLED, on every surface: "IN190 · 2nd trial", "Weekly 3"
    ROUND 14b (verify finding 5a) — AND WHEN THE FIRST SITTING HAS TO SAY SO.
    The trial is named from the 2nd up, which is right on a row standing alone:
    «IN190» IS the first sitting, and «IN190 · 1st trial» would be noise on the
@@ -2497,8 +2523,8 @@ WA.examRowLabel = function (e, named) {
 /* WHICH EXAMS ARE SAT MORE THAN ONCE — the set the naming reads as `trials`.
    COUNTED WITHIN EACH LIST, never across them: the dialog hands in the record
    BEFORE and the record AFTER, and one unchanged sitting appearing in both is
-   one sitting, not two. A series row is never counted — the ΕΕΘ are numbered
-   and no two of them share a name. */
+   one sitting, not two. A series row is never counted — the Weekly exams are
+   numbered and no two of them share a name. */
 WA.examsWithTrials = function (...lists) {
   const out = {};
   for (const list of lists) {
@@ -2514,7 +2540,7 @@ WA.examsWithTrials = function (...lists) {
   return out;
 };
 /* the next free number of a series — «next = max + 1», counted over what is
-   actually there, so a deleted ΕΕΘ 2 does not make the next one a duplicate */
+   actually there, so a deleted Weekly 2 does not make the next one a duplicate */
 WA.examNextSeriesNo = function (list, seriesId) {
   let max = 0;
   for (const e of (Array.isArray(list) ? list : [])) {
@@ -2581,7 +2607,7 @@ WA.examOperativeIx = function (list, idxs) {
 };
 /* DID THIS EXAM ROW PASS? — the row-level question, at the ground-exam mark.
    Both shapes are ground exams and both are marked the same way: one of the
-   eight, or an ΕΕΘ of the weekly series. */
+   eight, or a Weekly exam of the weekly series. */
 WA.examPassed = function (e) {
   return !!e && WA.gradePassed(e.grade, "exams");
 };
@@ -2617,7 +2643,7 @@ WA.examGraded = function (e) {
    exam — §4o·5's «what counts as beside», read from the same counter that
    already names the trial in the save dialog — and a single sitting stays
    unbadged as to trial, which is what keeps the word off those 199 rows.
-   A SERIES ROW NEVER WEARS A TRIAL WORD: the ΕΕΘ are numbered, not re-sat.
+   A SERIES ROW NEVER WEARS A TRIAL WORD: the Weekly exams are numbered, not re-sat.
 
    ROUND 17 (R16 verify item 12) — AND WHAT IT COUNTS ARE SITTINGS, NOT ROWS.
    The counter above was WA.examTrialsOf, which returns every row naming that
@@ -2629,7 +2655,7 @@ WA.examGraded = function (e) {
    The gate now asks the same question the sparse rule asks: is this row a
    REPORT (WA.slotUntouched says no to exactly the untouched flow-chart
    placeholder, and yes to everything else — a written row, a legacy row, an
-   admin-entered row, a minted trial or ΕΕΘ, all of which are stored). TWO
+   admin-entered row, a minted trial or Weekly exam, all of which are stored). TWO
    clauses, because both halves of the sentence have to be true:
      · the ROW ITSELF must be a sitting — an owed placeholder is not the
        «1st trial» of anything, whatever sits beside it;

@@ -177,7 +177,7 @@ create table if not exists public.proposals (
 );
 
 -- ── ENTER-ON-BEHALF stamp (round 4) ───────────────────────────────────────
--- 'admin' = the squadron CO entered this row FOR the owner; null = the owner
+-- 'admin' = the admin entered this row FOR the owner; null = the owner
 -- reported it themselves. Set by the write path only — never by the client.
 -- Per-ENTRY stamps live inside student_records.data (entries[].entered_by).
 alter table public.student_records add column if not exists entered_by text;
@@ -268,6 +268,67 @@ create table if not exists wa.migrations (
   ran_at  timestamptz not null default now(),
   note    text
 );
+
+-- ══ ROUND 18 — ASSESSMENTS ARE OPEN FOR ONE CLASS AT A TIME ════════════════
+-- COMMAND RULING (2026-08-26), verbatim: «Τωρα τελειωνουν της 98Β, οποτε μονο
+-- για αυτους θελω προτασεις. Στο μελλον θα επιλεγουμε για ποια ταξη θα
+-- στελνουμε προτασεις αξιοποιησης με το WA στους εκπαιδευτες. Θελουμε την
+-- σειρα την οποια τελειωνει, οχι ολες τις ενεργες.»
+--   «98B is finishing now, so I want proposals only for them. In future we will
+--    CHOOSE which class we send utilization proposals to the instructors for.
+--    We want the class that is FINISHING, not every active one.»
+--
+-- WHY A SETTING AND NOT A COLUMN. This is not a fact about a person, a record
+-- or an assessment — it is a fact about the SQUADRON'S CALENDAR, one value for
+-- the whole installation, and it changes about three times a year. A column on
+-- `people` would ask every row to carry the same answer; a per-instructor flag
+-- would let two instructors be asked about two different classes, which is
+-- exactly the thing the ruling forbids. One row in one tiny table is the
+-- lightest shape that is also the correct one.
+--
+-- WHY IN SCHEMA `wa` AND NOT `public`. PostgREST reaches `public` and nothing
+-- else, so a table here needs no RLS policy, no revoke, no deny-by-default
+-- boilerplate: it is unreachable by construction, and the ONLY way in or out is
+-- the RPC pair below. The lockdown block further down does not have to grow.
+--
+-- NULLABLE = NONE. `value is null` (or the row absent) means NO class is open:
+-- the instructor form lists nobody and every write is refused. That is a real
+-- state the admin can choose — between two classes there is genuinely nobody to
+-- assess — and it is stored as the absence of an answer rather than as a magic
+-- string, because a magic string is a class name somebody could one day create.
+create table if not exists wa.settings (
+  key        text primary key,
+  value      text,
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists trg_touch_settings on wa.settings;
+create trigger trg_touch_settings before update on wa.settings
+  for each row execute function wa.touch_updated_at();
+
+create or replace function wa.setting(p_key text) returns text
+language sql stable as $$ select value from wa.settings where key = p_key $$;
+
+-- THE SCOPE, NORMALISED ONCE. Everything that gates on it reads THIS — the
+-- dataset filter, the write refusal and the admin's own read-back — so an
+-- empty string, a stray space and a missing row cannot mean three things.
+create or replace function wa.assessment_class() returns text
+language sql stable as $$
+  select nullif(btrim(coalesce(wa.setting('assessment_class'), '')), '')
+$$;
+
+-- IS THIS STUDENT IN SCOPE? ONE definition, two callers that must never drift:
+-- wa.instructor_dataset (which students the form LISTS) and wa.write_proposal
+-- (which students may be WRITTEN). If these two ever disagreed, the form would
+-- show a card whose Save is refused, or hide a student whose assessment lands.
+-- A student with NO CLASS RECORDED is never in scope — the scope is a class
+-- NAME, and a person carrying no name to match cannot match one. Give them
+-- their class under People & links and they join the class they belong to.
+create or replace function wa.student_in_scope(s public.people) returns boolean
+language sql stable as $$
+  select wa.assessment_class() is not null
+     and nullif(btrim(coalesce(s.class, '')), '') = wa.assessment_class()
+$$;
 
 -- ── ROUND 9 — THE GLOBAL ROSTER ───────────────────────────────────────────
 -- ONE roster now feeds every FDMS app (the scheduler and this one). It is a
@@ -1141,7 +1202,7 @@ language sql immutable as $$
   select case when p_id = any(array['JP190']::text[]) then true else false end
 $$;
 
--- ══ ROUND 14 — THE ΕΕΘ SERIES, AND HOW MANY TRIALS AN EXAM MAY HAVE ════════
+-- ══ ROUND 14 — THE WEEKLY SERIES, AND HOW MANY TRIALS AN EXAM MAY HAVE ═════
 -- «στα ground exam να εχουμε 2nd trial, 3rd και να μπορουμε να βαλουμε τα ΕΕΘ
 --  με ΕΕΘ 1, ΕΕΘ 2 κλπ»
 -- Two different things, stored differently because they ARE different:
@@ -1149,14 +1210,36 @@ $$;
 --     it keeps the exam's identity and adds a number: `trial` 2 or 3. THE FIRST
 --     TRIAL IS WRITTEN AS NO KEY AT ALL, which is what makes every record from
 --     before this round correct without being rewritten.
---   · an ΕΕΘ is a WEEKLY THEORY EXAM — an OPEN series the syllabus does not
---     enumerate, so it names no exam and carries `series` + `series_no`.
+--   · a Weekly exam is a WEEKLY THEORY EXAM — an OPEN series the syllabus does
+--     not enumerate, so it names no exam and carries `series` + `series_no`.
 -- NOT part of the generated block: WA_EXAMS / wa.exam_ids() come out of the
--- syllabus sources and the ΕΕΘ are not in them. They are the squadron's own
--- weekly programme, and they are declared here by hand, on purpose.
+-- syllabus sources and the weekly exams are not in them. They are the
+-- squadron's own weekly programme, declared here by hand, on purpose.
 -- MIRROR: app/app.js → WA.EXAM_SERIES / WA.EXAM_TRIALS.
+--
+-- ══ ROUND 18 — THE SERIES IS CALLED «WEEKLY» ON EVERY SURFACE ══════════════
+-- COMMAND RULING (2026-08-26), verbatim: «τα ερωτηματολογια ΕΕΘ 1,2,3 να τα
+-- βαλουμε ως Weekly 1,2,3» — «the ΕΕΘ questionnaires 1,2,3, let us put them as
+-- Weekly 1,2,3». So: ΕΕΘ → **Weekly**, everywhere a human reads it — row
+-- labels, the mint button, badges, tips, the confirmation dialog, the printed
+-- brief, the CSV, the admin table and the refusals below.
+--
+-- THE STORED KEY DOES NOT MOVE, and that is the whole design of this rename.
+-- `series` is still the literal 'EETH' in every record, in the CHECK this
+-- function feeds, and in the payload the client sends. NOT ONE ROW IS
+-- MIGRATED: a record written in round 14 renders as «Weekly 3» the moment the
+-- new client loads, because the number was always the name and the WORD was
+-- always looked up. A rename that rewrote the key would have to touch every
+-- stored record to change a caption, and would leave any instance running an
+-- older client unable to read its own data.
+-- THE VISIBLE NAME LIVES IN ONE FUNCTION (wa.series_label), mirroring
+-- WA.EXAM_SERIES[].label — so the next rename is two lines, not thirty.
 create or replace function wa.exam_series() returns text[]
 language sql immutable as $$ select array['EETH']::text[] $$;
+create or replace function wa.series_label(p_series text) returns text
+language sql immutable as $$
+  select case when p_series = 'EETH' then 'Weekly' else coalesce(p_series, '?') end
+$$;
 create or replace function wa.exam_trials() returns int
 language sql immutable as $$ select 3 $$;
 
@@ -1167,7 +1250,7 @@ language sql immutable as $$ select 3 $$;
 -- different exams with two right numbers?») in favour of TWO: a πτήση is
 -- judged at 60 by ΠΔ 151/13 and ΠΔ 29/2020, a ground exam at 80, and FDMS has
 -- always called that second number `exam_pass_pct`.
--- IT APPLIES TO BOTH SHAPES: the eight fixed ground exams AND the ΕΕΘ weekly
+-- IT APPLIES TO BOTH SHAPES: the eight fixed ground exams AND the Weekly
 -- series, which are ground exams too and are marked the same way.
 --
 -- THE SERVER RECORDS THE NUMBER AND JUDGES NOTHING WITH IT, and that is not an
@@ -1789,7 +1872,7 @@ language sql immutable as $$
     -- student is owed. ROUND 12b: EXAM · DATE · GRADE, no examiner, no note.
     -- ROUND 14 — TRIAL and SERIES. `trial` is 2 or 3 and nothing else (the
     -- first trial is written as no key at all, so nothing stored before this
-    -- round has to be rewritten); `series` + `series_no` are the ΕΕΘ weekly
+    -- round has to be rewritten); `series` + `series_no` are the Weekly
     -- theory exams, which name no `exam`. The two shapes are EXCLUSIVE and the
     -- validator refuses a row that tries to be both.
     when 'exams'        then array['date','exam','trial','series','series_no',
@@ -2288,24 +2371,29 @@ begin
         elsif k = 'exams' then
           -- ══ ROUND 14 — TWO SHAPES, AND THEY ARE EXCLUSIVE ════════════════
           -- Either the row is one of the EIGHT (exam + optional trial 2|3), or
-          -- it is an ΕΕΘ of the weekly series (series + series_no, no exam).
-          -- A row that tried to be both would be a fixed exam the eight do not
-          -- contain, and every count of "how many of the eight are done" would
-          -- disagree with every other.
+          -- it is a Weekly exam of the weekly series (series + series_no, no
+          -- exam). A row that tried to be both would be a fixed exam the eight
+          -- do not contain, and every count of "how many of the eight are done"
+          -- would disagree with every other.
           perform wa.chk_bool(e->'legacy', w || '.legacy');
           perform wa.chk_text(e->'series', w || '.series', false, 20);
+          -- ROUND 18 — the ONE refusal that must still print the STORED KEY,
+          -- because it is the value the payload has to carry. It names the
+          -- visible word beside it so the reader can tell which is which.
           perform wa.chk((e->>'series') is null or (e->>'series') = any(wa.exam_series()),
                          w || '.series',
-                         format('unknown exam series — the list is %s',
-                                array_to_string(wa.exam_series(), ' / ')));
+                         format('unknown exam series — the list is %s (the %s theory exams)',
+                                array_to_string(wa.exam_series(), ' / '),
+                                wa.series_label('EETH')));
           perform wa.chk(not ((e->>'series') is not null and (e->>'exam') is not null),
                          w || '.series',
-                         'a row is either one of the eight ground exams or one of the ΕΕΘ series — never both');
+                         format('a row is either one of the eight ground exams or one of the %s series — never both',
+                                wa.series_label('EETH')));
           if (e->>'series') is not null then
-            -- THE NUMBER IS THE NAME. An ΕΕΘ with no number cannot be told from
-            -- any other ΕΕΘ, so it is the one thing this shape requires; the
-            -- DATE and the GRADE are both nullable, because an ΕΕΘ is put on
-            -- the weekly programme before it is sat.
+            -- THE NUMBER IS THE NAME. A Weekly exam with no number cannot be
+            -- told from any other, so it is the one thing this shape requires;
+            -- the DATE and the GRADE are both nullable, because a weekly exam
+            -- is put on the programme before it is sat.
             perform wa.chk_date(e->'date', w || '.date', false);
             perform wa.chk_int(e->'series_no', w || '.series_no', 1, wa.section_cap('exams'));
             -- coalesce, because an ABSENT key makes jsonb_typeof return SQL
@@ -2314,9 +2402,11 @@ begin
             perform wa.chk(wa.is_legacy(e)
                            or coalesce(jsonb_typeof(e->'series_no'), 'missing') = 'number',
                            w || '.series_no',
-                           'every ΕΕΘ carries its number — ΕΕΘ 1, ΕΕΘ 2 … — because the number is its name');
+                           format('every %1$s exam carries its number — %1$s 1, %1$s 2 … — because the number is its name',
+                                  wa.series_label('EETH')));
             perform wa.chk(not (e ? 'trial'), w || '.trial',
-              'an ΕΕΘ is not an attempt at one of the eight ground exams — it carries its series number, never a trial');
+              format('a %s exam is not an attempt at one of the eight ground exams — it carries its series number, never a trial',
+                     wa.series_label('EETH')));
           else
             -- A PLANNED ATTEMPT MAY BE DATELESS (round 14). A minted 2nd or 3rd
             -- trial says «a re-sit has been ordered» before it says when; the
@@ -2335,7 +2425,9 @@ begin
                                   array_to_string(wa.exam_ids(), ' / ')));
             perform wa.chk(wa.is_legacy(e)
                            or nullif(trim(coalesce(e->>'exam', '')), '') is not null,
-                           w || '.exam', 'every exam row names which of the eight ground exams it was, or the ΕΕΘ series it belongs to');
+                           w || '.exam',
+                           format('every exam row names which of the eight ground exams it was, or the %s series it belongs to',
+                                  wa.series_label('EETH')));
             -- 2 AND 3, AND NOTHING ELSE. 1 is written as no key at all: a
             -- stored 1 would be a second way of saying what the absence already
             -- says, and two spellings of one fact is how a uniqueness rule gets
@@ -2344,7 +2436,8 @@ begin
               'the first trial is written as no trial key at all — a stored 1 would be a second spelling of the same fact, and two spellings is how a uniqueness rule gets bypassed');
             perform wa.chk_int(e->'trial', w || '.trial', 2, wa.exam_trials());
             perform wa.chk(not (e ? 'series_no'), w || '.series_no',
-              'a series number belongs to an ΕΕΘ — one of the eight ground exams is numbered by its TRIAL');
+              format('a series number belongs to a %s exam — one of the eight ground exams is numbered by its TRIAL',
+                     wa.series_label('EETH')));
           end if;
           -- NULLABLE, for the same reason a flight's grade is: the result can
           -- take longer to arrive than the exam did to sit.
@@ -2389,14 +2482,14 @@ begin
                        k, 'each solo slot may appear only once — the solo rows are fixed');
       end if;
 
-      -- ══ ROUND 14 — ONE ROW PER (EXAM, TRIAL), AND ΕΕΘ NUMBERS ARE UNIQUE ══
+      -- ══ ROUND 14 — ONE ROW PER (EXAM, TRIAL), AND WEEKLY NUMBERS ARE UNIQUE
       -- The solo-slot precedent two blocks up, applied to the two new shapes.
       -- Two rows both calling themselves «IN190, 2nd trial» are two results for
       -- one sitting that can disagree, and the pass-attempt rule would have to
-      -- pick between them arbitrarily; two rows both calling themselves ΕΕΘ 3
-      -- make the number stop being a name. Both are closed here, on the server,
-      -- because the form's «next trial» / «next ΕΕΘ» affordances mint from
-      -- max+1 and a payload can always be hand-made.
+      -- pick between them arbitrarily; two rows both calling themselves
+      -- «Weekly 3» make the number stop being a name. Both are closed here, on
+      -- the server, because the form's «next trial» / «+ Weekly n» affordances
+      -- mint from max+1 and a payload can always be hand-made.
       if k = 'exams' then
         perform wa.chk((select count(*) = count(distinct t.key) from (
                           select coalesce(e2->>'exam', '-') || '|'
@@ -2413,7 +2506,8 @@ begin
                           where jsonb_typeof(e2) = 'object'
                             and (e2->>'series') is not null
                             and (e2->>'series_no') is not null) t),
-                       k, 'two rows carry the same ΕΕΘ number — the number is the name, so it identifies exactly one weekly exam');
+                       k, format('two rows carry the same %s number — the number is the name, so it identifies exactly one weekly exam',
+                                 wa.series_label('EETH')));
       end if;
 
       -- SEQ MUST DISAMBIGUATE (round-12 verify finding 2, the solo precedent
@@ -2919,7 +3013,7 @@ begin
         e := (e - 'series') || jsonb_build_object('series', null, 'legacy', true);
       end if;
       if (e->>'series') is not null then
-        -- an ΕΕΘ names no exam and takes no trial; date AND grade are both
+        -- a Weekly exam names no exam and takes no trial; date AND grade are both
         -- nullable, because a weekly exam is programmed before it is sat
         if (e->>'exam') is not null then
           e := (e - 'exam') || jsonb_build_object('exam', null, 'legacy', true);
@@ -2984,11 +3078,11 @@ language sql immutable as $$
 $$;
 
 -- how many entries of a record carry a given PROVENANCE stamp (round 12).
--- 'admin' is the CO's; the generalisation is here because the bridge's 'fdms'
--- stamp is the next value this has to be able to count WITHOUT being counted as
--- the CO's — a row a machine proposed is not a row the Squadron CO wrote, and
--- conflating them would be a truth defect in the exact feature that exists to
--- be honest about provenance.
+-- 'admin' is the admin's; the generalisation is here because the bridge's
+-- 'fdms' stamp is the next value this has to be able to count WITHOUT being
+-- counted as the admin's — a row a machine proposed is not a row the admin
+-- wrote, and conflating them would be a truth defect in the exact feature that
+-- exists to be honest about provenance.
 -- (An unflown fixed slot is a placeholder, not an entry — round 5.)
 create or replace function wa.entry_count_by(p jsonb, p_source text) returns int
 language sql immutable as $$
@@ -3052,18 +3146,19 @@ $$;
 -- place the feature exists to be honest about. Superseded:
 drop function if exists wa.stamp_record(jsonb, text);
 
--- ── THE CO'S EDITS PREVAIL — THE SUPREMACY INVERSION (round 8) ────────────
+-- ── THE ADMIN'S EDITS PREVAIL — THE SUPREMACY INVERSION (round 8) ─────────
 -- Rounds 4b-7 gave the owner the last word: saving your own form cleared every
--- CO stamp on it, because "reclaiming your own data makes it self-reported
--- again". The squadron reads it the other way round. When the Squadron CO
--- writes a line into a student's record he is not making a suggestion, and a
--- record in which the student can quietly overwrite the CO's correction is a
--- record the CO cannot brief from.
--- SO: an entry the CO created or modified (entered_by = 'admin') is LOCKED for
--- its owner. The owner's save must carry every one of them through UNCHANGED —
--- it is refused otherwise — and it NO LONGER STRIPS THE STAMPS. The CO keeps
--- the full range of motion: he may edit or delete his own entries, and editing
--- an owner's entry makes it his (the diff below stamps it), which locks it.
+-- admin stamp on it, because "reclaiming your own data makes it self-reported
+-- again". The squadron reads it the other way round. When the admin writes a
+-- line into a student's record he is not making a suggestion, and a record in
+-- which the student can quietly overwrite the admin's correction is a record
+-- the squadron cannot brief from.
+-- SO: an entry the admin created or modified (entered_by = 'admin') is LOCKED
+-- for its owner. The owner's save must carry every one of them through
+-- UNCHANGED — it is refused otherwise — and it NO LONGER STRIPS THE STAMPS.
+-- The admin keeps the full range of motion: he may edit or delete his own
+-- entries, and editing an owner's entry makes it his (the diff below stamps
+-- it), which locks it.
 -- The reclaim rule is superseded, and its function is dropped so no path can
 -- call it back:
 drop function if exists wa.strip_stamps(jsonb);
@@ -3340,7 +3435,7 @@ end $$;
 
 -- ── the ONE proposal write path ───────────────────────────────────────────
 -- Used by BOTH public.save_proposal (the instructor) and
--- public.admin_save_proposal (the CO on their behalf).
+-- public.admin_save_proposal (the admin on their behalf).
 create or replace function wa.write_proposal(p_instructor uuid, p_student uuid,
                                              p_payload jsonb, p_as_admin boolean)
 returns jsonb
@@ -3351,6 +3446,8 @@ declare
   lv text;
   fw boolean; cm text;
   saved public.proposals;
+  scope text;
+  who   text;
   by_who text := case when p_as_admin then 'admin' else null end;
 begin
   select * into s from public.people
@@ -3358,6 +3455,37 @@ begin
   if not found then
     raise exception 'WA: unknown student';
   end if;
+
+  -- ══ ROUND 18 — THE SCOPE GATES THE WRITE, AND IT REFUSES BY NAME ═════════
+  -- «μονο για αυτους θελω προτασεις» is a rule about what may be WRITTEN, and
+  -- a rule that lives only in the client is a rule a stale tab breaks. An
+  -- instructor who left the form open on Friday, or who kept a card from the
+  -- class that finished last term, must not be able to save into it on Monday
+  -- because his HTML predates the admin's decision — so the gate is HERE, in
+  -- the one write path both callers go through (the instructor's own
+  -- save_proposal AND the admin's admin_save_proposal, because the admin's
+  -- on-behalf form is the same questionnaire and can go stale the same way).
+  --
+  -- IT GATES WRITES AND NOTHING ELSE. Every proposal already stored stays
+  -- readable everywhere it shows today — the Overview table, the analysis
+  -- cards, the printed brief, the CSV exports, public.admin_get_data and
+  -- public.admin_export are all untouched by this. Moving the scope to next
+  -- term's class does not delete, hide or expire one assessment of the class
+  -- that finished; it stops NEW ones being written for anybody else.
+  --
+  -- THE REFUSAL NAMES THE STUDENT, because that is the only thing that makes
+  -- it actionable: the instructor's Save writes card by card and reports per
+  -- card, so «one of them was refused» would send him hunting through twelve
+  -- students for the one the server meant.
+  scope := wa.assessment_class();
+  who   := btrim(coalesce(s.rank, '') || ' ' || coalesce(s.last_name, ''));
+  if scope is null then
+    raise exception 'WA: assessments are closed — no class is open for assessment at the moment, so nothing can be recorded for %. The admin opens a class on the dashboard, under Instructor submissions.', who;
+  elsif not wa.student_in_scope(s) then
+    raise exception 'WA: % is in class %, and assessments are open for class % — only that class can be assessed right now. Nothing was written. (Assessments already stored for other classes are untouched and stay visible.)',
+      who, coalesce(nullif(btrim(coalesce(s.class, '')), ''), '— none recorded —'), scope;
+  end if;
+
   perform wa.chk(p_payload is not null and jsonb_typeof(p_payload) = 'object',
                  'proposal', 'payload must be an object');
 
@@ -3418,11 +3546,21 @@ end $$;
 -- ── the ONE instructor dataset ────────────────────────────────────────────
 -- students + their self-reported cards + THIS instructor's proposal per
 -- student. Used by public.list_students_for_instructor (the instructor) and
--- public.admin_get_proposals_of (the CO on their behalf).
+-- public.admin_get_proposals_of (the admin on their behalf).
+--
+-- ROUND 18 — AND IT IS THE SCOPED CLASS, NOT EVERY ACTIVE STUDENT. «Θελουμε
+-- την σειρα την οποια τελειωνει, οχι ολες τις ενεργες.» The filter is the SAME
+-- predicate the write path refuses on (wa.student_in_scope), so the form can
+-- never list a card whose Save would be refused, nor hide a student whose
+-- assessment would land. With no class open the list is EMPTY and the client
+-- says why — `assessment_class` travels with the payload for exactly that: an
+-- empty list with no reason attached is a blank page, and a blank page reads
+-- as a broken link rather than as a decision somebody made.
 create or replace function wa.instructor_dataset(v public.people) returns jsonb
 language sql stable as $$
   select jsonb_build_object(
     'me', wa.person_json(v),
+    'assessment_class', wa.assessment_class(),
     'students', coalesce((
       select jsonb_agg(jsonb_build_object(
                'person', wa.person_json(s),
@@ -3448,7 +3586,8 @@ language sql stable as $$
       left join public.proposals pr on pr.student_id = s.id and pr.instructor_id = v.id
       -- the read-time migration runs ONCE per record, not once per question
       cross join lateral (select wa.migrate_record(coalesce(r.data, '{}'::jsonb)) as rec) m
-      where s.role = 'student' and s.active), '[]'::jsonb))
+      where s.role = 'student' and s.active
+        and wa.student_in_scope(s)), '[]'::jsonb))
 $$;
 
 -- ── THE ACTIVE INSTRUCTORS, SURNAMES ONLY (round 9) ────────────────────────
@@ -3539,8 +3678,8 @@ begin
 end $$;
 
 -- the OWNER saving (round 8): their own entries stay theirs, and every entry
--- the squadron CO set comes through UNCHANGED and still stamped — a payload
--- that alters or drops one is refused (see wa.carry_stamps).
+-- the admin set comes through UNCHANGED and still stamped — a payload that
+-- alters or drops one is refused (see wa.carry_stamps).
 create or replace function public.save_student_record(p_token text, p_payload jsonb)
 returns jsonb
 language plpgsql volatile security definer set search_path = public, wa, pg_temp as $$
@@ -3737,6 +3876,55 @@ begin
   where id = p_id returning * into row;
   if not found then raise exception 'WA: unknown person'; end if;
   return wa.person_json(row) || jsonb_build_object('token', row.token);
+end $$;
+
+-- ══ ROUND 18 — THE ONE CONTROL THAT OPENS AND CLOSES THE ASSESSMENTS ═══════
+-- «Στο μελλον θα επιλεγουμε για ποια ταξη θα στελνουμε προτασεις αξιοποιησης.»
+-- ONE class name, or nothing. Passing null / '' closes the assessments: the
+-- instructor form lists nobody, every write is refused, and NOTHING STORED IS
+-- TOUCHED — this function writes one row of wa.settings and reads no other
+-- table for anything but the guard below.
+--
+-- THE GUARD: A CLASS NOBODY IS IN CANNOT BE OPENED. The control offers the
+-- classes that exist, so a name outside them arrives only from a typo, a stale
+-- tab or a hand-rolled call — and every one of those silently closes the
+-- assessments for the whole squadron while the dashboard claims a class is
+-- open. So it is refused, and the refusal NAMES what does exist, because the
+-- admin's next act is to pick one of them. (A class whose last student was
+-- deactivated afterwards therefore cannot be re-selected — it is no longer a
+-- class. It also cannot be silently rewritten to «all»: a stale scope stays
+-- closed, which is the safe direction. The dashboard shows it, marked.)
+create or replace function public.admin_set_assessment_class(p_token text, p_class text)
+returns jsonb
+language plpgsql volatile security definer set search_path = public, wa, pg_temp as $$
+declare
+  v public.people;
+  want text;
+  have text[];
+begin
+  v := wa.auth_role(p_token, 'admin');
+  want := nullif(btrim(coalesce(wa.norm_line(coalesce(p_class, '')), '')), '');
+  if want is not null then
+    perform wa.chk(length(want) <= 40, 'assessment_class',
+                   'a class name is at most 40 characters');
+    select coalesce(array_agg(distinct btrim(s.class) order by btrim(s.class)), array[]::text[])
+      into have
+      from public.people s
+     where s.role = 'student' and s.active
+       and nullif(btrim(coalesce(s.class, '')), '') is not null;
+    if not (want = any(have)) then
+      raise exception 'WA: no active student is in class % — assessments cannot be opened for a class nobody is in. The classes on the roster are: %. Choose one of them, or «none» to close the assessments.',
+        want, coalesce(nullif(array_to_string(have, ' · '), ''), '(none — no active student carries a class)');
+    end if;
+  end if;
+
+  insert into wa.settings (key, value) values ('assessment_class', want)
+  on conflict (key) do update set value = excluded.value;
+
+  return jsonb_build_object('ok', true,
+    'assessment_class', wa.assessment_class(),
+    'students', (select count(*) from public.people s
+                  where s.role = 'student' and s.active and wa.student_in_scope(s)));
 end $$;
 
 -- ── ENTER ON BEHALF (round 4) ─────────────────────────────────────────────
@@ -3962,6 +4150,12 @@ begin
   return jsonb_build_object(
     'students', students,
     'instructors', instructors,
+    -- ROUND 18 — the class the instructors are being asked about. It travels
+    -- with the dashboard's own dataset and NARROWS NOTHING IN IT: `students`
+    -- above is still every active student and `proposals` still every stored
+    -- assessment, whatever class it belongs to. This is the value the control
+    -- reads back so it can show what is currently open.
+    'assessment_class', wa.assessment_class(),
     'generated_at', now());
 end $$;
 
@@ -4021,6 +4215,7 @@ begin
     'admin_delete_person(text, uuid)',
     'admin_set_active(text, uuid, boolean)',
     'admin_regenerate_token(text, uuid)',
+    'admin_set_assessment_class(text, text)',
     'admin_get_student_form(text, uuid)',
     'admin_save_student_record(text, uuid, jsonb)',
     'admin_get_proposals_of(text, uuid)',
@@ -4109,6 +4304,42 @@ begin
                 n_rows, n1, n2, n3, n4a + n4b, n4a, n4b, n5, n_open);
   insert into wa.migrations (id, note) values ('r10-five-level-scale', msg);
   raise notice '%', msg;
+end $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ROUND 18 MIGRATION — THE ASSESSMENT SCOPE IS SEEDED TO TODAY'S REALITY, ONCE
+-- ───────────────────────────────────────────────────────────────────────────
+-- «Τωρα τελειωνουν της 98Β, οποτε μονο για αυτους θελω προτασεις» (2026-08-26).
+-- 98B HAF is the class finishing on the day this ruling was made, so that is
+-- the value this file installs — the setting arrives ALREADY CORRECT and the
+-- admin does not have to know the feature exists before the instructors can be
+-- asked anything.
+--
+-- IT IS GUARDED BY THE LEDGER AND NOT BY `on conflict`, for the round-10
+-- reason exactly: this file is re-applied on every deploy, and «seed if the
+-- row is missing» would resurrect 98B HAF the first time an admin deliberately
+-- CLOSES the assessments by choosing «— none —» (which stores a NULL value, or
+-- which a later cleanup might remove altogether). A decision the admin made on
+-- the dashboard must not be undone by a deployment. So the seed runs ONCE per
+-- database, ever, and afterwards the only writer is
+-- public.admin_set_assessment_class.
+do $$
+declare cur text;
+begin
+  if exists (select 1 from wa.migrations where id = 'r18-assessment-class') then
+    cur := wa.assessment_class();
+    raise notice 'r18: assessment scope already seeded — leaving it at %',
+      coalesce('«' || cur || '»', 'none (assessments closed)');
+  else
+    insert into wa.settings (key, value) values ('assessment_class', '98B HAF')
+    on conflict (key) do nothing;
+    insert into wa.migrations (id, note) values ('r18-assessment-class',
+      'r18: assessment_class seeded to «98B HAF» — the class finishing on 2026-08-26. Changed thereafter only through public.admin_set_assessment_class.');
+    raise notice 'r18: assessment scope seeded to «%» (% active student(s) in it)',
+      wa.assessment_class(),
+      (select count(*) from public.people s
+        where s.role = 'student' and s.active and wa.student_in_scope(s));
+  end if;
 end $$;
 
 -- ── bootstrap: the admin person (created once; token survives re-runs) ─────

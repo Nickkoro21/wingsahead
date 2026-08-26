@@ -49,6 +49,14 @@ test_pilot** (see §4g).
 PHASED: Phase 1 = the 9 students (target: links out the NEXT MORNING), Phase 2 =
 the ~15-20 instructors once their form is verified.
 
+**wa.settings** (round 18, §4t·1): `key` · `value` (nullable) · `updated_at` —
+one row per installation-wide setting, in the **private** schema and therefore
+unreachable from the API. Today it holds exactly one: **`assessment_class`**,
+the class the instructors are being asked about (null = the assessments are
+closed). Read through `wa.assessment_class()`, written only by
+`public.admin_set_assessment_class`, and seeded once to `98B HAF` through the
+`wa.migrations` ledger.
+
 **student_records** (1:1 with student, `last_update` auto).
 
 **ROUND-3 RULE (2026-08-13): every section is a LIST OF DATED ENTRIES and the
@@ -4697,6 +4705,352 @@ and no data is rewritten.
    clean on all five scripts; **zero console messages** on every screen visited;
    no horizontal scroll at 375 or 900. The throwaway database was dropped.
 
+## 4t. Round 18 (2026-08-26) — ONE CLASS AT A TIME, AND ΕΕΘ BECOMES «WEEKLY»
+
+Three items. **Two of them are on the server**, so this round carries a
+**schema gate**.
+
+### 4t·1. THE ASSESSMENT SCOPE — «Assessments open for: ⟨class⟩»
+
+**COMMAND RULING (2026-08-26), verbatim:**
+
+> «Τωρα τελειωνουν της 98Β, οποτε μονο για αυτους θελω προτασεις. Στο μελλον θα
+>  επιλεγουμε για ποια ταξη θα στελνουμε προτασεις αξιοποιησης με το WA στους
+>  εκπαιδευτες. Θελουμε την σειρα την οποια τελειωνει, οχι ολες τις ενεργες.»
+>
+> *«98B is finishing now, so I want proposals only for them. In future we will
+>  CHOOSE which class we send utilization proposals to the instructors for. We
+>  want the class that is FINISHING, not every active one.»*
+
+Until this round the instructor form asked every instructor about **every active
+student** — 25 of them, across three classes, of which the squadron cared about
+nine. The ruling narrows the QUESTION, not the archive.
+
+**THE STORAGE — one setting, in the private schema.**
+
+| what | where |
+|---|---|
+| the value | `wa.settings (key, value, updated_at)`, one row, `key = 'assessment_class'` |
+| «none» | `value is null` (or the row absent) — a real state, not a magic class name |
+| the seed | `wa.migrations` row `r18-assessment-class` → `'98B HAF'`, **once per database, ever** |
+| read | `wa.assessment_class()` — trims, folds `''` to null, so a stray space cannot mean a third thing |
+| the predicate | `wa.student_in_scope(people)` — **one** definition, two callers |
+| write | `public.admin_set_assessment_class(token, class)` — admin only |
+
+**WHY A SETTING AND NOT A COLUMN.** This is not a fact about a person, a record
+or an assessment; it is a fact about the squadron's **calendar** — one value for
+the whole installation, changed about three times a year. A column on `people`
+would ask every row to carry the same answer. A per-instructor flag would let
+two instructors be asked about two different classes, which is exactly what the
+ruling forbids.
+
+**WHY SCHEMA `wa` AND NOT `public`.** PostgREST reaches `public` and nothing
+else, so a table here needs no RLS policy, no revoke, no deny-by-default
+boilerplate — it is unreachable by construction and the only door is the RPC
+pair. *(Verified: `has_schema_privilege('anon','wa','usage')` = **f**,
+`has_table_privilege('anon','wa.settings','select')` = **f**.)*
+
+**WHY THE LEDGER AND NOT `on conflict do nothing`.** The round-10 lesson,
+exactly: this file is re-applied on every deploy, and «seed if the row is
+missing» would resurrect `98B HAF` the first time an admin deliberately closes
+the assessments with «— none —». A decision made on the dashboard must not be
+undone by a deployment. So the seed runs **once per database** and afterwards
+the only writer is the admin RPC.
+
+**THE ADMIN CONTROL — and where it lives, and why.** A `<select>` labelled
+**«Assessments open for»**, listing the classes present in the database (derived
+from the active students on every draw, the same source as the filter chips) plus
+**«— none —»**, inside the **Instructor submissions** card of the Overview.
+
+It does **not** sit beside the class-filter chips, and that is a decision and not
+a layout accident. The chip row is a **viewing** filter: it narrows what the
+admin is looking at, changes nothing for anybody else, and is remembered in this
+browser. This control **writes a decision** that reaches every instructor in the
+squadron. *One is what I see; the other is what they may do.* The Instructor
+submissions card is the one place on the dashboard already about the
+instructors' questionnaire — the card that answers *«are they done?»*, directly
+above the question it cannot answer without this: *«done with WHOM?»*. It is a
+boxed strip (`.scoperow`, tokens only) so the eye separates it from the prose
+before the reader has read a word, and it carries a **hover title in the house
+voice** that says what it gates, what it is not, and what it never touches.
+
+**A STALE SCOPE STAYS CLOSED.** If the scoped class loses its last active
+student the select still offers it, **marked** *«⟨class⟩ — nobody active»*, and
+the line beneath says the forms are empty and why. It is deliberately **not**
+folded back to «all», the way the viewing filter folds back: reverting would
+**open** the assessments for the whole squadron behind the admin's back, and
+this control must never move in that direction on its own.
+
+**SERVER-ENFORCED, IN THE ONE WRITE PATH.**
+
+- `wa.instructor_dataset` filters on `wa.student_in_scope`, so
+  `list_students_for_instructor` **and** `admin_get_proposals_of` narrow
+  together. The cards, the **R17 nav rail** and the **«N of M chosen»** head all
+  follow without one of them being told about classes — all three are built from
+  that one list, and were before this round. A client-side filter would have been
+  a fourth place to keep in step, and the one place a stale tab could ignore.
+- `wa.write_proposal` **refuses** a student outside the scope, **by name**,
+  before anything is stored — which covers `save_proposal` (the instructor) and
+  `admin_save_proposal` (the admin on their behalf), because the admin's
+  on-behalf form is the same questionnaire and goes stale the same way.
+  It names the student because the Save writes card by card and reports per
+  card: *«one of them was refused»* would send an instructor hunting through
+  twelve students for the one the server meant.
+
+  > `WA: ⟨rank surname⟩ is in class 99A HAF, and assessments are open for class`
+  > `98B HAF — only that class can be assessed right now. Nothing was written.`
+  > `(Assessments already stored for other classes are untouched and stay visible.)`
+
+  With no class open:
+
+  > `WA: assessments are closed — no class is open for assessment at the moment,`
+  > `so nothing can be recorded for ⟨rank surname⟩. The admin opens a class on`
+  > `the dashboard, under Instructor submissions.`
+
+- The setter **refuses a class nobody is in**, naming the classes that exist —
+  because a typo, a stale tab or a hand-rolled call would otherwise close the
+  assessments for the whole squadron while the dashboard claimed a class was
+  open.
+
+**THE SCOPE GATES NEW WRITES AND THE INSTRUCTOR FORM'S LIST — NEVER HISTORY.**
+Stated here because it is the property the next round must not quietly lose:
+**changing the scope later does not delete, hide or expire one past
+assessment.** Every proposal already stored stays visible exactly where it shows
+today — the Overview table and its mean, the analysis cards (with the assessor's
+name and the weight arithmetic), the printed brief and all four exports.
+`public.admin_get_data` and `public.admin_export` are **untouched by this
+round's filter**; the only new thing either learned is a read-only
+`assessment_class` field so the control can show what is open. The Overview's
+class chips, the CSV scope rule and the JSON backup rule are **unchanged** —
+they are viewing filters and this is not one.
+
+**A STUDENT WITH NO CLASS RECORDED IS NEVER IN SCOPE.** The scope is a class
+NAME, and a person carrying no name to match cannot match one. The select
+therefore offers no «No class recorded» option, unlike the viewing filter. Give
+the student their class under **People & links** and they join the class they
+belong to.
+
+**THE INSTRUCTOR FORM SAYS WHICH CLASS, EMPTY OR NOT.** An empty list means one
+of two very different things — *«no class is open»* or *«this class has nobody in
+it»* — and neither of them is *«your link is broken»*, which is what a blank page
+says. So the scope travels with the payload and the form states it out loud: a
+badge beside the instructor's own name (**«Class 98B HAF · 9 students»** /
+**«Assessments closed»**), the first sentence of the head hint, the nav rail's
+title, the printed sheet's meta line, and — where there is nothing to show — a
+titled empty-state card instead of a blank page:
+
+> **Nothing to assess** — There is nothing to assess yet. Assessments are closed
+> — no class is open for assessment at the moment. The squadron assesses one
+> class at a time — the one that is finishing — and the admin has not opened one.
+> Nothing you have submitted before has been lost: it is all still on the
+> dashboard.
+
+### 4t·2. ΕΕΘ → **WEEKLY** — every visible surface, zero stored bytes
+
+**COMMAND RULING (2026-08-26), verbatim:** «τα ερωτηματολογια ΕΕΘ 1,2,3 να τα
+βαλουμε ως Weekly 1,2,3» — *«the ΕΕΘ questionnaires 1,2,3, let us put them as
+Weekly 1,2,3».*
+
+**OLD NAME → NEW NAME, dated: ΕΕΘ n → Weekly n (2026-08-26).**
+
+| surface | before | after |
+|---|---|---|
+| row label (form, admin table, brief, rail) | `ΕΕΘ 3` | **`Weekly 3`** |
+| the mint button | `+ ΕΕΘ 1` | **`+ Weekly 1`** |
+| its hover title | *…the next weekly theory exam — ΕΕΘ 1…* | *…the next weekly theory exam — **Weekly 1**…* |
+| the series badge / tip | `ΕΕΘ — the weekly theory exams…` | **`Weekly` — the weekly theory exams…** |
+| the section tip + form hint | *the ΕΕΘ weekly theory exams* | *the **Weekly** theory exams* |
+| confirmation-dialog lines | *Ground exams · ΕΕΘ 1 — added* | *Ground exams · **Weekly 1** — added* |
+| CSV — Flight code | `ΕΕΘ 1` | **`Weekly 1`** |
+| CSV — Detail | `ΕΕΘ — weekly theory exam` | **`weekly theory exam`** |
+| server refusals (×6, `db/schema.sql`) | *every ΕΕΘ carries its number…* | *every **Weekly** exam carries its number…* |
+
+**THE STORED KEY DOES NOT MOVE, AND THAT IS THE WHOLE DESIGN.** `series` is
+still the literal `'EETH'` — in every record already written, in the CHECK on the
+server (`wa.exam_series()`), and in the payload the client sends.
+**NOT ONE ROW IS MIGRATED.** A record stored in round 14 renders «Weekly 3» the
+instant the new client loads, because the label was always a **lookup** and the
+number was always the name. Renaming the key would have meant rewriting every
+stored record to change a caption, and would have broken any instance still
+serving the previous client. *The word is data; the key is the contract.*
+
+**THE VISIBLE NAME LIVES IN ONE PLACE ON EACH SIDE** — `WA.EXAM_SERIES[].label`
+and the new `wa.series_label(key)` — so the next rename is two lines and not
+thirty. Six server refusals now build their text with `format()` from that
+function. **One refusal still prints the stored key**, deliberately: *«unknown
+exam series — the list is EETH (the Weekly theory exams)»* is about the value a
+payload must carry, so it names both.
+
+**CSV Detail lost a word rather than gaining one.** `ΕΕΘ — weekly theory exam`
+renamed mechanically would read `Weekly — weekly theory exam`: a cell saying the
+same word twice and the number not at all. The **name** is the Flight-code
+column's job; Detail says **what kind of row** it is, which is what the eight
+ground exams already get there.
+
+**ONE VISIBLE SURFACE STILL SAYS «ΕΕΘ», ON PURPOSE — say so, and overrule it in
+one line if it is wrong.** The series' own hover tip opens *«Weekly — the weekly
+theory exams (the squadron's **ΕΕΘ**, renamed on 2026-08-26)…»*. Everybody who
+has used this app since round 14 knows these rows by the old name, and the
+tooltip is the one place with room to say *«this is that»* without a memo. It is
+the **only** remaining ΕΕΘ a user can see. If the ruling meant the word should
+disappear from the screen entirely, deleting that parenthetical is the whole
+change.
+
+**Comments follow the vocabulary** (≈55 sites across `app.js`, `student.js`,
+`admin.js`, `schema.sql`) so no internal note contradicts the screen beside it.
+The **verbatim Greek rulings of rounds 14 and 18 are kept word for word** — they
+are the record of what was said, and the record is not edited. So are the
+`db/schema.sql` and `app/admin.js` comments that **quote** an old string as the
+record of what replaced it.
+
+### 4t·3. THE FIVE PROSE COMMENTS — the round-17b residual, taken
+
+Round 17b recorded two internal comments still calling the **admin** *«the
+Squadron CO»*, and left them out of a gated schema diff on purpose. The verify
+read found five. All five are reworded to **«the admin»**; **zero behaviour**,
+zero literals, zero grammar the parser can see.
+
+| # | file | what it headed |
+|---|---|---|
+| 1 | `db/schema.sql` | the `entered_by` stamp note (round 4) |
+| 2 | `db/schema.sql` | `wa.entry_count_by` — the provenance generalisation (round 12) |
+| 3 | `db/schema.sql` | THE SUPREMACY INVERSION header (round 8) |
+| 4 | `db/schema.sql` | `public.save_student_record`'s owner note (round 8) |
+| 5 | `app/student.js` | the client twin of #3 — *«THE CO'S EDITS PREVAIL»* |
+
+**WHAT STAYS «Squadron CO», BY ROUND 17'S OWN RULE.** The **appointment** exists:
+it is one of the two that may conduct an FPC (`wa.fpc_evaluators`,
+`WA.FPC_EVALUATORS`), an evaluator role of a CEF, the authority named in the
+ΚΕΠΕ entry conditions of 3-01 ΚΕΦ.2 §32β, and an option in the People editor's
+Duty list. Those are **doctrine**; they name an appointment and not this
+application's admin. Also unchanged: the code's private vocabulary (`is-co`,
+`WA.isCO`, `asCO`, `.cotag`), the stored `entered_by = 'admin'`, and
+`db/schema.sql`'s round-17b note that **quotes** the old wording as the record
+of what it replaced.
+
+### CACHE-BUSTER
+
+`?v=20260826a` on the **five** files this round touched — `styles.css`,
+`app.js`, `student.js`, `instructor.js`, `admin.js`. `config.js` and
+`items-catalog.js` are untouched and keep `?v=20260821b`.
+
+### DEPLOYMENT GATE — **SCHEMA FIRST**
+
+`db/schema.sql` is touched, and it carries a **seeding migration**. The database
+moves before the code: the user runs the new `schema.sql` on the cloud project,
+confirms it, and only then is the client deployed. The script is idempotent —
+re-running it changes nothing, the ledger keeps the seed from running twice, and
+no stored row is rewritten by any part of this round.
+
+**THIS ROUND'S COMMIT RIDES THE SAME GATE AS ROUND 17b'S** — two commits ahead of
+`origin/main`, neither pushed.
+
+### SELF-VERIFICATION — ROUND 18 (live, local stack, real RPCs)
+
+1. **THE SEED, AND THE LEDGER.** `schema.sql` applied to the local demo
+   database: `NOTICE: r18: assessment scope seeded to «98B HAF» (9 active
+   student(s) in it)`, exit **0**. Re-applied: `NOTICE: r18: assessment scope
+   already seeded — leaving it at «98B HAF»`, exit **0**, and `wa.migrations`
+   holds exactly two rows (`r10-five-level-scale`, `r18-assessment-class`).
+2. **THE INSTRUCTOR FORM, ON A REAL INSTRUCTOR LINK.** 9 cards, **every one
+   `Class 98B HAF`** (the database holds 25 active students across `2026B` (3),
+   `98B HAF` (9), `99A HAF` (13)). Rail title **«Class 98B HAF»**, head count
+   **«0 of 9 chosen»**, badge **«Class 98B HAF · 9 students»**, head sentence
+   *«Assessments are open for class 98B HAF.»*
+   `list_students_for_instructor` returns `assessment_class = "98B HAF"` and
+   `jsonb_array_length(students) = 9`, all of one class.
+3. **THE REFUSAL, BY RAW RPC.** `public.save_proposal(⟨instructor token⟩,
+   ⟨99A HAF student⟩, {level:"recommended",flew_with:true})` →
+   *«WA: ⟨rank surname⟩ is in class 99A HAF, and assessments are open for class
+   98B HAF — only that class can be assessed right now. Nothing was written.
+   (Assessments already stored for other classes are untouched and stay
+   visible.)»* — raised at `write_proposal` line 44, **before** any insert.
+   With the scope set to none, the same call →
+   *«WA: assessments are closed — no class is open for assessment at the moment,
+   so nothing can be recorded for ⟨rank surname⟩…»* (line 42).
+   `public.admin_save_proposal` on the same out-of-scope student → the **same
+   sentence**, through `write_proposal` line 44: the admin's on-behalf path is
+   gated identically, and `admin_get_proposals_of` returned **13** students and
+   `assessment_class = "99A HAF"` while 99A was open.
+4. **THE SETTER'S GUARDS.** `'98C HAF'` (nobody in it) → *«no active student is
+   in class 98C HAF … The classes on the roster are: 2026B · 98B HAF · 99A HAF.
+   Choose one of them, or «none» to close the assessments.»* · an instructor
+   token → *«WA: forbidden — this action requires the admin role»* · 41
+   characters → *«a class name is at most 40 characters (assessment_class)»* ·
+   `'  98B HAF  '` → accepted and stored trimmed, `{"ok":true,"students":9}`.
+5. **THE FLIP, THROUGH THE REAL CONTROL.** Overview → Instructor submissions →
+   the select changed from `98B HAF (9)` to `99A HAF (13)`; toast: *«Assessments
+   are open for class 99A HAF — 13 students. Every instructor form now lists
+   exactly them.»* The instructor form reloaded to **13 cards, all `99A HAF`**,
+   rail **«Class 99A HAF»**, head **«0 of 13 chosen»**.
+6. **AND HISTORY DID NOT MOVE.** With the scope on **99A HAF**, the Overview
+   table still listed **all 25** students of all three classes, and the
+   Assessment column still printed every stored mean of the **out-of-scope**
+   classes: `Ø 3.67 3/13`, `Ø 7.00 3/13`, `Ø 10.00 3/13` (2026B) and
+   `Ø 8.00 1/13` for the 98B student assessed one minute earlier through the
+   real instructor form. His analysis card still read *«Ø 8.00 · weighted mean
+   of 1 assessment · 8×1 ÷ 1 = 8.00 · 1× Recommended»* **with the assessor
+   named**, and the printed brief still carried him: *«… Class 98B HAF ·
+   self-report NOT submitted · assessments in: 1/13»*. Nothing was hidden,
+   nothing expired.
+7. **THE TWO EMPTY STATES.** Scope **none** → *«**Nothing to assess** — There is
+   nothing to assess yet. Assessments are closed … Nothing you have submitted
+   before has been lost: it is all still on the dashboard.»*, badge
+   **«Assessments closed»**, 0 cards, no rail, no blank page.
+   Scope **stale** (a class name with no active member, written straight into
+   `wa.settings` to reproduce «the class emptied afterwards») → the select
+   offers it **marked** *«97A HAF — nobody active»*, the dashboard line reads
+   *«Class 97A HAF is open, and no active student is in it…»*, and the
+   instructor form's card is titled *«Class 97A HAF is open — and empty»*.
+   **It did not silently fall back to «all».**
+8. **WEEKLY ON A PRE-EXISTING STORED ROW.** Two exam rows were stored through
+   the RPC in the round-14 shape — byte-for-byte
+   `[{"date":"2026-05-12","grade":88,"series":"EETH","series_no":1},
+   {"date":"2026-05-19","series":"EETH","series_no":2}]` — and then read by the
+   new client **with no migration of any kind**: the form printed **«Weekly 1»**
+   and **«Weekly 2»**, the mint button beneath them **«+ Weekly 3»** (max + 1),
+   and `ΕΕΘ` appeared **nowhere** in the rendered page. On a student with no
+   series rows the button read **«+ Weekly 1»**, title *«Adds the next weekly
+   theory exam — Weekly 1…»*. `WA.recordChanges` produced the confirmation
+   lines *«Ground exams · Weekly 1 · 12/05/2026 — added (grade 88 %)»* and
+   *«Ground exams · Weekly 3 — grade — → 74 %»*; `WA.fieldText("exams",
+   "series","EETH")` → **«Weekly»**; `WA.EXAM_SERIES[0]` is
+   `{id:"EETH", label:"Weekly"}` — **the key and the word, side by side.**
+   The **entries CSV**, captured from the real export, carried
+   `…;Ground exams;12/05/2026;weekly theory exam — passed (80 % or better);Weekly 1;…`
+   and `…;19/05/2026;weekly theory exam;Weekly 2;…` — **no `ΕΕΘ`, no `EETH`
+   anywhere in the file**. The printed brief carried `Weekly 1` / `Weekly 2` too.
+   **All six renamed server refusals fired**, through `wa.validate_record` on
+   hand-made payloads — *«every **Weekly** exam carries its number — Weekly 1,
+   Weekly 2 … »* · *«a **Weekly** exam is not an attempt at one of the eight
+   ground exams…»* · *«…or one of the **Weekly** series — never both»* ·
+   *«a series number belongs to a **Weekly** exam…»* · *«two rows carry the same
+   **Weekly** number…»* · and the one that keeps the key: *«unknown exam series
+   — the list is **EETH** (the **Weekly** theory exams)»*. A valid
+   `{"series":"EETH","series_no":1,"date":…,"grade":88}` was **ACCEPTED**
+   unchanged — the rename touched the words and not one rule.
+9. **HYGIENE.** `schema.sql` run **twice more** against the local demo database
+   after every edit: exit **0** both times, **zero** `ERROR` lines, and
+   `people` / `student_records` / `proposals` / `wa.settings` **byte-identical
+   fingerprints before and after** (`e0c127a4…`, `020ba5f7…`, `2b28d9fb…`,
+   `87d9840d…`), tokens and timestamps included. Counts back to where they
+   started: **42 people · 3 records · 9 proposals**, scope **98B HAF** — the
+   verification's one proposal and two exam rows were removed.
+   `node --check` clean on all six scripts; **zero console messages** on the
+   student form, the instructor form and all four admin tabs; **no horizontal
+   scroll at 375 or 900** (`scrollWidth === clientWidth` on both); the new
+   `.scoperow` renders in **light and dark** from tokens only
+   (`--accent-soft` / `--line`). Privacy grep over the whole diff: **no real
+   surname, Military Number or token** in any tracked file.
+   **ONE DEVIATION, RECORDED.** Two of the three demo `student_records` were
+   re-saved through the real `save_student_record` during verification, so they
+   are now stored in **canonical (migrated) form** — the legacy `pending` key of
+   round-2 vintage is gone from them and their `last_update` reads today. The
+   app renders them identically, because every read already ran
+   `wa.migrate_record`; the **third demo record still carries the legacy shape**,
+   so the migration path remains testable. Nothing else about the demo database
+   differs from where this round found it.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -4719,7 +5073,16 @@ and no data is rewritten.
    after the slots in date order. The same form, bound to somebody else, is what
    **the admin** fills in on a student's behalf (§4s·4 — the admin is the flight
    commander and the developer, **not** the squadron CO).
-2. **Instructor form**: student list; per student a **compact card of their
+2. **Instructor form**: student list — **round 18 (§4t·1): the students of the
+   ONE class the admin has opened for assessment, and nobody else**, filtered
+   server-side (`wa.student_in_scope`) so the cards, the nav rail and the
+   «N of M chosen» head all follow from one list; the form names the class in a
+   badge, in its head sentence, on the rail and on the printed sheet, and with
+   no class open (or an empty one) it shows a **titled empty-state card** saying
+   which of the two it is instead of a blank page. The server refuses a
+   proposal for a student outside the scope, **by name** — and past assessments
+   of every class stay visible everywhere they show today.
+   Per student a **compact card of their
    self-reported data** (counters, evaluations, solos, **and the round-12 flight
    log as one line per band — per-track counts, hours, how many sorties are
    still awaiting a grade, and (round 13) how many of the flow chart are still
@@ -4760,6 +5123,14 @@ and no data is rewritten.
       not-filterable instructor card labelled as such, and scoping **the three
       CSV exports** (class in the file name) while the **JSON backup stays
       complete**.
+      **Round 18 (§4t·1): «ASSESSMENTS OPEN FOR: ⟨class ▾⟩»**, a boxed strip
+      inside the *Instructor submissions* card — the classes present plus
+      «— none —», written through `public.admin_set_assessment_class`. It is a
+      **WRITE, not a view**: it decides which students every instructor's form
+      lists and which assessments the server accepts, and it is deliberately
+      NOT beside the class-filter chips, which only narrow what the admin sees.
+      It **hides and deletes nothing** — every stored assessment stays visible
+      in this table, in the analysis, in the brief and in all four exports.
    b. **Student analysis** (click a row — each student examined SEPARATELY):
       - Identity header (MN, rank, name, class) + entries still to correct.
       - **Comparison chart** (vanilla SVG, mifchart discipline): the selected
@@ -4852,6 +5223,29 @@ and no data is rewritten.
    button. That rename lives in the database and **only** there.
 
 ## 7. Open items
+
+- **ΑΠΟΦΑΝΣΕΙΣ 2026-08-26 (Γύρος 18, §4t) — ΔΥΟ, ΚΑΙ ΜΙΑ ΕΚΚΡΕΜΟΤΗΤΑ ΤΟΥ 17b
+  ΕΚΛΕΙΣΕ.**
+  1. **Οι προτάσεις αφορούν ΜΙΑ σειρά τη φορά** (§4t·1). «Τωρα τελειωνουν της
+     98Β, οποτε μονο για αυτους θελω προτασεις. Στο μελλον θα επιλεγουμε για
+     ποια ταξη θα στελνουμε προτασεις αξιοποιησης με το WA στους εκπαιδευτες.
+     Θελουμε την σειρα την οποια τελειωνει, οχι ολες τις ενεργες.» Μία ρύθμιση
+     (`wa.settings.assessment_class`, seed **98B HAF**), ένα control στο
+     Overview («Assessments open for»), η φόρμα του εκπαιδευτή δείχνει **μόνο**
+     τη σειρά αυτή, και ο server **αρνείται ονομαστικά** πρόταση για μαθητή
+     εκτός σειράς. **Το ιστορικό δεν κρύβεται ποτέ**: ό,τι έχει ήδη καταγραφεί
+     μένει ορατό παντού (Overview, analysis, brief, exports), και η αλλαγή
+     σειράς δεν σβήνει τίποτε.
+  2. **ΕΕΘ → «Weekly»** (§4t·2). «τα ερωτηματολογια ΕΕΘ 1,2,3 να τα βαλουμε ως
+     Weekly 1,2,3.» Μετονομασία **σε κάθε ορατή επιφάνεια** (γραμμές, κουμπί
+     «+ Weekly n», badges/tips, διάλογος επιβεβαίωσης, εκτύπωση, CSV, πίνακας
+     admin, αρνήσεις του server). **Η αποθήκευση ΔΕΝ άλλαξε**: `series:'EETH'`
+     παραμένει byte-for-byte και **καμία εγγραφή δεν μεταναστεύει** — μια
+     γραμμή του Γύρου 14 εμφανίζεται ως «Weekly n» χωρίς να την αγγίξει κανείς.
+  3. **ΕΚΛΕΙΣΕ — τα πέντε σχόλια που έλεγαν «the Squadron CO» για τον admin**
+     (§4t·3): το residual του Γύρου 17b, πέντε (όχι δύο) σημεία, **μόνο
+     σχόλια**, μηδέν συμπεριφορά. Ο **πραγματικός** Διοικητής Μοίρας μένει
+     άθικτος όπου είναι **δόγμα** (FPC, CEF, ΚΕΠΕ §32β, λίστα Duty).
 
 - **ΑΠΟΦΑΝΣΕΙΣ 2026-08-22 (Γύρος 17, §4s) — ΔΥΟ, ΚΑΙ Η ΔΕΥΤΕΡΗ ΚΛΕΙΝΕΙ ΤΟ
   ΠΑΛΑΙΟΤΕΡΟ ΑΝΟΙΧΤΟ ΣΗΜΕΙΟ ΤΗΣ ΕΦΑΡΜΟΓΗΣ.**
@@ -4952,7 +5346,8 @@ and no data is rewritten.
   του Γύρου 13) ενώ ο βαθμός της δεν μετράει — να μείνει έτσι ή η μη-λειτουργική
   προσπάθεια να γίνει γκρι; (2) η στήλη `done` του summary CSV μετράει **γραμμές**
   και όχι **θυρίδες**, οπότε με re-sits μπορεί να ξεπεράσει τον παρονομαστή —
-  προτείνεται πέμπτη στήλη `slots done`· (3) τα **ΕΕΘ δεν έχουν κατάλογο**, άρα
+  προτείνεται πέμπτη στήλη `slots done`· (3) τα **Weekly** (πρώην ΕΕΘ — η
+  μετονομασία του Γύρου 18, §4t·2) **δεν έχουν κατάλογο**, άρα
   ούτε παρονομαστή («3 owed» = τρία που κατέγραψε κάποιος, όχι «3 από N»)· (4) το
   panel οδηγεί σε **ενότητες**, όχι σε γραμμές — ένα «πήγαινέ με στην πρώτη γραμμή
   που χρωστάω» είναι ένα κλικ παραπάνω στο ίδιο component.
