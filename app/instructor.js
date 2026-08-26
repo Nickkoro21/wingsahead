@@ -294,6 +294,29 @@ WA.renderInstructor = async function (view, me, opts) {
      grouping added here later moves both or neither — they cannot drift.
      ══════════════════════════════════════════════════════════════════════════ */
   function hasChoice(sid) { return !!(P[sid] && P[sid].level); }
+  /* ROUND 19 — AND ONE ROW MORE, AT THE END. The rail's own rule («the rail is
+     the card list, literally») is about the STUDENT rows: they and the cards
+     are both built from data.students, in its order, so neither can drift from
+     the other. That rule is untouched here — this row is appended after the map
+     and is built from the currency section instead, which is the other card on
+     this page. Without it a section that sits below nine tall cards is a
+     section most instructors never scroll to, and the head count keeps counting
+     students because that is what it says it counts. */
+  function curNavItem() {
+    const n = curLive().length;
+    const dirty = curIsDirty();
+    return {
+      id: CUR_NAV_ID,
+      label: WA.secLabel(CUR_SEC),
+      tip: (curRO ? "This instructor's own flying" : "Your own flying") +
+        " for the squadron's currency register — " +
+        (n ? n + " flight" + (n === 1 ? "" : "s") + " recorded" : "nothing recorded yet") +
+        (dirty ? " — changed, not saved yet" : "") + ". Click to go to the section.",
+      badge: n ? String(n) : "none",
+      tone: n ? "good" : "mustard",
+      rowTone: n ? "done" : "extra",
+    };
+  }
   function navItems() {
     return data.students.map((s) => {
       const sid = s.person.id;
@@ -316,7 +339,7 @@ WA.renderInstructor = async function (view, me, opts) {
         tone: lv ? "good" : "mustard",
         rowTone: lv ? "done" : "extra",
       };
-    });
+    }).concat([curNavItem()]);
   }
   function navSummary() {
     const n = data.students.length;
@@ -324,6 +347,225 @@ WA.renderInstructor = async function (view, me, opts) {
     return data.students.filter((s) => hasChoice(s.person.id)).length + " of " + n + " chosen";
   }
   function refreshNav() { if (WA._nav) WA._nav.refresh(navItems()); }
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     ROUND 19 — «MY CURRENCY»: THE INSTRUCTOR'S OWN FLYING, ON HIS OWN LINK.
+     ──────────────────────────────────────────────────────────────────────────
+     RULING (2026-08-26): «στο link που θα στέλνουμε σε κάθε εκπαιδευτή θέλω να
+     μπορεί να περάσει κι εκείνος, πέρα από την αξιολόγηση, κάποια δική του
+     πτήση S και τα αντίστοιχα Ε. Επίσης να μπορεί να περάσει Ε και σε μια πτήση
+     με μαθητή πέρα από τις S. Αυτό θα είναι μια γέφυρα για το currency του
+     FDMS.»
+
+     IT IS A PLAIN TABLE, AND THAT IS THE WHOLE DESIGN. The student's log tables
+     are pre-seeded from the printed flow chart and wear four state colours,
+     because there the syllabus KNOWS what is owed. Here nothing is owed by a
+     form: an instructor's flying is open-ended, so there is no denominator, no
+     placeholder row and no state chip — a chip saying «owed» would invent a
+     requirement the 3-01 states somewhere else entirely. Rows are added by
+     «+ flight», they sort themselves newest first, and an empty section says so
+     in one line instead of drawing an empty skeleton.
+
+     AND IT IS READ-ONLY ON THE ADMIN'S TWIN. `asCO` renders every cell as text
+     and offers no control that writes: a currency claim says who flew what, and
+     the admin was not in the aircraft. The server agrees by having no admin
+     write path at all (db/schema.sql → wa.write_instructor_record), so this is
+     not a client-side courtesy a hand-made request could step around.
+     ══════════════════════════════════════════════════════════════════════════ */
+  const CUR_SEC = "ins_currency";
+  const CUR_NAV_ID = "__cur";
+  const curRO = asCO;
+  /* the working rows, materialised: `seq` and `e_items` are always present, so
+     the fingerprint of a row the server just returned and of the row the form
+     is holding are built from the same shape (the payload drops both again
+     where they say nothing — see curPayload) */
+  const curLoad = (list) => WA.migrateInsRecord({ currency: list }).currency
+    .map((e) => ({ ...e, seq: WA.curSeq(e), e_items: WA.eItemsOf(e) }));
+  const C = { rows: curLoad(data.currency) };
+  let curSavedAt = data.currency_last_update || null;
+  /* A ROW WITH NOTHING IN IT IS NOT AN ENTRY — the wa.slot_empty rule, said for
+     a section that has no slots: «+ flight» pressed and then ignored must not
+     become a refusal, a change line or a stored row. */
+  const curBlank = (e) => !e.date && !e.kind && !e.category && !(e.e_items || []).length;
+  const curLive = () => C.rows.filter((e) => !curBlank(e));
+  const curFp = (rows) => JSON.stringify(rows.map(WA.fpEntry));
+  let CUR_SAVED = curFp(curLive());
+  let CUR_SAVED_ROWS = curLive().map((e) => ({ ...e, e_items: (e.e_items || []).slice() }));
+  const curIsDirty = () => curFp(curLive()) !== CUR_SAVED;
+  const curChanges = () => WA.recordChanges(
+    { [CUR_SEC]: CUR_SAVED_ROWS }, { [CUR_SEC]: curLive() }, [CUR_SEC]);
+  /* what actually goes on the wire: the two keys that say nothing are dropped,
+     so a record never stores «seq: 1» or an empty event list */
+  function curPayload() {
+    return curLive().map((e) => {
+      const o = { date: e.date || null, kind: e.kind || null, category: e.category || null };
+      if (WA.curSeq(e) > 1) o.seq = WA.curSeq(e);
+      if ((e.e_items || []).length) o.e_items = (e.e_items || []).slice();
+      return o;
+    });
+  }
+  /* the three facts that make two sorties of one day two rows and not one */
+  const curTrip = (e) => [String(e.kind || ""), String(e.category || ""),
+                          String(e.date || "")].join("|");
+  /* SEQ IS AUTHORED — the box is on the row and the instructor may change it —
+     but the form never hands him a number the server is about to refuse. When a
+     row's identity lands on one that already exists it takes the lowest free
+     number instead, and the toast says so: silently keeping the collision would
+     turn a saved section into a refusal at the last moment. */
+  function curFixSeq(i) {
+    const me = C.rows[i];
+    if (!me || curBlank(me)) return 0;
+    const taken = {};
+    C.rows.forEach((r, k) => {
+      if (k !== i && !curBlank(r) && curTrip(r) === curTrip(me)) taken[WA.curSeq(r)] = true;
+    });
+    if (!taken[WA.curSeq(me)]) return 0;
+    for (let s = 1; s <= 9; s++) {
+      if (!taken[s]) { me.seq = s; return s; }
+    }
+    return 0;
+  }
+  /* the rows that cannot be saved yet, named the way the instructor reads them.
+     The server refuses these too, by field — but «required date missing
+     (currency[2].date)» is an address, and this is a sentence. */
+  function curIncomplete() {
+    return C.rows.map((e, i) => ({ e, i })).filter(({ e }) =>
+        !curBlank(e) && (!e.date || !e.kind || !e.category)).map(({ e, i }) => {
+      const miss = [!e.date ? "a date" : "",
+                    !e.kind ? "whether it was your own flight or one with a student" : "",
+                    !e.category ? "ΑΕΡΟΣ or F/S" : ""].filter(Boolean);
+      const nm = WA.rowLabel(CUR_SEC, e) ||
+        (e.e_items || []).map(WA.eItemCode).join(" · ") || "a new flight";
+      return { i, text: nm + " — still needs " + miss.join(" and ") };
+    });
+  }
+  /* THE ROW THE REFUSAL NAMES, MARKED (the 12b pattern, .is-problem): a
+     sentence that points at a row is only half of an instruction until the eye
+     knows which row it points at. Four seconds, background only. */
+  function curMark(i) {
+    const tr = document.querySelector(`#ins-cur [data-currow="${i}"]`);
+    if (!tr) return;
+    tr.classList.add("is-problem");
+    tr.scrollIntoView({ block: "center" });
+    const box = tr.querySelector("input, select");
+    if (box) box.focus();
+    setTimeout(() => tr.classList.remove("is-problem"), 4000);
+  }
+
+  function curEventOptions(e) {
+    const has = {};
+    for (const id of (e.e_items || [])) has[id] = true;
+    return `<option value="" selected>&mdash; add an event &mdash;</option>` +
+      WA.E_ITEMS.filter((it) => !has[it.id]).map((it) =>
+        `<option value="${esc(it.id)}">${esc(it.c + " — " + it.n)}</option>`).join("");
+  }
+  function curEventsCell(i, e) {
+    const ids = e.e_items || [];
+    const chips = ids.map((id, k) => {
+      const known = !!WA.eItem(id);
+      return `<span class="mschip${known ? "" : " is-legacy"}" title="${esc(WA.eItemTip(id))}">${
+        esc(WA.eItemCode(id))}${known ? "" : ` <span class="k">unknown</span>`}${curRO ? ""
+        : `<button type="button" class="x" data-curerm="${esc(i)}:${esc(k)}"
+                   aria-label="Remove ${esc(WA.eItemCode(id))}">&#10005;</button>`}</span>`;
+    }).join("");
+    return `<div class="ms-chips">${ids.length > 1
+        ? `<span class="ms-n">${esc(ids.length)}</span>` : ""}${chips
+        || `<span class="ms-none">${curRO ? "no event recorded" : "no event yet"}</span>`}</div>` +
+      (curRO ? "" : `<select class="ms-add" data-curadd="${esc(i)}"
+         aria-label="Add an event to this flight">${curEventOptions(e)}</select>`);
+  }
+  function curRowHTML(e, i) {
+    if (curRO) {
+      return `<tr>
+        <td>${esc(e.date ? fmtD(e.date) : "—")}</td>
+        <td>${esc(WA.currencyKindLabel(e.kind))}</td>
+        <td title="${esc((WA.currencyCat(e.category) || {}).tip || "")}">${esc(WA.currencyCatLabel(e.category))}</td>
+        <td class="num">${esc(WA.curSeq(e))}</td>
+        <td class="ecell">${curEventsCell(i, e)}</td>
+      </tr>`;
+    }
+    return `<tr data-currow="${esc(i)}">
+      <td><input type="date" data-curf="${esc(i)}:date" value="${esc(e.date || "")}"
+                 aria-label="Date of the flight"></td>
+      <td><select data-curf="${esc(i)}:kind" aria-label="Whose flight this was">
+        <option value=""${e.kind ? "" : " selected"}>&mdash; choose &mdash;</option>
+        ${WA.CURRENCY_KINDS.map((k) => `<option value="${esc(k.id)}"${
+          e.kind === k.id ? " selected" : ""} title="${esc(k.tip)}">${esc(k.label)}</option>`).join("")}
+      </select></td>
+      <td><select data-curf="${esc(i)}:category" aria-label="Aircraft or simulator">
+        <option value=""${e.category ? "" : " selected"}>&mdash; choose &mdash;</option>
+        ${WA.CURRENCY_CATS.map((c) => `<option value="${esc(c.id)}"${
+          e.category === c.id ? " selected" : ""} title="${esc(c.tip)}">${esc(c.label + " — " + c.en)}</option>`).join("")}
+      </select></td>
+      <td class="num"><input type="number" min="1" max="9" step="1" class="seqbox"
+             data-curf="${esc(i)}:seq" value="${esc(WA.curSeq(e))}"
+             title="${esc("Which flight of that day this is, for that kind and that programme. It is 1 unless you flew the same thing twice on the same day; the form takes the next free number when it has to.")}"
+             aria-label="Which flight of the day"></td>
+      <td class="ecell">${curEventsCell(i, e)}</td>
+      <td><button type="button" class="btn btn-sm btn-x" data-curdel="${esc(i)}"
+            title="Remove this flight from your currency">&#10005;</button></td>
+    </tr>`;
+  }
+  function curTableHTML() {
+    const ord = WA.curSort(C.rows);
+    if (!ord.length) {
+      return `<div class="empty">${curRO
+        ? "This instructor has not recorded a flight of his own yet."
+        : "No flight recorded yet &mdash; use &ldquo;+ flight&rdquo;. A sortie that exercised no event is still a sortie: the events may be left empty."}</div>`;
+    }
+    return `<div class="tblwrap"><table class="ftbl curtbl">
+      <thead><tr>
+        <th>Date</th>
+        <th title="${esc("Your own sortie, or one flown with a student. Neither of them names the student: their flight is recorded on their own form.")}">Flight</th>
+        <th title="${esc("ΑΕΡΟΣ — the semester air programme (Πίνακας 9 of the 3-01). F/S — the semester simulator programme (Πίνακας 6). The squadron counts the two separately.")}">Programme</th>
+        <th class="num" title="${esc("Which flight of that day — 1, and 2 for a second sortie of the same kind and programme on the same date.")}">#</th>
+        <th title="${esc("The events of the 3-01 EVENTS table (Ch.4 §48) this sortie exercised — the closed list of " + WA.E_ITEMS.length + " the register is built on. It may be left empty.")}">E-items</th>
+        ${curRO ? "" : "<th></th>"}
+      </tr></thead>
+      <tbody>${ord.map(({ e, i }) => curRowHTML(e, i)).join("")}</tbody>
+    </table></div>`;
+  }
+  function curCardHTML() {
+    const live = curLive();
+    const n = live.length;
+    const ev = live.reduce((a, e) => a + (e.e_items || []).length, 0);
+    return `
+      <section class="card" id="ins-cur">
+        <div class="idhead">
+          <span class="nm">${esc(WA.secLabel(CUR_SEC))} ${WA.tipDot(CUR_SEC)}</span>
+          <span class="meta">${n
+            ? esc(n + " flight" + (n === 1 ? "" : "s") + " · " + ev + " event" + (ev === 1 ? "" : "s"))
+            : "nothing recorded yet"}</span>
+          <span class="badge${n ? " badge-good" : ""}"
+            title="${esc(curSavedAt
+              ? "Last saved " + fmtDT(curSavedAt)
+              : "Nothing has been saved into this currency yet")}">${esc(curSavedAt
+              ? "upd. " + fmtDT(curSavedAt) : "not submitted yet")}</span>
+        </div>
+        <p class="hint" style="margin-top:6px">${curRO
+          ? "<b>Read-only.</b> An instructor's currency is a claim about who flew what, so it can only be entered from his own link &mdash; the server has no path for anybody else to write it. Everything below is what he recorded himself."
+          : "Your own flying, for the squadron's currency register &mdash; the bridge into FDMS. " +
+            "One row per sortie: the day, whether it was <b>your own flight</b> or one <b>with a student</b>, " +
+            "whether it was flown in the aircraft (<b>ΑΕΡΟΣ</b>) or in the simulator (<b>F/S</b>), " +
+            "and the <b>E-items</b> of the 3-01 it exercised. A flight that exercised no event is still a flight. " +
+            "This names no student and changes no student&rsquo;s record."}</p>
+        ${curTableHTML()}
+        ${curRO ? "" : `<div class="addrow"><button type="button" class="btn btn-sm btn-add"
+            id="cur-add" title="${esc("Adds one flight of your own. Nothing is filled in for you: a date, a kind and a programme are facts, and the form assumes none of them.")}"
+            >+ flight</button></div>`}
+      </section>`;
+  }
+  function curRedraw(focusSel) {
+    const holder = document.getElementById("ins-cur-holder");
+    if (!holder) return;
+    holder.innerHTML = curCardHTML();
+    if (focusSel) {
+      const el = holder.querySelector(focusSel);
+      if (el) el.focus();
+    }
+    refreshNav();
+    refreshSave();
+  }
 
   function stuCard(s) {
     const sid = s.person.id;
@@ -416,6 +658,12 @@ WA.renderInstructor = async function (view, me, opts) {
               ? `<h3>${esc(scope ? "Class " + scope + " is open — and empty"
                                  : "Nothing to assess")}</h3>` : ""}
              <p class="hint">${esc(emptyLine)}</p></section>`}
+      ${/* ROUND 19 — UNDER THE ASSESSMENTS, and under them even when there are
+           none: an instructor whose class is closed still flies, and his
+           currency is not a footnote to a questionnaire that is not being
+           asked. Its own holder, so the section redraws without the cards
+           under the reader's fingers. */ ""}
+      <div id="ins-cur-holder">${curCardHTML()}</div>
     </div>
     </div>
     ${/* ROUND 14 — ONE SAVE, and it is the student form's floating pattern:
@@ -445,7 +693,9 @@ WA.renderInstructor = async function (view, me, opts) {
     WA._nav = WA.navMount(insNavEl, {
       items: navItems(),
       summary: navSummary,
-      anchor: (id) => document.getElementById("ins-stu-" + id),
+      /* ROUND 19 — two kinds of card, one panel: a student card is found by its
+         student id, and the currency section by its own */
+      anchor: (id) => document.getElementById(id === CUR_NAV_ID ? "ins-cur" : "ins-stu-" + id),
     });
     WA._nav.summary(navSummary());
   }
@@ -517,6 +767,27 @@ WA.renderInstructor = async function (view, me, opts) {
           · printed ${esc(fmtDT(new Date().toISOString()))}${asCO
             ? " · entered on their behalf by " + esc(WA.adminRankName()) + " (" + esc(WA.ADMIN_BODY) + ")" : ""}</div>
         ${pages || `<p class="pr-none">${esc(emptyLine)}</p>`}
+        ${/* ROUND 19 — AND THE SECOND HALF OF WHAT WAS SUBMITTED. The round-8
+             doctrine for this sheet is that it prints what the document
+             actually IS; from this round the document has two parts, and a
+             printout that showed only the assessments would be filed as the
+             whole of an instructor's return. Monochrome, one row per flight,
+             the events written out in their printed codes. */ ""}
+        <div class="pr-ins-blk">
+          <h3>${esc(WA.secLabel(CUR_SEC))}
+            <span class="pr-ins-meta">own flying &mdash; the squadron&rsquo;s currency register</span></h3>
+          ${curLive().length
+            ? `<table class="pr-t"><thead><tr>
+                 <th>Date</th><th>Flight</th><th>Programme</th><th>#</th><th>E-items</th>
+               </tr></thead><tbody>${WA.curSort(curLive()).map(({ e }) => `<tr>
+                 <td>${esc(e.date ? fmtD(e.date) : "—")}</td>
+                 <td>${esc(WA.currencyKindLabel(e.kind))}</td>
+                 <td>${esc(WA.currencyCatLabel(e.category))}</td>
+                 <td>${esc(WA.curSeq(e))}</td>
+                 <td>${esc((e.e_items || []).map(WA.eItemCode).join(" · ") || "—")}</td>
+               </tr>`).join("")}</tbody></table>`
+            : `<p class="pr-none">No flight recorded.</p>`}
+        </div>
       </div>`;
   }
   buildInsPrint();
@@ -587,9 +858,36 @@ WA.renderInstructor = async function (view, me, opts) {
     refreshNav();
     refreshSave();
   }
+  /* ── ROUND 19 — THE SAVE COUNTS BOTH THINGS THIS FORM HOLDS ───────────────
+     The button has said «Save 3 assessments» since round 14 and that sentence
+     is kept EXACTLY where it is still the whole truth. The moment the currency
+     section is dirty too, it stops being the whole truth — so the word grows a
+     second half rather than being replaced by a vaguer one: «Save 3 assessments
+     + 2 currency changes» says what will be written, in the two units the
+     instructor was working in. */
+  function curCount() { return curRO ? 0 : curChanges().length; }
+  function saveWords(nA, nC) {
+    const a = nA + " assessment" + (nA === 1 ? "" : "s");
+    const c = nC + " currency change" + (nC === 1 ? "" : "s");
+    if (nA && nC) return a + " + " + c;
+    if (nC) return c;
+    return a;
+  }
+  /* The status line under the button says the same two numbers as a sentence,
+     and «3 currency changes changed» is not one: «changed» belongs to the
+     assessments, which are EDITED, while currency rows are added and removed.
+     Round 14's exact sentence is kept for the case where they are all that
+     moved, because for that case it was already right. */
+  function statusWords(nA, nC) {
+    if (nA && nC) return saveWords(nA, nC) + " — press Save.";
+    if (nC) return saveWords(0, nC) + " — press Save.";
+    return saveWords(nA, 0) + " changed — press Save.";
+  }
   function refreshSave() {
-    const n = dirtyIds().length;
-    const word = "Save " + n + " assessment" + (n === 1 ? "" : "s") + (asCO ? " as admin" : "");
+    const nA = dirtyIds().length;
+    const nC = curCount();
+    const n = nA + nC;
+    const word = "Save " + saveWords(nA, nC) + (asCO ? " as admin" : "");
     for (const id of ["ins-save", "ins-float-save"]) {
       const b = document.getElementById(id);
       if (!b) continue;
@@ -603,7 +901,7 @@ WA.renderInstructor = async function (view, me, opts) {
     const st = document.getElementById("ins-status");
     if (st && !st.classList.contains("ok") && !st.classList.contains("err")) {
       st.textContent = n
-        ? n + " assessment" + (n === 1 ? "" : "s") + " changed — press Save."
+        ? statusWords(nA, nC)
         : "Assessments are kept only after you press Save.";
     }
     /* the floating bar clears the sticky top bar, whatever height it wrapped
@@ -627,6 +925,87 @@ WA.renderInstructor = async function (view, me, opts) {
       markDirty(sid);
       return;
     }
+    /* ── ROUND 19 — THE THREE ACTS OF THE CURRENCY TABLE ────────────────────
+       Add a flight · remove a flight · take an event off a flight. All three
+       are ACTS on the working rows followed by ONE redraw of the section's own
+       holder, so the student cards above never move under the reader. */
+    if (curRO) return;
+    if (ev.target.closest("#cur-add")) {
+      if (C.rows.length >= WA.INS_SECTION_CAP(CUR_SEC)) {
+        toast("Your currency is full (" + WA.INS_SECTION_CAP(CUR_SEC) + " flights)", true);
+        return;
+      }
+      /* NOTHING IS FILLED IN. A date, a kind and a programme are FACTS, and a
+         form that guesses one of them for an instructor has put a flight in his
+         logbook that he did not fly. The row says what it still needs. */
+      C.rows.push({ date: "", kind: "", category: "", seq: 1, e_items: [] });
+      curRedraw(`[data-currow="${C.rows.length - 1}"] input[type="date"]`);
+      return;
+    }
+    const del = ev.target.closest("[data-curdel]");
+    if (del) {
+      const i = Number(del.dataset.curdel);
+      const row = C.rows[i];
+      const nm = row ? WA.rowLabel(CUR_SEC, row) : "";
+      C.rows.splice(i, 1);
+      curRedraw();
+      toast(nm ? nm + " removed — press Save to keep the change"
+               : "The empty row was removed");
+      return;
+    }
+    const erm = ev.target.closest("[data-curerm]");
+    if (erm) {
+      const [ix, k] = String(erm.dataset.curerm).split(":");
+      const row = C.rows[Number(ix)];
+      if (!row) return;
+      const ids = (row.e_items || []).slice();
+      ids.splice(Number(k), 1);
+      row.e_items = ids;
+      curRedraw(`[data-curadd="${Number(ix)}"]`);
+      return;
+    }
+  });
+
+  /* ── ROUND 19 — EVERY CELL OF THE CURRENCY TABLE, ON ONE LISTENER ─────────
+     `change` and not `input`: a date box fires `input` on every keystroke of a
+     half-typed year, and this handler REDRAWS (the table sorts by date, and the
+     sort must not be a step behind the value). Committing the cell is the
+     moment the fact exists, and the redraw puts the focus back where it was.
+     THE GUARD IS THE IDEMPOTENCY: a browser that also fires `input` on a select
+     would come through here twice, and the second pass finds nothing changed. */
+  function curField(el) {
+    if (curRO || !el || !el.dataset || !el.dataset.curf) return false;
+    const [ix, field] = String(el.dataset.curf).split(":");
+    const i = Number(ix);
+    const row = C.rows[i];
+    if (!row) return false;
+    let v = el.value;
+    if (field === "seq") {
+      const n = Math.round(Number(v));
+      v = (isFinite(n) && n >= 1 && n <= 9) ? n : 1;
+    }
+    if (String(row[field] === undefined ? "" : row[field]) === String(v)) return false;
+    row[field] = v;
+    /* the row may have just landed on another one's day, kind and programme */
+    const moved = curFixSeq(i);
+    if (moved) {
+      toast("A flight of " + fmtD(row.date) + " (" + WA.currencyCatLabel(row.category) +
+        ", " + WA.currencyKindLabel(row.kind) + ") is already recorded — this one is #" + moved);
+    }
+    curRedraw(`[data-curf="${i}:${field}"]`);
+    return true;
+  }
+  root.addEventListener("change", (ev) => {
+    const el = ev.target;
+    if (el && el.dataset && el.dataset.curadd !== undefined && el.value) {
+      const i = Number(el.dataset.curadd);
+      const row = C.rows[i];
+      if (!row) return;
+      row.e_items = WA.eItemsOf({ e_items: (row.e_items || []).concat([el.value]) });
+      curRedraw(`[data-curadd="${i}"]`);
+      return;
+    }
+    curField(el);
   });
 
   /* ── ROUND 14 — THE ONE GENERAL SAVE ──────────────────────────────────────
@@ -638,14 +1017,49 @@ WA.renderInstructor = async function (view, me, opts) {
      cards over the RPC that already exists, and reports per card: an assessment
      the server refuses leaves that one card unsaved and named, and the rest of
      the class still lands. */
+  /* ── ROUND 19 — THE CURRENCY IS ONE WRITE, AND IT GOES FIRST ──────────────
+     The whole section in one act: rows are ADDED AND REMOVED here, not only
+     edited, so a per-row RPC would have to invent a row identity that survives
+     a page still being edited. It goes before the assessment loop because it is
+     one fast call and because a refusal the instructor must act on should reach
+     him before a dozen slower writes, not after them — and the loop runs
+     regardless, so nothing in the class is held hostage by one bad flight.
+     THE SERVER'S VERDICT IS APPLIED, NOT ASSUMED: the returned record is what
+     the working rows are rebuilt from, exactly as an assessment takes back the
+     level the server stored. */
+  async function saveCurrency() {
+    if (curRO || !curIsDirty()) return null;
+    const bad = curIncomplete();
+    if (bad.length) {
+      curMark(bad[0].i);
+      return "Currency not saved — " + bad[0].text +
+        (bad.length > 1 ? " (and " + (bad.length - 1) + " more)" : "");
+    }
+    try {
+      const res = await rpc("save_instructor_currency",
+        { p_token: WA.token, p_payload: { currency: curPayload() } });
+      C.rows = curLoad((res.record || {}).currency || []);
+      curSavedAt = res.last_update || curSavedAt;
+      CUR_SAVED = curFp(curLive());
+      CUR_SAVED_ROWS = curLive().map((e) => ({ ...e, e_items: (e.e_items || []).slice() }));
+      curRedraw();
+      return null;
+    } catch (e) {
+      return "Currency not saved — " + e.message;
+    }
+  }
+
   async function saveAll(ids) {
     const st = $("ins-status");
     const btns = [$("ins-save"), document.getElementById("ins-float-save")].filter(Boolean);
     btns.forEach((b) => { b.disabled = true; });
     st.className = "st";
-    st.textContent = "Saving " + ids.length + "…";
+    st.textContent = "Saving " + (ids.length + curCount()) + "…";
     let ok = 0;
     const failed = [];
+    const curWas = curCount();
+    const curErr = await saveCurrency();
+    const curOk = curWas && !curErr ? curWas : 0;
     for (const sid of ids) {
       const cst = root.querySelector(`[data-st="${sid}"]`);
       if (cst) { cst.className = "prop-st"; cst.textContent = "Saving…"; }
@@ -693,36 +1107,54 @@ WA.renderInstructor = async function (view, me, opts) {
        the level), so the rail is redrawn from P AFTER the writes, not before */
     refreshNav();
     refreshSave();
-    if (failed.length) {
+    /* ROUND 19 — TWO WRITES, ONE VERDICT LINE. A currency refusal is reported
+       even when every assessment landed: «12 saved ✓» beside a section that was
+       silently not written is the one sentence this form must never print. */
+    if (failed.length || curErr) {
       st.className = "st err";
-      st.textContent = ok + " saved · " + failed.length + " refused — " +
-        nameOf(failed[0].sid) + ": " + failed[0].msg;
-      toast(failed.length + " assessment" + (failed.length === 1 ? "" : "s") + " could not be saved", true);
-      const card = root.querySelector(`[data-stucard="${failed[0].sid}"]`);
+      st.textContent = [
+        (ok + curOk) + " saved",
+        failed.length ? failed.length + " refused — " + nameOf(failed[0].sid) + ": " + failed[0].msg : "",
+        curErr || "",
+      ].filter(Boolean).join(" · ");
+      toast(curErr && !failed.length
+        ? "Your currency could not be saved"
+        : failed.length + " assessment" + (failed.length === 1 ? "" : "s") + " could not be saved", true);
+      const card = failed.length ? root.querySelector(`[data-stucard="${failed[0].sid}"]`)
+                                 : document.getElementById("ins-cur");
       if (card) card.scrollIntoView({ block: "center" });
     } else {
       st.className = "st ok";
-      st.textContent = ok + " assessment" + (ok === 1 ? "" : "s") + " saved ✓ " +
+      st.textContent = saveWords(ok, curOk) + " saved ✓ " +
         fmtDT(new Date().toISOString()) + (asCO ? " — tagged as entered by " + WA.ADMIN_WORD : "");
       toast(asCO
         ? ok + " assessment" + (ok === 1 ? "" : "s") + " saved as admin — they are tagged"
-        : ok + " assessment" + (ok === 1 ? "" : "s") + " saved");
+        : saveWords(ok, curOk) + " saved");
     }
   }
   /* the change list, then the write — «ποιος εγραψε … και σε σχεση με τι» */
   async function confirmedSaveAll() {
     const ids = dirtyIds();
-    if (!ids.length) return;
+    const curCh = curRO ? [] : curChanges();
+    if (!ids.length && !curCh.length) return;
     const before = {}, after = {};
     for (const sid of ids) { before[sid] = savedStateOf(sid); after[sid] = stateOf(sid); }
-    const changes = WA.proposalChanges(before, after, nameOf);
+    /* ROUND 19 — ONE LIST, TWO KINDS OF LINE. The assessments name a student
+       and what changed about him; the currency rows name themselves through the
+       SAME builder every other record in this application uses (WA.rowLabel →
+       «My currency · own · ΑΕΡΟΣ · 26/08/2026 #2 — added (E-items Ε-1α · Ε-32)»),
+       so nothing about this section had to be described twice. */
+    const changes = WA.proposalChanges(before, after, nameOf).concat(curCh);
     const ans = await WA.confirmSave({
       who: WA.personRankName(WA.me || {}),
       onBehalf: asCO ? WA.personRankName(who) : "",
-      title: "Save " + ids.length + " assessment" + (ids.length === 1 ? "" : "s") + "?",
-      what: asCO
+      title: "Save " + saveWords(ids.length, curCh.length) + "?",
+      what: (asCO
         ? "These are recorded as this instructor’s assessments and tagged “entered by " + WA.ADMIN_WORD + "”. Every one of them is about FIGHTERS, on the five-level scale."
-        : "These are your assessments for the Wing Commander brief — one answer per student, about FIGHTERS, on the five-level scale.",
+        : "These are your assessments for the Wing Commander brief — one answer per student, about FIGHTERS, on the five-level scale.") +
+        (curCh.length
+          ? " The currency rows are your own flying: they name no student, they change no student’s record, and they are what the squadron’s currency register reads."
+          : ""),
       savedWord: "last saved",
       changes,
     });
@@ -740,9 +1172,18 @@ WA.renderInstructor = async function (view, me, opts) {
         if (ck) ck.checked = a.flew_with;
         markDirty(sid);
       }
+      /* the currency goes back to its last saved rows by the same act — the
+         dialog listed both, so «discard» must undo both or the sentence it
+         asked the question with was not true */
+      if (curCh.length) {
+        C.rows = CUR_SAVED_ROWS.map((e) => ({ ...e, e_items: (e.e_items || []).slice() }));
+        curRedraw();
+      }
       if (WA._insPrint) WA._insPrint();
       toast(changes.length + " change" + (changes.length === 1 ? "" : "s") +
-        " discarded — the form is back to the last saved assessments");
+        " discarded — the form is back to the last saved " +
+        (curCh.length && ids.length ? "assessments and currency"
+          : curCh.length ? "currency" : "assessments"));
       return;
     }
     await saveAll(ids);
@@ -792,11 +1233,19 @@ WA.renderInstructor = async function (view, me, opts) {
   }
 
   WA._insState = P;
+  /* ROUND 19 — AND THE CURRENCY COUNTS AS UNSAVED WORK TOO. The guard existed
+     to stop a closed tab from throwing away an answer; a table of flights is
+     more typing than an answer, not less. It is read through a function rather
+     than copied into a flag, so it can never be a stale snapshot of the rows. */
+  WA._insCurDirty = () => !curRO && curIsDirty();
   if (!WA._insUnloadHooked) {
     WA._insUnloadHooked = true;
     window.addEventListener("beforeunload", (ev) => {
       const p = WA._insState;
-      if (p && Object.values(p).some((x) => x.dirty)) { ev.preventDefault(); ev.returnValue = ""; }
+      const cur = typeof WA._insCurDirty === "function" && WA._insCurDirty();
+      if (cur || (p && Object.values(p).some((x) => x.dirty))) {
+        ev.preventDefault(); ev.returnValue = "";
+      }
     });
   }
 };

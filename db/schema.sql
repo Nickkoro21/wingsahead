@@ -12,15 +12,15 @@
 --   · RLS is additionally ENABLED on every table with no policies
 --     (deny-by-default belt & braces).
 --
--- ENTER ON BEHALF (round 4): the CO can fill in ANYBODY's form through the
+-- ENTER ON BEHALF (round 4): the admin can fill in ANYBODY's form through the
 -- admin_* on-behalf RPCs. They share the owner's validation path exactly
 -- (wa.write_record / wa.write_proposal), and what they write is stamped
--- entered_by='admin' server-side — the tag the whole UI renders as "CO".
--- ROUND 8 — THE CO'S EDITS PREVAIL (supersedes the round-4b reclaim rule):
--- an entry the CO created or modified is LOCKED for its owner. The owner's
+-- entered_by='admin' server-side — the tag the whole UI renders as "ADMIN".
+-- ROUND 8 — THE ADMIN'S EDITS PREVAIL (supersedes the round-4b reclaim rule):
+-- an entry the admin created or modified is LOCKED for its owner. The owner's
 -- save must carry every one of them through fact for fact and no longer
 -- strips the stamps (wa.carry_stamps refuses a payload that alters or drops
--- one, by name); the CO can still edit or delete his own, and editing an
+-- one, by name); the admin can still edit or delete his own, and editing an
 -- owner's entry makes it his — which locks it.
 -- ROUND 8 — SMS NAMES ITS ΚΕΠΕ ENTRY CONDITION (3-01 ΚΕΦ.2 §32β, PDF 54 /
 -- printed 36): wa.sms_reasons(), required on every entrance, legacy rows
@@ -76,11 +76,11 @@
 -- for the solos and the eight checkrides (empty until flown — an unflown
 -- slot is a placeholder that counts for nothing and is never stamped), and
 -- the FPC/CEF trigger flight + evaluator (ex "by").
--- ROUND 4b — WHAT they write, not what they submit: a CO save is DIFFED
+-- ROUND 4b — WHAT they write, not what they submit: an admin save is DIFFED
 -- against the stored record (wa.stamp_record_diff), so adding one line to a
 -- student's 17 self-reported entries stamps that one line and leaves the other
 -- 17 self-reported. The record-level flag is derived from the entries
--- (wa.record_stamp) and means "contains CO-entered data", never "is a CO
+-- (wa.record_stamp) and means "contains admin-entered data", never "is an admin
 -- record" — the views spell out which by counting.
 --
 -- The FINAL SELECT of this script prints the ADMIN token + link fragment —
@@ -160,6 +160,37 @@ create table if not exists public.student_records (
   last_update timestamptz not null default now(),
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
+);
+
+-- ── ROUND 19 — THE INSTRUCTOR'S OWN RECORD ────────────────────────────────
+-- The mirror of public.student_records, one table over: a student reports his
+-- own training, and from this round an instructor reports his own CURRENCY —
+-- the flights he flew and the 3-01 events they exercised. Same shape for the
+-- same reasons: ONE jsonb per person, sections inside it, every count derived
+-- and nothing typed; whitelisted keys, a read-time strip and a cap per section
+-- (wa.ins_entry_keys / wa.ins_strip_entry / wa.ins_section_cap).
+--
+-- WHY A SECOND TABLE AND NOT A COLUMN ON public.proposals. A proposal is keyed
+-- (instructor, student) — it is a statement ABOUT SOMEBODY ELSE, and there are
+-- as many of them as there are students. A currency row is a statement about
+-- the instructor HIMSELF, and there is exactly one record of them per person.
+-- Hanging it off a proposal would tie an instructor's flying to whichever
+-- student happened to be first in a list, and would lose it the day that
+-- student left. One row per instructor is the shape the data actually has.
+--
+-- NO `entered_by` COLUMN, AND THAT IS THE RULING (round 19). The admin can
+-- enter a STUDENT's record on their behalf because he is transcribing a form
+-- somebody filled in on paper. He cannot enter an instructor's currency: it is
+-- a claim about who flew what, and the only person who can make it is the
+-- person who flew. The admin's on-behalf form therefore shows this section
+-- READ-ONLY and says why — so there is no stamp to carry, no diff to stamp,
+-- and no way for a currency claim to arrive with anybody else's hand on it.
+create table if not exists public.instructor_records (
+  instructor_id uuid primary key references public.people(id) on delete cascade,
+  data          jsonb not null default '{}'::jsonb,
+  last_update   timestamptz not null default now(),
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
 );
 
 create table if not exists public.proposals (
@@ -341,7 +372,7 @@ $$;
 --     People tab simply has none, and Postgres allows any number of NULLs in
 --     a unique column, so hand-made people never collide with each other.
 --   · The TOKEN is never part of an import's update list: a re-import must not
---     invalidate a link the CO has already distributed.
+--     invalidate a link the admin has already distributed.
 --   · call_sign / country / test_pilot are what the roster adds to a person;
 --     country is TEXT and not an enum on purpose — the country dropdown of
 --     both apps carries HAF / ITAF plus the "Other…" free-text escape, and the
@@ -379,14 +410,20 @@ drop trigger if exists trg_touch_proposals on public.proposals;
 create trigger trg_touch_proposals before update on public.proposals
   for each row execute function wa.touch_updated_at();
 
--- ── LOCKDOWN: no direct table access, RLS deny-by-default ──────────────────
-alter table public.people          enable row level security;
-alter table public.student_records enable row level security;
-alter table public.proposals       enable row level security;
+drop trigger if exists trg_touch_ins_records on public.instructor_records;
+create trigger trg_touch_ins_records before update on public.instructor_records
+  for each row execute function wa.touch_updated_at();
 
-revoke all on public.people          from public, anon, authenticated;
-revoke all on public.student_records from public, anon, authenticated;
-revoke all on public.proposals       from public, anon, authenticated;
+-- ── LOCKDOWN: no direct table access, RLS deny-by-default ──────────────────
+alter table public.people             enable row level security;
+alter table public.student_records    enable row level security;
+alter table public.proposals          enable row level security;
+alter table public.instructor_records enable row level security;
+
+revoke all on public.people             from public, anon, authenticated;
+revoke all on public.student_records    from public, anon, authenticated;
+revoke all on public.proposals          from public, anon, authenticated;
+revoke all on public.instructor_records from public, anon, authenticated;
 revoke all on all sequences in schema public from anon, authenticated;
 
 -- ── auth / validation helpers (schema wa — unreachable from the API) ───────
@@ -1286,11 +1323,15 @@ $$;
 -- Every list of instructors the application produces is ordered by this key and
 -- by nothing else. Two levels: the AIR FORCE (HAF, then ITAF, then any other
 -- named one alphabetically, then whoever the roster gave no country), and
--- within each the CALL SIGN in NATURAL order — P-2 before P-14, never the
--- string order that puts P-14 first. The call sign and not the rank decides,
--- because the call sign is the squadron's own position (P-14 is the CO) while
--- the rank is a grade; this is the FDMS Currency precedent unchanged. Whoever
--- has no call sign sorts LAST WITHIN THEIR OWN AIR FORCE, by surname.
+-- within each the CALL SIGN in NATURAL order — a 2 before a 14, never the
+-- string order that puts the 14 first. The call sign and not the rank decides,
+-- because the call sign IS the squadron's own position while the rank is a
+-- grade; this is the FDMS Currency precedent unchanged.
+-- WHICH CALL SIGN COMES FIRST IS NOT WRITTEN ANYWHERE (round 19, the FDMS
+-- round-18 privacy lesson applied here): the order falls out of the `call_sign`
+-- values the roster itself holds, so no literal in this file names a real call
+-- sign and no comment says which officer holds which one. Whoever has no call
+-- sign sorts LAST WITHIN THEIR OWN AIR FORCE, by surname.
 -- It lives on the SERVER as well as in the client because the instructor
 -- picker's payload is surnames and nothing else — no country and no call sign
 -- ever leave the database for a student — so the ORDER is the only way the
@@ -1336,6 +1377,139 @@ language sql immutable as $$
   select array['C4790-91-S1','C4801-04-S1','C4901-05-S1','C5201-04-S1','C5301-04-S1','F4301-06-S1','F4301-06-S2','F4501-03-S1']::text[]
 $$;
 -- ▲▲ GENERATED BLOCK ▲▲
+
+-- ══ ROUND 19 — THE INSTRUCTOR'S OWN CURRENCY (the FDMS bridge lane) ════════
+-- RULING (2026-08-26), verbatim: «στο link που θα στέλνουμε σε κάθε εκπαιδευτή
+-- θέλω να μπορεί να περάσει κι εκείνος, πέρα από την αξιολόγηση, κάποια δική
+-- του πτήση S και τα αντίστοιχα Ε. Επίσης να μπορεί να περάσει Ε και σε μια
+-- πτήση με μαθητή πέρα από τις S. Αυτό θα είναι μια γέφυρα για το currency του
+-- FDMS.»
+--
+-- WHAT A ROW IS. An instructor's currency row is a CLAIM ABOUT HIS OWN FLYING:
+-- on this DAY he flew — either a sortie of his own (kind 'own') or a sortie
+-- with a student (kind 'student') — in the AIR or in the SIMULATOR (category
+-- 'aeros' / 'fs'), and it exercised these EVENTS (e_items[], possibly none).
+-- `seq` tells two flights of the same day apart, exactly as it does on a
+-- student's log row.
+--
+-- WHAT A ROW IS NOT. It is NOT the student's flight. A 'student' row does not
+-- reference a student, a record or a proposal: the flight itself lives on the
+-- student's side and is entered there by the student. This row is the
+-- instructor's own currency claim about the same hour of the same day, and
+-- keeping the two unlinked is what makes the sections independently correct —
+-- neither can corrupt the other, and revoking one link touches neither.
+--
+-- AND THERE IS NO SORTIE CODE, DELIBERATELY (the round-19 judgement). The R12
+-- flight-kind pattern — a closed syllabus list with an off-catalogue escape —
+-- was considered and refused for two reasons the form makes plain. (a) The
+-- syllabus catalogue is the STUDENT's Phase-II flow chart; an instructor's own
+-- Σ sortie under Πίνακας 9 has no code in it at all, so the box would be
+-- empty-by-nature on half the rows, and a field that is meaningless for half
+-- its rows teaches its user to skip it on the other half. (b) FDMS's currency
+-- cell is dated by DATE and E-ITEM and by nothing else (scheduler-spec §11:
+-- «μία έξοδος στο κελί, κατά τη δική της ημερομηνία · δατάρει και Ε άλλων
+-- στηλών»), so a code would be a field this bridge carries and its destination
+-- never reads. House minimalism decided the rest: this section has no note
+-- field either.
+create or replace function wa.currency_kinds() returns text[]
+language sql immutable as $$ select array['own','student']::text[] $$;
+
+-- THE TWO PROGRAMMES, IN THE NAMES THE 3-01 PRINTS FOR THEM. «ΑΕΡΟΣ» is the
+-- semester AIR programme (Πίνακας 9) and «F/S» the semester SIMULATOR one
+-- (Πίνακας 6) — the two sections the FDMS currency card opens with and closes
+-- on. They are STORED as ASCII keys and only ever SHOWN in the printed Greek,
+-- the same terminology bridge the Weekly tip makes for the ΕΕΘ.
+create or replace function wa.currency_categories() returns text[]
+language sql immutable as $$ select array['aeros','fs']::text[] $$;
+
+-- ▼▼ CURRENCY GENERATED BLOCK — tools/gen-currency-catalog.py — DO NOT EDIT BY HAND ▼▼
+-- Generated from the FDMS instructor-currency research file:
+--   2026-08-14  (D:/FDMS/data/requirements/instructor_currency.json)
+-- MIRROR: app/currency-catalog.js, written by the same run of the same script.
+--
+-- THE E-ITEMS OF THE 3-01/2025 ΔΑΕ — the EVENTS table of Ch.4 §48 (PDF 105-107).
+-- An instructor's currency row names the events his sortie exercised, and this
+-- is the closed list it may name: an id outside it is refused ON WRITE, BY NAME,
+-- because a currency claim nobody can look up in the 3-01 is a claim that cannot
+-- be audited. The STORED value is the ASCII id — never the printed Greek code,
+-- whose Ε and α are homoglyphs of Latin E and a and could not be retyped.
+--
+-- 27 of the catalog's 28 e-items are here. The one that is not, by name:
+--   e-1d-demo — Chapter 5 of the 3-01 — the display pilot's own currency, which FDMS shows only to the instructor who holds the post.
+create or replace function wa.e_item_ids() returns text[]
+language sql immutable as $$
+  select array[
+    'e-1a-aerobatics',
+    'e-1b-spin',
+    'e-1c-aircraft-test-fcf',
+    'e-2-practice-forced-landing',
+    'e-3-in-cloud-flight',
+    'e-4-ifr-approach',
+    'e-5-formation-descent',
+    'e-6c-landing-light-off-night',
+    'e-9a-no-flap-approach',
+    'e-9c-heavy-aircraft-approach',
+    'e-10a-foreign-airfield',
+    'e-10b-both-runway-directions',
+    'e-14a-live-weapons-air-to-ground',
+    'e-14b-live-weapons-air-to-air',
+    'e-18-formation-takeoff',
+    'e-21-flight-300ft',
+    'e-30a-high-altitude-intercept-day',
+    'e-31a-low-altitude-intercept-day',
+    'e-32-bfm',
+    'e-40-training-munitions-release',
+    'e-41a-range-firing-day',
+    'e-45-visual-delivery-med-hi-apex-day',
+    'e-46-visual-delivery-low-apex-day',
+    'e-49a-has-day',
+    'e-49c-las-day',
+    'e-62-oca-strike',
+    'e-67-cas'
+  ]::text[]
+$$;
+
+-- the printed name of one e-item — the refusal says WHICH event it could not
+-- find, in the words the 3-01 prints, not a slug the instructor never typed
+create or replace function wa.e_item_name(p_id text) returns text
+language sql immutable as $$
+  select case p_id
+    when 'e-1a-aerobatics' then 'Ε-1α — Aerobatics (Ακροβατικά)'
+    when 'e-1b-spin' then 'Ε-1β — SPIN'
+    when 'e-1c-aircraft-test-fcf' then 'Ε-1γ — Aircraft test flight (FCF / Δοκιμή Α/Φ)'
+    when 'e-2-practice-forced-landing' then 'Ε-2 — Practice forced landing (Εικονική Αναγκαστική Π/Γ)'
+    when 'e-3-in-cloud-flight' then 'Ε-3 — Flight inside cloud (Πτήση εντός νεφών)'
+    when 'e-4-ifr-approach' then 'Ε-4 — IFR approach (Προσέγγιση IFR)'
+    when 'e-5-formation-descent' then 'Ε-5 — Descent in formation (Κάθοδος σε σχηματισμό)'
+    when 'e-6c-landing-light-off-night' then 'Ε-6γ — Approach with landing light OFF (night)'
+    when 'e-9a-no-flap-approach' then 'Ε-9α — Approach without FLAPS'
+    when 'e-9c-heavy-aircraft-approach' then 'Ε-9γ — Approach with a heavy aircraft (Προσέγγιση με βαρύ Α/Φ)'
+    when 'e-10a-foreign-airfield' then 'Ε-10α — Landing, touch & go or approach at a foreign airfield'
+    when 'e-10b-both-runway-directions' then 'Ε-10β — Landing or approach on both runway directions'
+    when 'e-14a-live-weapons-air-to-ground' then 'Ε-14α — Release of live air-to-ground weapons'
+    when 'e-14b-live-weapons-air-to-air' then 'Ε-14β — Release of live air-to-air weapons'
+    when 'e-18-formation-takeoff' then 'Ε-18 — Formation takeoff (Α/Γ σε σχηματισμό)'
+    when 'e-21-flight-300ft' then 'Ε-21 — Flight at 300 ft (LOW ALTITUDE)'
+    when 'e-30a-high-altitude-intercept-day' then 'Ε-30α — High-altitude interception, day (Υ.Α.Η.)'
+    when 'e-31a-low-altitude-intercept-day' then 'Ε-31α — Low-altitude interception, day (Χ.Α.Η.)'
+    when 'e-32-bfm' then 'Ε-32 — BFM (Basic Fighter Manoeuvres)'
+    when 'e-40-training-munitions-release' then 'Ε-40 — Release of training munitions (Άφεση εκπαιδευτικών πυρομαχικών)'
+    when 'e-41a-range-firing-day' then 'Ε-41α — Range firing, day (Π.ΒΟΛΗΣ (Η))'
+    when 'e-45-visual-delivery-med-hi-apex-day' then 'Ε-45 — VISUAL DELIVERY MED/HI APEX, day'
+    when 'e-46-visual-delivery-low-apex-day' then 'Ε-46 — VISUAL DELIVERY LOW APEX, day'
+    when 'e-49a-has-day' then 'Ε-49Α — HAS (High Angle Strafe), day'
+    when 'e-49c-las-day' then 'Ε-49Γ — LAS (Low Angle Strafe), day'
+    when 'e-62-oca-strike' then 'Ε-62 — OCA (STRIKE)'
+    when 'e-67-cas' then 'Ε-67 — CAS (Close Air Support)'
+    else null end
+$$;
+-- ▲▲ CURRENCY GENERATED BLOCK ▲▲
+
+-- HOW MANY EVENTS ONE SORTIE MAY NAME. The ceiling is the catalogue itself:
+-- a sortie cannot exercise an event twice, so more ids than the 3-01 prints is
+-- not a busy sortie, it is a payload nobody typed.
+create or replace function wa.e_item_cap() returns int
+language sql immutable as $$ select array_length(wa.e_item_ids(), 1) $$;
 
 -- ══ ROUND 11 — THE GRADE SCALE, AND WHAT «SUCCESSFUL» MEANS ════════════════
 -- Nothing in a student record stores an OUTCOME: an evaluation entry carries
@@ -1517,8 +1691,8 @@ $$;
 -- discretion of the Squadron CO / DO, which the six conditions specify
 -- («Ειδικότερα…») without exhausting. That is the only room the regulation
 -- leaves, so it is the only option beyond the six, it is NAMED rather than
--- blank, and it demands the reason in writing (§32δ(2): the CO informs the
--- student of the reasons he was put in ΚΕΠΕ).
+-- blank, and it demands the reason in writing (§32δ(2): the Squadron CO
+-- informs the student of the reasons he was put in ΚΕΠΕ).
 -- MIRROR: app/app.js → WA.SMS_REASONS. Change one, change the other.
 create or replace function wa.sms_reasons() returns text[]
 language sql immutable as $$
@@ -1657,8 +1831,8 @@ $$;
 --      everywhere.
 -- NOTHING IS PRE-SEEDED. The syllabus list is the CLOSED LIST a sortie is
 -- CHOSEN from, never a skeleton of rows: an unflown sortie is not an entry, so
--- wa.slot_empty needs no branch for these four and the CO-entry arithmetic
--- ("1 of 18 entered by the CO") is not diluted by 133 placeholders.
+-- wa.slot_empty needs no branch for these four and the admin-entry arithmetic
+-- ("1 of 18 entered by the admin") is not diluted by 133 placeholders.
 --
 -- the thirteen sections of a v2 record, in form order — the new four LAST,
 -- which is where the directive puts them («ενα πινακα στο τελος»).
@@ -1885,7 +2059,7 @@ $$;
 -- stage prescribes and the eight stage checkrides are present from the first
 -- day, empty until they are flown. A slot nobody has flown yet is a
 -- PLACEHOLDER, not an entry — it must not be counted, must not be stamped as
--- "entered by the CO", and must not demand a date it cannot have.
+-- "entered by the admin", and must not demand a date it cannot have.
 create or replace function wa.slot_empty(p_sec text, e jsonb) returns boolean
 language sql immutable as $$
   select case
@@ -2266,7 +2440,7 @@ begin
           perform wa.chk(nullif(trim(coalesce(e->>'instructor', '')), '') is not null,
                          w || '.instructor',
                          'every flown sortie names the instructor — a student never launches alone on their own authority, and an ungraded row still had somebody in the other seat or somebody who authorised it');
-          -- the unambiguous identity, written by the CO's form path only for
+          -- the unambiguous identity, written by the admin's form path only for
           -- now. Never drawn as a box, so nothing a student types reaches it.
           perform wa.chk_text(e->'instructor_oid', w || '.instructor_oid', false, 64);
 
@@ -2532,7 +2706,7 @@ begin
       -- The stage is flown in one order and the checkrides sit in it at fixed
       -- points, so a later checkride cannot have been flown while an earlier
       -- one has not: such a record is a typo in the identity picker, and it
-      -- silently corrupts every per-checkride comparison the CO makes.
+      -- silently corrupts every per-checkride comparison the admin makes.
       -- THE ORDER IS THE SYLLABUS ORDER — wa.eval_ids(), generated from the
       -- FILE ORDER of the sortie entries in flowchart2.json (the printed
       -- Training Flow Chart): C4590 → C4790 → C5090 → C5490 → I4490 → I4890
@@ -3062,8 +3236,182 @@ begin
   return arr;
 end $$;
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ROUND 19 — THE INSTRUCTOR RECORD: ITS BOUNDARY, ITS WHITELIST, ITS REPAIR
+-- ───────────────────────────────────────────────────────────────────────────
+-- Everything below is the student-record machinery said once more for the
+-- table next door, and it is said SEPARATELY on purpose. The two records share
+-- not one section name, and a single wa.entry_keys() serving both would answer
+-- 'currency' with the student's list — which is exactly the failure mode the
+-- whitelist exists to prevent: an unregistered section is not rejected, it is
+-- silently DESTROYED by the strip, row by row, on the first read. Two records,
+-- two registries, and each one exhaustive about its own sections.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- the sections of an instructor record, in form order. One, for now — and the
+-- list exists rather than the literal so the second one costs a line here and
+-- nothing anywhere else.
+-- MIRROR: app/app.js → WA.INS_SECTIONS.
+create or replace function wa.ins_sections() returns text[]
+language sql immutable as $$ select array['currency']::text[] $$;
+
+-- HOW MANY ROWS ONE SECTION MAY HOLD. An instructor flies most days of the
+-- week; 400 rows is roughly two years of his own sorties, and like every other
+-- cap in this schema it is a runaway-client stop and not a squadron rule.
+create or replace function wa.ins_section_cap(p_sec text) returns int
+language sql immutable as $$ select case when p_sec = 'currency' then 400 else 200 end $$;
+
+-- PER-SECTION KEY WHITELIST — the exhaustive list of keys ONE entry of an
+-- instructor's record may carry. Anything else is refused on write and dropped
+-- on read, exactly as wa.entry_keys does for a student's.
+-- MIRROR: app/app.js → WA.INS_ENTRY_KEYS. Change one, change the other.
+create or replace function wa.ins_entry_keys(p_sec text) returns text[]
+language sql immutable as $$
+  select case p_sec
+    -- date      required — a currency claim without a day claims nothing
+    -- kind      'own' (his own sortie) / 'student' (a sortie with a student)
+    -- category  'aeros' (Πίνακας 9, the air programme) / 'fs' (Πίνακας 6, SIM)
+    -- e_items   the 3-01 EVENTS the sortie exercised — ids of wa.e_item_ids(),
+    --           possibly NONE: a plain S flight that exercised no event is
+    --           still a flight, and the ruling asks for it by name
+    -- seq       which sortie of that kind, category and day — 1, and 2 for the
+    --           second. AUTHORED, never an array index (the round-12 doctrine)
+    when 'currency' then array['date','kind','category','e_items','seq']
+    else array[]::text[] end
+$$;
+
+-- one entry, reduced to the keys its section allows (read-time repair)
+create or replace function wa.ins_strip_entry(e jsonb, p_sec text) returns jsonb
+language sql immutable as $$
+  select case when jsonb_typeof(e) <> 'object' then '{}'::jsonb else
+    coalesce((select jsonb_object_agg(t.k, t.v) from jsonb_each(e) t(k, v)
+              where t.k = any(wa.ins_entry_keys(p_sec))), '{}'::jsonb) end
+$$;
+
+-- the E-items of one row, as a text[] — used by the uniqueness and membership
+-- checks below and by nothing that writes
+create or replace function wa.e_items_of(e jsonb) returns text[]
+language sql immutable as $$
+  select case when jsonb_typeof(e->'e_items') = 'array'
+    then coalesce((select array_agg(x #>> '{}')
+                   from jsonb_array_elements(e->'e_items') x), array[]::text[])
+    else array[]::text[] end
+$$;
+
+-- INSTRUCTOR RECORD payload — full structural validation, raises on violation.
+-- Every refusal NAMES the thing it refused, because the instructor form saves
+-- the whole section in one act and «invalid payload» would send him hunting
+-- through his own year for the row the server meant.
+create or replace function wa.validate_instructor_record(p jsonb) returns void
+language plpgsql immutable as $$
+declare
+  k text; f text; i int; j int; e jsonb; w text;
+  ids text[]; seen text[];
+begin
+  perform wa.chk(jsonb_typeof(p) = 'object', 'payload', 'must be a JSON object');
+  for k in select jsonb_object_keys(p) loop
+    perform wa.chk(k = any(wa.ins_sections()), k,
+      format('unknown section — an instructor record holds: %s',
+             array_to_string(wa.ins_sections(), ', ')));
+    perform wa.chk(jsonb_typeof(p->k) = 'array', k, 'section must be a list of entries');
+    perform wa.chk(jsonb_array_length(p->k) <= wa.ins_section_cap(k), k,
+      format('too many entries (max %s)', wa.ins_section_cap(k)));
+    for i in 0 .. jsonb_array_length(p->k) - 1 loop
+      e := p->k->i;
+      w := format('%s[%s]', k, i);
+      perform wa.chk(jsonb_typeof(e) = 'object', w, 'entry must be an object');
+      -- the whitelist, refused BY NAME on the way in
+      for f in select jsonb_object_keys(e) loop
+        perform wa.chk(f = any(wa.ins_entry_keys(k)), w || '.' || f,
+          format('unknown field for section %s — allowed: %s',
+                 k, array_to_string(wa.ins_entry_keys(k), ', ')));
+      end loop;
+      if k = 'currency' then
+        perform wa.chk_date(e->'date', w || '.date', true);
+        perform wa.chk((e->>'kind') = any(wa.currency_kinds()), w || '.kind',
+          format('a flight is either your own or one with a student — %s',
+                 array_to_string(wa.currency_kinds(), ' / ')));
+        perform wa.chk((e->>'category') = any(wa.currency_categories()), w || '.category',
+          format('a flight is flown in the air or in the simulator — %s',
+                 array_to_string(wa.currency_categories(), ' / ')));
+        perform wa.chk_int(e->'seq', w || '.seq', 1, 9);
+        -- THE EVENTS. A closed list, and the refusal names the id it could not
+        -- find: a currency claim that cannot be looked up in the 3-01 is a
+        -- claim nobody can audit, and «invalid» would not say which one.
+        if e ? 'e_items' then
+          perform wa.chk(jsonb_typeof(e->'e_items') = 'array' or jsonb_typeof(e->'e_items') = 'null',
+                         w || '.e_items', 'must be a list of event ids');
+          if jsonb_typeof(e->'e_items') = 'array' then
+            perform wa.chk(jsonb_array_length(e->'e_items') <= wa.e_item_cap(),
+              w || '.e_items',
+              format('a sortie cannot exercise more events than the 3-01 prints (%s)',
+                     wa.e_item_cap()));
+            ids := wa.e_items_of(e);
+            for j in 1 .. coalesce(array_length(ids, 1), 0) loop
+              perform wa.chk(ids[j] = any(wa.e_item_ids()),
+                format('%s.e_items[%s]', w, j - 1),
+                format('«%s» is not an event of the 3-01 EVENTS table — choose one of the %s printed events',
+                       ids[j], wa.e_item_cap()));
+              perform wa.chk((select count(*) from unnest(ids) x where x = ids[j]) = 1,
+                format('%s.e_items[%s]', w, j - 1),
+                format('«%s» is named twice on the same sortie — one flight exercises an event once',
+                       coalesce(wa.e_item_name(ids[j]), ids[j])));
+            end loop;
+          end if;
+        end if;
+      end if;
+    end loop;
+    -- ONE ROW PER (kind, category, date, seq) — the same identity the change
+    -- list names a row by, so two rows the dialog would print identically
+    -- cannot both be stored. `seq` is what makes a second sortie of the same
+    -- day sayable; without this check it would also make it forgeable twice.
+    if k = 'currency' then
+      seen := array[]::text[];
+      for i in 0 .. jsonb_array_length(p->k) - 1 loop
+        e := p->k->i;
+        f := (e->>'kind') || '|' || (e->>'category') || '|' || (e->>'date') || '|' ||
+             coalesce(e->>'seq', '1');
+        perform wa.chk(not (f = any(seen)), format('%s[%s]', k, i),
+          format('this flight is already recorded (%s, %s, flight %s of the day) — give the second one its own number',
+                 e->>'date', e->>'category', coalesce(e->>'seq', '1')));
+        seen := seen || f;
+      end loop;
+    end if;
+  end loop;
+end $$;
+
+-- READ-TIME REPAIR of an instructor record — the twin of wa.migrate_record.
+-- It has no legacy shapes to heal (this section is one round old), so its whole
+-- job is the FINAL PASS: every section the registry does not name is dropped,
+-- and inside a section every key it does not name is stripped. That is what
+-- makes a retired key stop existing the moment the record is read, instead of
+-- lingering in storage until somebody notices.
+create or replace function wa.migrate_instructor_record(p jsonb) returns jsonb
+language plpgsql immutable as $$
+declare o jsonb := '{}'::jsonb; k text; arr jsonb; i int;
+begin
+  if jsonb_typeof(p) <> 'object' then return '{}'::jsonb; end if;
+  foreach k in array wa.ins_sections() loop
+    arr := '[]'::jsonb;
+    if jsonb_typeof(p->k) = 'array' then
+      for i in 0 .. jsonb_array_length(p->k) - 1 loop
+        arr := arr || jsonb_build_array(wa.ins_strip_entry(p->k->i, k));
+      end loop;
+    end if;
+    o := o || jsonb_build_object(k, arr);
+  end loop;
+  return o;
+end $$;
+
+-- how many rows an instructor record holds, all sections together
+create or replace function wa.ins_entry_count(p jsonb) returns int
+language sql immutable as $$
+  select coalesce(sum(coalesce(jsonb_array_length(p->k), 0))::int, 0)
+  from unnest(wa.ins_sections()) k
+$$;
+
 -- person as public jsonb (never leaks the token).
--- ROUND 9: the roster fields travel with the person — external_oid so the CO
+-- ROUND 9: the roster fields travel with the person — external_oid so the admin
 -- can see WHICH row the shared roster owns, call_sign / country / test_pilot
 -- because they are how the squadron actually names and sorts its instructors.
 create or replace function wa.person_json(p public.people) returns jsonb
@@ -3095,8 +3443,8 @@ language sql immutable as $$
       and not wa.slot_empty(s.key, e)), 0)
 $$;
 
--- how many entries of a record were entered BY THE CO on the owner's behalf.
--- Kept as its own name because a dozen callers say it, and because "the CO's"
+-- how many entries of a record were entered BY THE ADMIN on the owner's behalf.
+-- Kept as its own name because a dozen callers say it, and because "the admin's"
 -- is the question every surface actually asks.
 create or replace function wa.co_entry_count(p jsonb) returns int
 language sql immutable as $$
@@ -3104,12 +3452,12 @@ language sql immutable as $$
 $$;
 
 -- how many entries the record carries in total — the DENOMINATOR behind
--- "17 self-reported + 1 entered by the CO". Without it the dashboard cannot
--- tell a record the CO wrote from a record the CO merely added one line to
--- (round-4b: the two used to look identical, and both read as "CO record").
+-- "17 self-reported + 1 entered by the admin". Without it the dashboard cannot
+-- tell a record the admin wrote from a record the admin merely added one line to
+-- (round-4b: the two used to look identical, and both read as "admin record").
 -- ROUND 5: a fixed slot nobody has flown yet counts for nothing here either —
 -- otherwise every record would arrive carrying 16 "entries" it does not have,
--- and "1 of 18 entered by the CO" would stop being true.
+-- and "1 of 18 entered by the admin" would stop being true.
 create or replace function wa.entry_count(p jsonb) returns int
 language sql immutable as $$
   select coalesce((
@@ -3121,14 +3469,14 @@ language sql immutable as $$
 $$;
 
 -- ── the RECORD-level stamp is DERIVED, never authored (round 4b) ───────────
--- 'admin' means "this record CONTAINS data the CO entered" — that is all it
+-- 'admin' means "this record CONTAINS data the admin entered" — that is all it
 -- has ever been able to mean since the stamp went per-entry. It is true when
 -- at least one entry carries the stamp, and (the one case with no entries to
--- carry it) when the CO created the record and its owner has never saved it.
+-- carry it) when the admin created the record and its owner has never saved it.
 -- Every view must then say WHICH of the two it is by comparing
--- wa.co_entry_count against wa.entry_count: all entries → "entered by the CO",
--- some → "self-reported, N entries added by the CO". Reading this flag alone
--- as "the CO filled the whole thing in" is the round-4 defect.
+-- wa.co_entry_count against wa.entry_count: all entries → "entered by the admin",
+-- some → "self-reported, N entries added by the admin". Reading this flag alone
+-- as "the admin filled the whole thing in" is the round-4 defect.
 -- p_rec is the MIGRATED record; p_stored is the column as it stands.
 create or replace function wa.record_stamp(p_rec jsonb, p_stored text) returns text
 language sql immutable as $$
@@ -3140,7 +3488,7 @@ $$;
 
 -- ── ENTER-ON-BEHALF: the entry stamp ──────────────────────────────────────
 -- ROUND 4b — the stamp is decided PER ENTRY, by DIFF.
--- The round-4 version stamped every entry of the submitted payload, so a CO
+-- The round-4 version stamped every entry of the submitted payload, so an admin
 -- who added ONE line to a student's 17 self-reported entries re-attributed all
 -- 18 to himself. The record then lied about its own provenance, in the exact
 -- place the feature exists to be honest about. Superseded:
@@ -3177,10 +3525,10 @@ language sql immutable as $$
               where t.k <> 'entered_by' and jsonb_typeof(t.v) <> 'null'), '{}'::jsonb) end
 $$;
 
--- the CO path: the submitted payload against the STORED record, section by
+-- the admin path: the submitted payload against the STORED record, section by
 -- section. An entry that is already in the record keeps the provenance it
--- already had (null stays null — the CO re-sending a student's line does not
--- make it his); an entry that is NEW or MODIFIED is the CO's and says so.
+-- already had (null stays null — the admin re-sending a student's line does not
+-- make it his); an entry that is NEW or MODIFIED is the admin's and says so.
 -- Entries that disappeared need nothing: a deletion leaves no row to attribute.
 -- p_old is the stored record AFTER wa.migrate_record — the same shape the
 -- form was handed, so an untouched row round-trips to an exact match.
@@ -3229,8 +3577,8 @@ begin
                   else e || jsonb_build_object('entered_by', od->hit->'entered_by') end;
       elsif wa.slot_empty(k, e) then
         -- an unflown fixed slot is a placeholder the FORM draws, not something
-        -- the CO "entered". Stamping it would tag the eight checkrides and the
-        -- eight solos of every record the CO ever opens (round 5).
+        -- the admin "entered". Stamping it would tag the eight checkrides and the
+        -- eight solos of every record the admin ever opens (round 5).
         e := e - 'entered_by';
       else
         e := e || jsonb_build_object('entered_by', 'admin');
@@ -3260,11 +3608,11 @@ language sql immutable as $$
 $$;
 
 -- the OWNER path (round 8): the submitted payload against the STORED record.
--- Every entry the CO owns must still be there, fact for fact — matched by
--- wa.entry_core exactly as the CO path matches, position first — and it comes
+-- Every entry the admin owns must still be there, fact for fact — matched by
+-- wa.entry_core exactly as the admin path matches, position first — and it comes
 -- out of this function still carrying his name. An entry of the owner's own
 -- keeps null whether it changed or not: their record is still theirs to write.
--- A CO entry that was ALTERED has no match, and a CO entry that was DELETED
+-- An admin entry that was ALTERED has no match, and an admin entry that was DELETED
 -- has no match either; both leave a stored stamp unclaimed, and that is the
 -- refusal — one sentence, naming the rule, for both.
 create or replace function wa.carry_stamps(p_new jsonb, p_old jsonb) returns jsonb
@@ -3308,7 +3656,7 @@ begin
         e := case when (od->hit->>'entered_by') is null then e - 'entered_by'
                   else e || jsonb_build_object('entered_by', od->hit->'entered_by') end;
       else
-        -- a row the owner wrote or changed — theirs, never the CO's
+        -- a row the owner wrote or changed — theirs, never the admin's
         e := e - 'entered_by';
       end if;
       arr := arr || jsonb_build_array(e);
@@ -3323,7 +3671,7 @@ begin
     end loop;
     o := o || jsonb_build_object(k, arr);
   end loop;
-  -- a whole SECTION the payload omitted takes its stored CO entries with it,
+  -- a whole SECTION the payload omitted takes its stored admin entries with it,
   -- so the same rule has to look at what is not in the payload at all
   for k in select jsonb_object_keys(coalesce(p_old, '{}'::jsonb)) loop
     if (p_new ? k) or jsonb_typeof(p_old->k) <> 'array' then continue; end if;
@@ -3339,8 +3687,8 @@ end $$;
 
 -- ── the ONE student-record write path ─────────────────────────────────────
 -- Used by BOTH public.save_student_record (the owner) and
--- public.admin_save_student_record (the CO on their behalf) — same validation,
--- same legacy rule, same upsert. A CO typo is still a typo.
+-- public.admin_save_student_record (the admin on their behalf) — same validation,
+-- same legacy rule, same upsert. An admin typo is still a typo.
 create or replace function wa.write_record(p_student uuid, p_payload jsonb, p_as_admin boolean)
 returns jsonb
 language plpgsql volatile as $$
@@ -3358,7 +3706,7 @@ begin
   -- value. What is validated below is exactly what is stored further down, so
   -- a padded ' C4302 ' cannot be a syllabus code to the storage and free text
   -- to wa.code_track: the category⇄track refusal fires on it exactly as it
-  -- fires on a clean C4302, on the owner path and the CO path alike.
+  -- fires on a clean C4302, on the owner path and the admin path alike.
   pl := wa.norm_record(p_payload);
   perform wa.validate_record(pl);
 
@@ -3402,9 +3750,9 @@ begin
     'a legacy result note may be kept or dropped, never rewritten — the removed Result box cannot be edited through a hand-made payload');
 
   -- THE STAMP — decided per entry, against what is STORED, on BOTH paths.
-  -- CO path (round 4b, unchanged): only what he actually wrote carries his
+  -- admin path (round 4b, unchanged): only what he actually wrote carries his
   -- name, and editing an owner's entry makes that entry his.
-  -- OWNER path (round 8): the stamps SURVIVE. Every CO entry must come back
+  -- OWNER path (round 8): the stamps SURVIVE. Every admin entry must come back
   -- fact for fact — wa.carry_stamps refuses the save otherwise, naming the
   -- rule — and it comes back still stamped. The owner's own entries stay the
   -- owner's whether they changed or not.
@@ -3413,9 +3761,9 @@ begin
   stamped := case when p_as_admin then wa.stamp_record_diff(pl, old)
                   else wa.carry_stamps(pl, old) end;
   -- DERIVED, never typed — on both paths now, because a record whose entries
-  -- carry the CO's name keeps saying so after its owner saves it. The one case
-  -- the entries cannot settle (a record the CO opened and nobody has filled)
-  -- still belongs to the CO path: an empty record locks nothing.
+  -- carry the admin's name keeps saying so after its owner saves it. The one case
+  -- the entries cannot settle (a record the admin opened and nobody has filled)
+  -- still belongs to the admin path: an empty record locks nothing.
   by_who := wa.record_stamp(stamped,
               case when p_as_admin then (case when had then prev else 'admin' end)
                    else null end);
@@ -3426,7 +3774,7 @@ begin
   do update set data = excluded.data, last_update = now(), entered_by = excluded.entered_by
   returning last_update into t;
   -- `record` is the stamped payload as stored: the client applies the server's
-  -- verdict instead of guessing which of its rows the CO touched.
+  -- verdict instead of guessing which of its rows the admin touched.
   return jsonb_build_object('ok', true, 'last_update', t, 'entered_by', by_who,
                             'co_entries', wa.co_entry_count(stamped),
                             'entries', wa.entry_count(stamped),
@@ -3543,6 +3891,53 @@ begin
                             'weight', wa.level_weight(saved.level));
 end $$;
 
+-- ── ROUND 19 — the ONE instructor-record write path ───────────────────────
+-- ONE caller today (public.save_instructor_currency, the owner) and it is
+-- written as a path anyway, for the same reason wa.write_record is one: the
+-- normalisation, the validation and the upsert are the contract, and a second
+-- entry point that skipped any of the three would be a second contract.
+--
+-- IT IS THE OWNER'S PATH AND ONLY THE OWNER'S. There is no p_as_admin twin
+-- here — see the table's own comment: a currency claim is a statement about
+-- who flew what, and the admin was not in the aircraft. The admin's on-behalf
+-- form renders this section read-only, so the refusal is not a message the
+-- user ever meets; the absence of the path is what makes it true.
+create or replace function wa.write_instructor_record(p_instructor uuid, p_payload jsonb)
+returns jsonb
+language plpgsql volatile as $$
+declare t timestamptz; pl jsonb;
+begin
+  -- the SAME normalisation boundary the student record crosses (round 5b):
+  -- what is validated below is exactly what is stored further down, so a
+  -- padded ' e-32-bfm ' cannot be a known event to the storage and an unknown
+  -- one to the membership check.
+  pl := wa.norm_record(p_payload);
+  perform wa.validate_instructor_record(pl);
+  -- and the READ-TIME shape is what is written: the record is stored already
+  -- stripped, so what comes back out of the table is byte-identical to what
+  -- the migration would have made of it.
+  pl := wa.migrate_instructor_record(pl);
+
+  insert into public.instructor_records as ir (instructor_id, data, last_update)
+  values (p_instructor, pl, now())
+  on conflict (instructor_id)
+  do update set data = excluded.data, last_update = now()
+  returning last_update into t;
+  return jsonb_build_object('ok', true, 'last_update', t,
+                            'entries', wa.ins_entry_count(pl),
+                            'record', pl);
+end $$;
+
+-- the instructor's own record, migrated on read — '{}' becomes the empty
+-- sections rather than nothing, so every reader gets the same shape whether
+-- the instructor has ever saved or not
+create or replace function wa.instructor_record_of(p_instructor uuid) returns jsonb
+language sql stable as $$
+  select wa.migrate_instructor_record(
+           coalesce((select ir.data from public.instructor_records ir
+                      where ir.instructor_id = p_instructor), '{}'::jsonb))
+$$;
+
 -- ── the ONE instructor dataset ────────────────────────────────────────────
 -- students + their self-reported cards + THIS instructor's proposal per
 -- student. Used by public.list_students_for_instructor (the instructor) and
@@ -3561,6 +3956,14 @@ language sql stable as $$
   select jsonb_build_object(
     'me', wa.person_json(v),
     'assessment_class', wa.assessment_class(),
+    -- ROUND 19 — THE INSTRUCTOR'S OWN CURRENCY RIDES WITH HIS FORM. It is his
+    -- record, on his form, in the same round trip as the cards: a second call
+    -- would be a second chance for the page to render half of itself. The
+    -- admin's on-behalf view gets it too — read-only there, because
+    -- wa.write_instructor_record has no admin path at all.
+    'currency', wa.instructor_record_of(v.id) -> 'currency',
+    'currency_last_update', (select ir.last_update from public.instructor_records ir
+                              where ir.instructor_id = v.id),
     'students', coalesce((
       select jsonb_agg(jsonb_build_object(
                'person', wa.person_json(s),
@@ -3701,7 +4104,7 @@ begin
   return wa.instructor_dataset(v);
 end $$;
 
--- the OWNER saving: the proposal becomes self-reported again (a CO stamp is
+-- the OWNER saving: the proposal becomes self-reported again (an admin stamp is
 -- cleared the moment the instructor saves it themselves).
 create or replace function public.save_proposal(p_token text, p_student_id uuid, p_payload jsonb)
 returns jsonb
@@ -3710,6 +4113,24 @@ declare v public.people;
 begin
   v := wa.auth_role(p_token, 'instructor');
   return wa.write_proposal(v.id, p_student_id, p_payload, false);
+end $$;
+
+-- ── ROUND 19 — THE INSTRUCTOR SAVES HIS OWN CURRENCY ──────────────────────
+-- The whole section in one act, exactly as the student form saves a record:
+-- rows are added and removed as well as edited, so a per-row RPC would have to
+-- invent a row identity that survives a page the user is still editing.
+-- THE TOKEN IS THE IDENTITY. There is no p_instructor_id: the row this writes
+-- belongs to whoever holds the link, and a parameter naming somebody else
+-- would be a way to file a flight under another instructor's name. Revoking a
+-- link (public.admin_set_active → active = false) closes this the same instant
+-- it closes the assessments — wa.auth_role refuses an inactive person.
+create or replace function public.save_instructor_currency(p_token text, p_payload jsonb)
+returns jsonb
+language plpgsql volatile security definer set search_path = public, wa, pg_temp as $$
+declare v public.people;
+begin
+  v := wa.auth_role(p_token, 'instructor');
+  return wa.write_instructor_record(v.id, p_payload);
 end $$;
 
 -- ADMIN ──────────────────────────────────────────────────────────────────
@@ -3792,7 +4213,7 @@ begin
     if not found then raise exception 'WA: unknown person'; end if;
     perform wa.chk(not (p ? 'role'), 'role', 'role cannot be changed');
     -- ROUND 9 — THE OBJECT ID IS IMMUTABLE. It belongs to the shared roster,
-    -- not to this database: the CO may ADOPT a hand-made person into the
+    -- not to this database: the admin may ADOPT a hand-made person into the
     -- roster by giving them the id once (null → 'R-nnnn'), and after that the
     -- id is the one thing on the row he cannot rewrite. Re-sending the same
     -- value is not a change and is accepted, so a plain "Save" never fails.
@@ -3928,19 +4349,19 @@ begin
 end $$;
 
 -- ── ENTER ON BEHALF (round 4) ─────────────────────────────────────────────
--- The CO must be able to enter and edit information FOR ANYONE — a student who
+-- The admin must be able to enter and edit information FOR ANYONE — a student who
 -- cannot reach their link, an instructor who dictates his ranking over the
--- phone. Transparency is the price: what the CO writes carries
--- entered_by='admin', which the views render as a small "CO" tag.
+-- phone. Transparency is the price: what the admin writes carries
+-- entered_by='admin', which the views render as a small "ADMIN" tag.
 -- A PROPOSAL is one row and is stamped as a whole. A RECORD is a list of
 -- entries, so round 4b decides it entry by entry: the payload is diffed
--- against the stored record and only the entries the CO added or changed are
--- stamped (wa.stamp_record_diff). The stamps survive further CO saves — a CO
+-- against the stored record and only the entries the admin added or changed are
+-- stamped (wa.stamp_record_diff). The stamps survive further admin saves — an admin
 -- re-save that changes nothing changes nothing — and are all cleared the
 -- moment the OWNER saves: reclaiming their own data makes it self-reported.
 -- SECURITY: admin role only (a student/instructor token raises), and the
 -- validation pipeline is the SAME one the owner goes through — wa.write_record
--- / wa.write_proposal — so a CO typo is refused exactly like a student typo.
+-- / wa.write_proposal — so an admin typo is refused exactly like a student typo.
 
 create or replace function public.admin_get_student_form(p_token text, p_student_id uuid)
 returns jsonb
@@ -3960,7 +4381,7 @@ begin
   return jsonb_build_object(
     'me', wa.person_json(s),
     'data', rec,
-    -- the CO fills in the SAME form and gets the SAME picker (round 9)
+    -- the admin fills in the SAME form and gets the SAME picker (round 9)
     'instructors', wa.instructor_surnames(),
     'entered_by', wa.record_stamp(rec, r.entered_by),
     'co_entries', wa.co_entry_count(rec),
@@ -4042,9 +4463,9 @@ begin
       'completion', jsonb_build_object(
         'has_record', r.student_id is not null,
         'entered_by', wa.record_stamp(m.rec, r.entered_by),
-        -- how many entries the CO wrote, out of how many the record holds:
-        -- 1 of 18 is a self-reported record with one CO addition, 18 of 18 is
-        -- a record the CO entered. The dashboard must not confuse the two.
+        -- how many entries the admin wrote, out of how many the record holds:
+        -- 1 of 18 is a self-reported record with one admin addition, 18 of 18 is
+        -- a record the admin entered. The dashboard must not confuse the two.
         'co_entries', wa.co_entry_count(m.rec),
         'entries_total', wa.entry_count(m.rec),
         'proposals_in', (select count(*) from public.proposals pr
@@ -4097,7 +4518,7 @@ begin
               from public.proposals p2
               join public.people i2 on i2.id = p2.instructor_id and i2.active
               where p2.student_id = s.id and p2.level = k.lvl) c on true), '{}'::jsonb),
-          -- and WHO said it: the CO reads a level with the names beside it
+          -- and WHO said it: the admin reads a level with the names beside it
           'by_level', coalesce((
             select jsonb_object_agg(k.lvl, coalesce(c.names, '[]'::jsonb))
             from unnest(wa.level_keys()) k(lvl)
@@ -4141,7 +4562,15 @@ begin
 
   select coalesce(jsonb_agg(wa.person_json(p) || jsonb_build_object(
            'proposals_count', (select count(*) from public.proposals pr
-                               where pr.instructor_id = p.id))
+                               where pr.instructor_id = p.id),
+           -- ROUND 19 — HIS OWN CURRENCY, READ-ONLY, ON THE DASHBOARD. The
+           -- admin can see what an instructor claims he flew; he cannot write
+           -- it (wa.write_instructor_record has no admin path), so this is a
+           -- READ and the People drill-down renders it as one.
+           'currency', wa.instructor_record_of(p.id) -> 'currency',
+           'currency_last_update', (select ir.last_update
+                                    from public.instructor_records ir
+                                    where ir.instructor_id = p.id))
          -- ROUND 14 — the squadron's own order, everywhere it lists people
          order by wa.seniority_key(p), p.last_name), '[]'::jsonb)
   into instructors
@@ -4160,12 +4589,28 @@ begin
 end $$;
 
 -- raw export (JSON download / CSV built client-side) — tokens excluded
+--
+-- ══ ROUND 19 — THE PAYLOAD SAYS WHAT IT IS: "schema": "wa-export-v1" ═══════
+-- The FDMS Bridge accepts this file MARKED OR UNMARKED, because until now
+-- there was nothing to mark it with — and an importer that has to guess is an
+-- importer whose guard can be walked past by any JSON that happens to carry a
+-- `people` array. The stamp closes that: from this round the file names its
+-- own format in its own first field, the bridge's store-Import can demand it,
+-- and the unmarked branch becomes what it always should have been — a
+-- compatibility path for files exported before today, not the normal case.
+-- THE VALUE IS A CONTRACT AND IT IS VERSIONED. `wa-export-v1` describes the
+-- SHAPE below, not the round that wrote it: adding a key (this round adds
+-- `instructor_records`) leaves a v1 reader working, because a reader that
+-- ignores what it does not know still gets every field it came for. Only a
+-- change that BREAKS such a reader — a key renamed, a type changed, a section
+-- removed — may move it to v2, and nothing here may move it silently.
 create or replace function public.admin_export(p_token text) returns jsonb
 language plpgsql stable security definer set search_path = public, wa, pg_temp as $$
 declare v public.people;
 begin
   v := wa.auth_role(p_token, 'admin');
   return jsonb_build_object(
+    'schema', 'wa-export-v1',
     'exported_at', now(),
     'people', coalesce((select jsonb_agg(wa.person_json(p)
                           order by p.role, wa.seniority_key(p), p.last_name)
@@ -4190,7 +4635,27 @@ begin
                     'weight', wa.level_weight(pr.level),
                     'flew_with', pr.flew_with, 'comment', pr.comment,
                     'entered_by', pr.entered_by,
-                    'updated_at', pr.updated_at)) from public.proposals pr), '[]'::jsonb));
+                    'updated_at', pr.updated_at)) from public.proposals pr), '[]'::jsonb),
+    -- ROUND 19 — THE BRIDGE LANE. The instructors' own currency claims, in the
+    -- same shape the form wrote them and the same shape the read gives back
+    -- (wa.migrate_instructor_record runs here too, so an export can never
+    -- carry a key the section has retired). `data_as_stored` is kept beside it
+    -- for the same reason the student records keep theirs: the migration is a
+    -- READ, and an export that showed only its output could not prove what the
+    -- table actually holds.
+    'instructor_records', coalesce((select jsonb_agg(jsonb_build_object(
+                            'instructor_id', ir.instructor_id,
+                            'data', wa.migrate_instructor_record(ir.data),
+                            'data_as_stored', ir.data,
+                            'entries_total', wa.ins_entry_count(
+                                               wa.migrate_instructor_record(ir.data)),
+                            'last_update', ir.last_update))
+                          from public.instructor_records ir), '[]'::jsonb),
+    -- and the closed list the ids above were chosen from, so a reader that has
+    -- never seen the 3-01 can still print «Ε-32 — BFM» instead of a slug
+    'e_items', coalesce((select jsonb_agg(jsonb_build_object(
+                  'id', t.id, 'name', wa.e_item_name(t.id)) order by t.ord)
+                from unnest(wa.e_item_ids()) with ordinality t(id, ord)), '[]'::jsonb));
 end $$;
 
 -- weekly keep-alive ping (GitHub Action) — touches nothing, returns 'ok'
@@ -4210,6 +4675,7 @@ begin
     'list_instructor_names(text)',
     'list_students_for_instructor(text)',
     'save_proposal(text, uuid, jsonb)',
+    'save_instructor_currency(text, jsonb)',
     'admin_list_people(text)',
     'admin_save_person(text, uuid, jsonb)',
     'admin_delete_person(text, uuid)',

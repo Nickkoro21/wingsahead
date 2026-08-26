@@ -4,7 +4,7 @@
    ──────────────────────────────────────────────────────────────────────────
    ROUND-3 SHAPE: every section is a LIST OF DATED ENTRIES and every counter
    is DERIVED from that list — there is no typed count anywhere in the app.
-   Rows carry the detail the CO asked for: FAIL / ALMOST GOOD know the flight
+   Rows carry the detail the admin asked for: FAIL / ALMOST GOOD know the flight
    code, the syllabus items (multi-select), the instructor and the grade;
    solos are graded % or NG; evaluations name which of the eight checkrides
    they were; airsickness knows when and with whom.
@@ -270,10 +270,10 @@ WA.renderStudent = async function (view, me, opts) {
      own form locks nothing: on that side every row is his to edit or delete.
      MIRROR: db/schema.sql → wa.carry_stamps. */
   const coLocked = (e) => !asCO && WA.isCO(e);
-  /* the CO entries the record ARRIVED with, per section. Nothing in the UI can
+  /* the admin entries the record ARRIVED with, per section. Nothing in the UI can
      drop one, so a mismatch at save time means a row was refused on its way
      into the payload — and the owner cannot fix a locked row, so the message
-     has to send them to the CO instead of to the row. */
+     has to send them to the admin instead of to the row. */
   const CO_BASE = {};
 
   /* ── field builders ───────────────────────────────────────────────────── */
@@ -302,7 +302,7 @@ WA.renderStudent = async function (view, me, opts) {
      who TYPED 62.5 was refused on save and told to press a "Round to 63%"
      button that was nowhere on the row. It now appears on the keystroke that
      makes the value fractional and leaves on the one that does not — the same
-     wording, the same button, on the student form and the CO's alike (they
+     wording, the same button, on the student form and the admin's alike (they
      are one form). */
   function fixnoteHTML(sec, i, field, val) {
     const n = Number(val);
@@ -1146,7 +1146,7 @@ WA.renderStudent = async function (view, me, opts) {
        · the FIRST trial wears its word when the exam holds more than one
          sitting, holder or not, so the pair 85-then-65 stops reading as one
          anonymous row plus one attempt.
-     Both gates live in WA (examTrialShown · examNotPassed) because the CO's
+     Both gates live in WA (examTrialShown · examNotPassed) because the admin's
      analysis table wears the same badge and the two must not drift.
      AND THE VERDICT IS GRADED-AND-BELOW, not «has not passed YET»: an ungraded
      holder used to wear «· not passed» in --warn on the strength of a mark
@@ -1189,18 +1189,18 @@ WA.renderStudent = async function (view, me, opts) {
     if (meta.state === "owed") return "";
     const next = WA.examNextTrial(S.data.exams || [], e.exam);
     if (!next || next < 2) return "";
-    /* ── ROUND 16 · RULING 3B (22/08/2026) — THE MINT SURVIVES THE CO'S LOCK ──
-       «Το Β». A CO-entered exam row is locked, and until this round the lock
+    /* ── ROUND 16 · RULING 3B (22/08/2026) — THE MINT SURVIVES THE ADMIN'S LOCK ──
+       «Το Β». An admin-entered exam row is locked, and until this round the lock
        swallowed this button with every other control in the row (applyLocks
        disables them all, by design and by shape). The effect was that a
-       student whose 1st sitting the CO had typed in COULD NOT RECORD THEIR OWN
+       student whose 1st sitting the admin had typed in COULD NOT RECORD THEIR OWN
        RE-SIT — the one row of the log that is unambiguously theirs to report.
-       The lock is not weakened by a millimetre: the CO's row stays disabled
+       The lock is not weakened by a millimetre: the admin's row stays disabled
        field by field and kept-or-dropped-never-rewritten (wa.carry_stamps
        still refuses any save that alters it). What is unlocked is the ACT of
        MINTING A NEW ROW, which touches nothing that is his — the minted trial
        carries no `entered_by`, so it is the student's own line from the first
-       keystroke, and the server sees a payload in which the CO's entry comes
+       keystroke, and the server sees a payload in which the admin's entry comes
        back fact for fact with a NEW sibling beside it. `applyLocks` therefore
        skips [data-mint], and only that. */
     const lk = coLocked(e);
@@ -1616,7 +1616,7 @@ WA.renderStudent = async function (view, me, opts) {
      will see their rows in a different order than yesterday — by syllabus, not
      by date. If the date order is wanted back for the slots too, it is one
      comparator.
-     THE ORDER ITSELF LIVES IN WA.slotRows, not here: the CO's drill-down and
+     THE ORDER ITSELF LIVES IN WA.slotRows, not here: the admin's drill-down and
      the printed brief order the same record with the same function, so three
      surfaces cannot disagree about where a row goes. On THIS side every slot
      is claimed (ensureLogSlots seeded whatever nothing else claims), so the
@@ -1627,7 +1627,7 @@ WA.renderStudent = async function (view, me, opts) {
       .map((r) => ({ e: r.e, i: r.i }));
   }
   /* one <tr>. The classes are the row states the card form wore as a border:
-     a leftover, a CO entry, a CO entry the owner may not touch — and, since
+     a leftover, an admin entry, an admin entry the owner may not touch — and, since
      round 13, THE COLOUR: done · started · owed · extra. */
   function trHTML(sec, e, i) {
     const m = rowMeta(sec.id, i);
@@ -2034,7 +2034,7 @@ WA.renderStudent = async function (view, me, opts) {
     b.title = "Adds the next weekly theory exam — " + lbl +
       ". They are numbered in order and both the date and the grade may be filled in later.";
   }
-  /* THE LOCK, ENFORCED IN THE DOM (round 8). Every control inside a row the CO
+  /* THE LOCK, ENFORCED IN THE DOM (round 8). Every control inside a row the admin
      set is disabled — inputs, selects, the item chips' ✕, the Graded/NG chips
      and the remove button alike — so no delegated handler can ever fire
      against it. It runs after EVERY render path (section, single row,
@@ -2484,9 +2484,9 @@ WA.renderStudent = async function (view, me, opts) {
            : " Completing them takes a few seconds and nothing is lost in the meantime."}`
       : "";
   }
-  /* how much of this record was entered by the CO instead of its owner —
+  /* how much of this record was entered by the admin instead of its owner —
      HOW MUCH, not whether: the rest of it is the owner's and is named as such
-     (round 4b, where a CO save stopped claiming the whole record) */
+     (round 4b, where an admin save stopped claiming the whole record) */
   function showCoNote() {
     let n = 0, tot = 0;
     /* FILLED entries only: an unflown syllabus slot is nobody's report */
@@ -2508,7 +2508,7 @@ WA.renderStudent = async function (view, me, opts) {
   showLegacyNote();
   showCoNote();
 
-  /* Back to the dashboard — the admin token stays in the hash, so the CO
+  /* Back to the dashboard — the admin token stays in the hash, so the admin
      never has to re-open their link (the banner button and the save bar
      button are both outside #stu-form, hence the listener on the view). */
   if (asCO) {
@@ -3468,7 +3468,7 @@ WA.renderStudent = async function (view, me, opts) {
           seq: Math.max(1, Math.min(20, Math.round(Number(e.seq) || 1))),
           kind: e.kind || "syllabus",
           instructor: WA.normLine(e.instructor) || null,
-          /* NEVER AUTHORED HERE. instructor_oid is written by the CO's form
+          /* NEVER AUTHORED HERE. instructor_oid is written by the admin's form
              path and by the bridge; the form draws no box for it, so it only
              ever travels through unchanged — dropping it would delete an
              identity the row already carries. */
@@ -3583,17 +3583,17 @@ WA.renderStudent = async function (view, me, opts) {
         grade: gr(e.grade),
       }, e);
     });
-    /* ── THE CO'S ENTRIES MUST ALL STILL BE THERE (round 8) ─────────────────
+    /* ── THE ADMIN'S ENTRIES MUST ALL STILL BE THERE (round 8) ─────────────────
        Nothing in the UI can drop one — they are locked — so a section that
-       comes out of this function short of CO entries can only mean a locked
+       comes out of this function short of admin entries can only mean a locked
        row was refused on its way into the payload. The owner cannot fix a
-       locked row, so the message sends them to the CO instead of to the box,
+       locked row, so the message sends them to the admin instead of to the box,
        and it goes FIRST: the specific complaint underneath it is not
        something they can act on. */
     /* ROUND 13 — the check is the OWNER's, and only the owner's. It exists
-       because nothing in the student's UI can drop a CO entry (they are
+       because nothing in the student's UI can drop an admin entry (they are
        locked), so a section that comes out short can only mean a locked row
-       was refused on its way in. On the CO'S OWN FORM nothing is locked: he
+       was refused on its way in. On the ADMIN'S OWN FORM nothing is locked: he
        may delete his own entry, and since round 13 he may CLEAR a slot row he
        filled in — both are legitimate acts, and refusing his save with a
        sentence telling him to ask himself would be nonsense. */
@@ -3622,7 +3622,7 @@ WA.renderStudent = async function (view, me, opts) {
      WHO comes from the TOKEN, which is the whole identity model of this
      application: whoever holds a personal link IS that person, and the one
      thing the form owes them before a write is whose name goes on it. On the
-     CO's on-behalf twin that is TWO names — who is writing, and whose record —
+     admin's on-behalf twin that is TWO names — who is writing, and whose record —
      because the tag the save leaves behind says exactly that.
      WHAT is the numbered change list, built by the shared WA.recordChanges
      against SAVED_REC (the record as it was last saved) — the same baseline the
@@ -3698,7 +3698,7 @@ WA.renderStudent = async function (view, me, opts) {
         : await rpc("save_student_record", { p_token: WA.token, p_payload: clean });
       S.lastUpdate = res.last_update;
       S.enteredBy = res.entered_by || null;
-      /* THE STAMPS, as the server decided them (round 4b). A CO save is diffed
+      /* THE STAMPS, as the server decided them (round 4b). An admin save is diffed
          against the stored record — only the entries he added or changed get
          the tag — so the client can no longer work them out from the payload
          alone: it applies res.record, entry for entry, in payload order.
@@ -3734,7 +3734,7 @@ WA.renderStudent = async function (view, me, opts) {
       }
       showCoNote();
       $("stu-lastupd").innerHTML = `Last update: <b>${esc(fmtDT(S.lastUpdate))}</b>`;
-      /* how much of the record now carries the CO's name — the server counted
+      /* how much of the record now carries the admin's name — the server counted
          it while stamping, so the message states a fact and not an intention */
       const coN = (typeof res.co_entries === "number")
         ? res.co_entries

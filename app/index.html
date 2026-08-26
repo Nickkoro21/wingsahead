@@ -6,7 +6,7 @@
 <meta name="robots" content="noindex">
 <title>Wings Ahead &mdash; Student utilization</title>
 <link rel="icon" href="assets/364mea-240.png">
-<link rel="stylesheet" href="styles.css?v=20260826a">
+<link rel="stylesheet" href="styles.css?v=20260826b">
 <script>
 /* Palette before first paint — no flash of the default theme on reload.
    Mirrors app.js (PALETTES / apply): same keys, same default (DEFAULT_PAL).
@@ -49,9 +49,13 @@
 </footer>
 <script src="config.js?v=20260821b"></script>
 <script src="items-catalog.js?v=20260821b"></script>
-<script src="app.js?v=20260826a"></script>
-<script src="student.js?v=20260826a"></script>
-<script src="instructor.js?v=20260826a"></script>
-<script src="admin.js?v=20260826a"></script>
+<!-- ROUND 19 — the 3-01 EVENTS table, generated beside app.js's mirror of it.
+     It must load BEFORE app.js, which reads WA_E_ITEMS as it defines WA.E_ITEMS,
+     exactly as items-catalog.js loads before the syllabus pickers. -->
+<script src="currency-catalog.js?v=20260826b"></script>
+<script src="app.js?v=20260826b"></script>
+<script src="student.js?v=20260826b"></script>
+<script src="instructor.js?v=20260826b"></script>
+<script src="admin.js?v=20260826b"></script>
 </body>
 </html>

@@ -107,8 +107,8 @@ function getToken() {
 /* ENTER-ON-BEHALF sub-route — #t=<admin token>&co=rec:<uuid> (student record)
    or &co=prop:<uuid> (an instructor's proposals). The token stays in the hash,
    so Back / reload / bookmark never lose the admin session. Only the admin
-   role acts on it: for anybody else route() ignores it (the CO editing UI is
-   unreachable, not merely hidden). */
+   role acts on it: for anybody else route() ignores it (the admin editing UI
+   is unreachable, not merely hidden). */
 function getCoTarget() {
   const m = /[#&]co=(rec|prop):([0-9a-fA-F-]{36})/.exec(location.hash);
   return m ? { kind: m[1], id: m[2] } : null;
@@ -142,6 +142,10 @@ function teardownView() {
   WA._admNav = null;
   WA._stuState = null;
   WA._insState = null;
+  /* ROUND 19 — and the closure that answers «is his currency unsaved?». It is a
+     function over the view being torn down, so the once-attached beforeunload
+     hook must not keep asking it about rows that no longer exist. */
+  WA._insCurDirty = null;
   /* the instructor print builder is a closure over the view that is going
      away — the once-attached beforeprint hook must not call a dead one */
   WA._insPrint = null;
@@ -169,7 +173,7 @@ async function route() {
   WA.me = me;
   const co = getCoTarget();
   if (me.role === "admin" && co) {
-    /* the CO entering on behalf of somebody — the SAME form, bound to them */
+    /* the admin entering on behalf of somebody — the SAME form, bound to them */
     if (co.kind === "rec") WA.renderStudent(view, null, { asCO: true, targetId: co.id });
     else WA.renderInstructor(view, null, { asCO: true, targetId: co.id });
     return;
@@ -724,6 +728,11 @@ WA.SECTIONS_META = {
   fs:           { label: "F/S", tip: "The same log for the SIMULATOR — its own flow-chart sorties pre-seeded in the same four tracks, in the same four colours. Sim hours and flight hours are counted separately by the squadron, which is why they are two logs and not one." },
   lessons:      { label: "Ground lessons", tip: "The ground academics — the twelve theory groups of the programme and all 47 courses inside them, present as rows from the first day and grouped by their theory group. A lesson is a BLOCK, so it can carry an end date. A lesson is attended, not scored, so there is no grade here and no instructor. An untouched course is stored nowhere; a course the catalogue does not know goes in as an extra." },
   exams:        { label: "Ground exams", tip: "The eight ground-exam groups of the syllabus, present as rows from the first day: grey until the exam is sat, light green on the date alone, green once the result is in — whatever the result says, because the row asked for a mark and got one. A GROUND EXAM IS PASSED AT " + WA.passMin("exams") + " % — a flight is passed at " + WA.passMin() + ", and these are two different examinations with two right numbers (ruling of 2026-08-21). The " + WA.passMin("exams") + " % decides which TRIAL stands for the exam, never whether the row is complete. The Weekly theory exams are ground exams too and are marked the same way. (The exam papers written INSIDE a theory group — FF 190, PT 190, AΕ 190, JX 190/191, NA 191 — are courses of their group and belong under Ground lessons: that is where the squadron's scheduler counts them.)" },
+  /* ROUND 19 — the ONE section of an INSTRUCTOR's record. It is listed here
+     beside the student's because every naming surface — the change list, the
+     save dialog, the read-only dashboard view — asks WA.secLabel for a word
+     and must get the same word from all of them. */
+  ins_currency: { label: "My currency", tip: "Your own flying, for the squadron's currency register — the bridge into FDMS. One row per sortie: the DAY, whether it was a flight of your own or one with a student, whether it was flown in the aircraft (ΑΕΡΟΣ — the semester air programme, Πίνακας 9 of the 3-01) or in the simulator (F/S — Πίνακας 6), and the 3-01 EVENTS it exercised. A sortie that exercised no event is still a sortie: leave the events empty and the flight still counts. This is YOUR record and nobody else's — it names no student, and the flights your students log are entered by them, on their own form." },
 };
 WA.secLabel = function (k) { return (WA.SECTIONS_META[k] || {}).label || k; };
 WA.secTip = function (k) { return (WA.SECTIONS_META[k] || {}).tip || ""; };
@@ -921,7 +930,7 @@ WA.itemsLabel = function (entry) {
     (WA.itemKnown(e.category, n) ? "" : " (legacy)")).join(" · ");
 };
 /* the same list as HTML, with the custom leftovers greyed and explained —
-   the CO's tables, the brief and the instructor card all call this one */
+   the admin's tables, the brief and the instructor card all call this one */
 WA.itemsLabelHTML = function (entry) {
   const e = entry || {};
   const list = Array.isArray(e.items) ? e.items : [];
@@ -1108,11 +1117,189 @@ WA.ENTRY_KEYS = {
                  "legacy", "entered_by"],
 };
 
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 19 — THE INSTRUCTOR'S OWN CURRENCY (the FDMS bridge lane).
+   ──────────────────────────────────────────────────────────────────────────
+   RULING (2026-08-26): «στο link που θα στέλνουμε σε κάθε εκπαιδευτή θέλω να
+   μπορεί να περάσει κι εκείνος, πέρα από την αξιολόγηση, κάποια δική του πτήση
+   S και τα αντίστοιχα Ε. Επίσης να μπορεί να περάσει Ε και σε μια πτήση με
+   μαθητή πέρα από τις S. Αυτό θα είναι μια γέφυρα για το currency του FDMS.»
+
+   A SECOND RECORD, AND ITS OWN REGISTRY. An instructor record shares not one
+   section name with a student record, so it gets its own whitelist rather than
+   a branch inside the student's: a single map serving both would answer
+   'currency' with the student's key list, and an unregistered section is not
+   rejected by the strip — it is DESTROYED by it, row by row, on the first read.
+   MIRROR: db/schema.sql → wa.ins_sections / wa.ins_entry_keys / wa.ins_section_cap.
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.INS_SECTIONS = ["currency"];
+WA.INS_ENTRY_KEYS = {
+  /* the section key as the FORM and the CHANGE LIST know it is `ins_currency`
+     — a name that cannot collide with any student section on a surface that
+     takes both (WA.secLabel, WA.rowLabel, WA.rowIdent). The name the RECORD
+     stores is plain `currency`, because inside an instructor's record there is
+     nothing else it could be. WA.insSecKey() is the one place the two meet. */
+  ins_currency: ["date", "kind", "category", "e_items", "seq"],
+};
+/* MIRROR: db/schema.sql → wa.ins_section_cap. Like every other cap in this
+   application it is a runaway-client stop, not a squadron rule: 400 rows is
+   about two years of one instructor's own sorties. */
+WA.INS_SECTION_CAP = function (sec) { return sec === "ins_currency" ? 400 : 200; };
+/* form key ⇄ stored key, in both directions, in one place */
+WA.insSecKey = function (formKey) { return String(formKey || "").replace(/^ins_/, ""); };
+WA.insFormKey = function (storedKey) { return "ins_" + String(storedKey || ""); };
+
+/* THE TWO KINDS. «κάποια δική του πτήση S» and «μια πτήση με μαθητή»: the
+   ruling names exactly two, and they are two because the squadron counts them
+   differently — a sortie flown with a student is instruction as well as
+   currency. Neither references the student: the flight itself lives on the
+   student's own form, and this row is the instructor's claim about his own
+   logbook (db/schema.sql → wa.currency_kinds). */
+WA.CURRENCY_KINDS = [
+  { id: "own", label: "own",
+    tip: "A sortie of your own — no student aboard. This is the «δική του πτήση» of the ruling: your own S flight, flown for your own programme." },
+  { id: "student", label: "with a student",
+    tip: "A sortie flown with a student. The FLIGHT is the student's and they log it on their own form; this row is your currency claim about the same hour — the events it let you exercise. Nothing here names the student, and nothing here changes their record." },
+];
+WA.currencyKind = function (id) {
+  return WA.CURRENCY_KINDS.find((k) => k.id === String(id || "")) || null;
+};
+WA.currencyKindLabel = function (id) {
+  const k = WA.currencyKind(id);
+  return k ? k.label : (id ? String(id) : "—");
+};
+
+/* THE TWO PROGRAMMES, IN THE NAMES THE 3-01 PRINTS. «ΑΕΡΟΣ» is the semester
+   AIR programme (Πίνακας 9) and «F/S» the semester SIMULATOR one (Πίνακας 6):
+   the first and the last section of the FDMS currency card. The interface of
+   this application is English and these two words are not — deliberately, and
+   for the reason the Weekly tip gives for keeping ΕΕΘ in its own tooltip: they
+   are what is PRINTED on the sheet the instructor is copying from, and an
+   invented English pair would make him translate twice. The English is one
+   hover away, which is where a terminology bridge belongs.
+   MIRROR: db/schema.sql → wa.currency_categories. */
+WA.CURRENCY_CATS = [
+  { id: "aeros", label: "ΑΕΡΟΣ", en: "air",
+    tip: "ΑΕΡΟΣ — the semester AIR programme of the 3-01 (Πίνακας 9): the sorties flown in the aircraft. It is the first section of the currency card in FDMS." },
+  { id: "fs", label: "F/S", en: "simulator",
+    tip: "F/S — the semester SIMULATOR programme of the 3-01 (Πίνακας 6). The squadron counts simulator sorties and aircraft sorties separately, which is why they are two answers here and not one." },
+];
+WA.currencyCat = function (id) {
+  return WA.CURRENCY_CATS.find((c) => c.id === String(id || "")) || null;
+};
+WA.currencyCatLabel = function (id) {
+  const c = WA.currencyCat(id);
+  return c ? c.label : (id ? String(id) : "—");
+};
+
+/* ── THE E-ITEMS ──────────────────────────────────────────────────────────
+   The EVENTS table of the 3-01/2025 ΔΑΕ, generated from the FDMS research
+   file into app/currency-catalog.js and into db/schema.sql by ONE run of
+   tools/gen-currency-catalog.py — so the closed list this form offers and the
+   closed list the server enforces cannot drift.
+   THE STORED VALUE IS THE ASCII id. The printed code is Greek and its Ε and α
+   are homoglyphs of Latin E and a: a stored code would be a value nobody could
+   retype and no two systems could reliably compare. */
+WA.E_ITEMS = (typeof WA_E_ITEMS === "object" && WA_E_ITEMS && Array.isArray(WA_E_ITEMS.items))
+  ? WA_E_ITEMS.items : [];
+WA._E_BY_ID = (() => {
+  const m = {};
+  for (const it of WA.E_ITEMS) m[it.id] = it;
+  return m;
+})();
+WA.eItem = function (id) { return WA._E_BY_ID[String(id || "")] || null; };
+/* the SHORT name — the printed code, which is what a currency sheet says */
+WA.eItemCode = function (id) {
+  const it = WA.eItem(id);
+  return it ? it.c : String(id || "");
+};
+/* the FULL name — «Ε-32 — BFM (Basic Fighter Manoeuvres)» */
+WA.eItemText = function (id) {
+  const it = WA.eItem(id);
+  return it ? it.c + " — " + it.n : String(id || "");
+};
+WA.eItemTip = function (id) {
+  const it = WA.eItem(id);
+  if (!it) return "This event is not in the 3-01 EVENTS table this application carries. It cannot be saved: choose one of the printed events instead.";
+  return WA.eItemText(it.id) +
+    (it.seat ? " · seat " + it.seat : "") +
+    (it.d ? " · the 3-01 prints a " + it.d + "-day window for an experienced (ΕΜΠ) instructor" :
+            " · the 3-01 prints no window for it — the availability is kept") +
+    ". The window itself is counted in FDMS; this form records that the event was flown, and on what day.";
+};
+/* the ids of one row, in CATALOGUE ORDER and without repeats. The order is not
+   cosmetic: WA.sameValue compares arrays as JSON, so two rows holding the same
+   events in a different order would read as a change nobody made. */
+WA.eItemsOf = function (e) {
+  const raw = (e && Array.isArray(e.e_items)) ? e.e_items : [];
+  const want = {};
+  for (const v of raw) want[String(v || "").trim()] = true;
+  const out = WA.E_ITEMS.filter((it) => want[it.id]).map((it) => it.id);
+  /* an id the catalogue does not know is KEPT and shown marked, never dropped
+     silently — the server will refuse it by name, which is the message that
+     tells the instructor what to fix */
+  for (const k of Object.keys(want)) if (k && !WA.eItem(k)) out.push(k);
+  return out;
+};
+WA.eItemsText = function (e) {
+  const ids = WA.eItemsOf(e);
+  return ids.length ? ids.map(WA.eItemCode).join(" · ") : "";
+};
+
+/* THE CLIENT'S READ-TIME REPAIR of an instructor record — the mirror of
+   wa.migrate_instructor_record. It has no legacy shapes to heal, so its whole
+   job is the whitelist: every section the registry does not name disappears,
+   and inside a section every key it does not name is dropped. */
+WA.migrateInsRecord = function (rec) {
+  const src = (rec && typeof rec === "object") ? rec : {};
+  const out = {};
+  for (const stored of WA.INS_SECTIONS) {
+    const keep = WA.INS_ENTRY_KEYS[WA.insFormKey(stored)] || [];
+    const list = Array.isArray(src[stored]) ? src[stored] : [];
+    out[stored] = list.map((e) => {
+      const o = {};
+      if (e && typeof e === "object") {
+        for (const f of keep) if (Object.prototype.hasOwnProperty.call(e, f)) o[f] = e[f];
+      }
+      return o;
+    });
+  }
+  return out;
+};
+
+/* WHICH SORTIE OF THE DAY — 1 unless the row says otherwise, and the key is
+   only ever written when it says something (the round-14 `trial` doctrine),
+   so a record from before a second flight existed needs no rewriting. */
+WA.curSeq = function (e) {
+  const n = Math.round(Number((e || {}).seq));
+  return (isFinite(n) && n >= 1) ? n : 1;
+};
+/* DATE ORDER, NEWEST FIRST, and the same-day sorties in their own order. The
+   list is open-ended — there is no syllabus to lay it out — so the only order
+   it can have is the one a logbook has. */
+WA.curSort = function (list) {
+  return (Array.isArray(list) ? list.slice() : []).map((e, i) => ({ e, i }))
+    .sort((a, b) => {
+      const da = String(a.e.date || ""), db = String(b.e.date || "");
+      if (da !== db) return da < db ? 1 : -1;      /* newest first */
+      const sa = WA.curSeq(a.e), sb = WA.curSeq(b.e);
+      if (sa !== sb) return sa - sb;
+      return a.i - b.i;
+    });
+};
+/* the identity two versions of one currency row share — and the identity the
+   server refuses a second copy of (wa.validate_instructor_record) */
+WA.curIdent = function (e) {
+  const x = e || {};
+  return [String(x.kind || ""), String(x.category || ""),
+          String(x.date || ""), WA.curSeq(x)].join("|");
+};
+
 /* ── AN EMPTY FIXED SLOT (round 5) ─────────────────────────────────────────
    The eight solos and the eight checkrides are rows the SYLLABUS puts in the
    record, not events the student reported. Until one is flown it is a
    placeholder: it is never counted, never exported as an entry and never
-   stamped "entered by the CO".
+   stamped "entered by the admin".
    MIRROR: db/schema.sql → wa.slot_empty. */
 WA.slotEmpty = function (sec, e) {
   if (!e || typeof e !== "object") return false;
@@ -1145,8 +1332,8 @@ WA.slotEmpty = function (sec, e) {
 
    AND THE STORAGE STAYS SPARSE, which is the whole engineering of it. An
    untouched slot stores NOTHING: buildPayload drops it, so the server never
-   receives it, wa.slot_empty needs no new branch, the CO-entry arithmetic
-   ("3 of 80 entered by the CO") is not diluted by 180 placeholders nobody
+   receives it, wa.slot_empty needs no new branch, the admin-entry arithmetic
+   ("3 of 80 entered by the admin") is not diluted by 180 placeholders nobody
    reported, and the payload caps are exactly where they were.
 
    THREE FUNCTIONS DECIDE EVERYTHING, and every surface calls them:
@@ -1384,7 +1571,7 @@ WA.claims = function (sec, list) {
    rides on: a row carrying NOTHING BUT ITS SLOT IDENTITY is a placeholder the
    form drew, and it is never stored, never counted and never stamped.
    `legacy` and `entered_by` are disqualifiers on purpose: a row an older form
-   left incomplete, or one the CO entered, is a REPORT — it must never be
+   left incomplete, or one the admin entered, is a REPORT — it must never be
    mistaken for a placeholder and silently dropped on the next save. */
 WA.slotUntouched = function (sec, e) {
   if (!e || typeof e !== "object") return false;
@@ -1491,7 +1678,7 @@ WA.rowState = function (sec, e, claimed) {
 
 /* THE FOUR COUNTS OF ONE SCOPE — a track of a log, or a whole section.
    OWED IS COMPUTED FROM THE CATALOGUE (slots − claimed), never counted off the
-   rows: the student's form carries the placeholders and the CO's record does
+   rows: the student's form carries the placeholders and the admin's record does
    not, and both must reach the same number. Hours and the debrief lag count
    the TOUCHED rows only — a slot nobody has flown has flown no hours. */
 WA.stateCounts = function (sec, list, track) {
@@ -1537,7 +1724,7 @@ WA.stateCounts = function (sec, list, track) {
    then the EXTRAS, which have no place in the chart to sit in, oldest first.
    That last half is round 12b's date sort, unrevoked and now scoped to the
    rows it was always the right rule for.
-   The student's form, the CO's drill-down and the printed brief all call this,
+   The student's form, the admin's drill-down and the printed brief all call this,
    so the three cannot show the same record in three different orders.
      → [{ def, e, i, state }]   i = the STORED index, -1 when nothing claims it */
 WA.slotRows = function (sec, list, track) {
@@ -1617,7 +1804,7 @@ WA.stateLine = function (sec, cn) {
 /* the entries of one section that actually happened (slots excluded).
    ROUND 13 — the four log sections join the rule the two fixed sections have
    followed since round 5: an OWED slot is not an entry, so it counts for
-   nothing anywhere — not in the CO-entry arithmetic, not in the exports, not
+   nothing anywhere — not in the admin-entry arithmetic, not in the exports, not
    in the counters. (A stored record never CONTAINS one; the student's form
    does, and this is the function that keeps the two saying the same number.) */
 WA.filled = function (sec, list) {
@@ -1885,7 +2072,7 @@ WA.migrateRecord = function (rec) {
    DERIVED from the entries, never typed. */
 /* ROUND 12 — the four log sections join the arithmetic, honestly. The
    consequence is named rather than hidden: a mid-stage student goes from ~18
-   entries to ~80, so "3 of 8 entered by the CO" becomes "3 of 80". That is
+   entries to ~80, so "3 of 8 entered by the admin" becomes "3 of 80". That is
    what the record now contains, and a denominator that pretended otherwise
    would be the untruth. */
 WA.COUNTED = ["nfs", "sms", "fail", "almost_good", "airsickness",
@@ -1941,13 +2128,13 @@ WA.recStats = function (rec) {
     airsickness: n("airsickness"), solos: n("solo_flights"),
     fpc: n("fpc"), cef: n("cef"),
     legacy: WA.legacyItems(r).length,
-    /* HOW MANY entries the CO entered — never WHETHER the record is "the
-       CO's": that verdict needs the total too, and lives in WA.coSource */
+    /* HOW MANY entries the admin entered — never WHETHER the record is "the
+       admin's": that verdict needs the total too, and lives in WA.coSource */
     co: WA.coEntries(r).length,
   };
 };
 
-/* every entry the CO entered on the owner's behalf, described */
+/* every entry the admin entered on the owner's behalf, described */
 WA.coEntries = function (rec) {
   const r = rec || {};
   const out = [];
@@ -2028,7 +2215,7 @@ WA.SOLO_NG_DEFAULT_TIP =
    The stage is flown in one order and the checkrides sit in it at fixed
    points, so a later checkride cannot have been flown while an earlier one
    has not: such a record is a slip of the identity picker, and it corrupts
-   every per-checkride comparison the CO makes without ever looking wrong.
+   every per-checkride comparison the admin makes without ever looking wrong.
    THE ORDER IS WA.EVAL_ORDER — the file order of flowchart2.json, i.e. the
    printed Training Flow Chart. What is refused is a FILL out of order; an
    empty fixed slot is always allowed, because that is the state all eight
@@ -2289,9 +2476,9 @@ WA.daysAgo = function (d) {
   return Math.round((today - then) / 86400000);
 };
 /* the chip itself — quiet by default, amber once it has waited.
-   ROUND 13 residual (found while re-rendering the CO's exam table): the chip is
+   ROUND 13 residual (found while re-rendering the admin's exam table): the chip is
    SECTION-AWARE, like WA.debriefWord has been since 12b. A ground exam awaits a
-   RESULT, not a debrief — nobody debriefs a written paper — and the CO's exam
+   RESULT, not a debrief — nobody debriefs a written paper — and the admin's exam
    table was the one surface still saying the flight word. 12b's own note
    claimed this surface already agreed; it did not, and now it does. */
 WA.debriefChip = function (e, sec) {
@@ -2469,13 +2656,37 @@ WA.examLabel = function (id) {
    stored record to change a caption — and would have broken any instance still
    serving the previous client. The word is data; the key is the contract.
    MIRROR: db/schema.sql → wa.series_label().
+
+   ROUND 19 — AND THE «ΕΕΘ» IN THE TIP STAYS. RULING (Claude, 2026-08-26,
+   standing unless the user overrules it). Round 18 renamed the series to
+   «Weekly» on every surface and left one Greek word behind, inside the
+   tooltip: «the squadron's ΕΕΘ, renamed on 2026-08-26». That is not a missed
+   surface — it is a TERMINOLOGY BRIDGE, and it is deliberate.
+   WHY IT IS NOT A VIOLATION OF THE ENGLISH-UI RULE. The rule exists so that a
+   foreign student officer can read this application; it has never meant that a
+   Greek word may not be NAMED as the thing an English one replaced. Every user
+   of this form has spent a year hearing «ΕΕΘ» in the squadron and reading it on
+   the programme board, and a tooltip that pretended the word did not exist
+   would force each of them to work out for themselves that «Weekly» is the same
+   examination. The bridge is where a bridge belongs: one hover away, never in a
+   label, never in a stored value, and dated so a reader knows when the change
+   happened. The same judgement governs the round-19 ΑΕΡΟΣ / F/S labels — see
+   WA.CURRENCY_CATS, where the printed Greek is the label and the English is
+   one hover away, for the same reason and with the same limit.
+   IT IS A SENTENCE WITH AN EXPIRY: when nobody in the squadron says «ΕΕΘ» any
+   more, the bridge has done its work and the clause goes. Until then, removing
+   it would cost a reader the one fact that connects the new word to his own.
    ══════════════════════════════════════════════════════════════════════════ */
 WA.EXAM_TRIALS = 3;
 WA.EXAM_SERIES = [
-  /* `id` is the STORED key and never changes. `label` is what everybody
-     reads. `en` is the ASCII spelling of the stored key, kept for the file
-     names and log lines that must stay ASCII. */
-  { id: "EETH", label: "Weekly", en: "EETH",
+  /* `id` is the STORED key and never changes; `label` is what everybody reads.
+     ROUND 19 — AND THERE IS NO `en` ANY MORE. Round 18 added it as «the ASCII
+     spelling of the stored key, kept for the file names and log lines that must
+     stay ASCII», and not one file name or log line ever read it: the stored key
+     is ALREADY ASCII, so the field was a copy of `id` under a second name. A
+     dead field is a promise the code does not keep — the next reader would have
+     had to prove it was unused before touching either half — so it is gone. */
+  { id: "EETH", label: "Weekly",
     tip: "Weekly — the weekly theory exams (the squadron's ΕΕΘ, renamed on 2026-08-26). An OPEN series the syllabus does not enumerate: they are numbered Weekly 1, Weekly 2 … in the order they are sat, and both the date and the grade may be left empty until they are known. They are not one of the eight ground exams and they are not extras — they are planned. They ARE ground exams, so they are marked at the ground-exam pass mark: " + WA.passMin("exams") + " %, the same number as the eight (round 15)." },
 ];
 WA.examSeriesDef = function (id) {
@@ -2619,7 +2830,7 @@ WA.examGraded = function (e) {
   return !(g === null || g === undefined || g === "") && isFinite(Number(g));
 };
 /* ── ROUND 16 — THE BADGE GATE, ONE DEFINITION FOR BOTH SURFACES ───────────
-   The student's exam row and the CO's Student-analysis row wear the SAME
+   The student's exam row and the admin's Student-analysis row wear the SAME
    badge, and until this round each decided for itself when to draw it. Two
    rulings of 22/08/2026 move that decision, so it moves once, here.
 
@@ -2828,7 +3039,7 @@ WA.checkLineHTML = function (sec, e) {
    and a result still awaited is a grade not written yet. */
 
 /* entries a v1 record could not fully describe — the student is asked to
-   complete them; the CO sees how many are still incomplete. */
+   complete them; the admin sees how many are still incomplete. */
 WA.legacyItems = function (rec) {
   const r = rec || {};
   const out = [];
@@ -2931,11 +3142,15 @@ WA.personCall = function (p, withRank) {
         after them (alphabetically, so a third one lands somewhere definite
         rather than wherever the roster happened to insert it), and people the
         roster gave no country last.
-     2. THE CALL SIGN, in NATURAL order — P-2 before P-14 before P-31, never
-        the string order that puts P-14 before P-2. The call sign IS the
-        squadron's own hierarchy (P-14, the CO, comes first), which is why it
-        and not the rank field decides: rank is a grade, the call sign is the
-        position. This is the FDMS Currency precedent, unchanged.
+     2. THE CALL SIGN, in NATURAL order — a 2 before a 14 before a 31, never
+        the string order that puts the 14 before the 2. The call sign IS the
+        squadron's own hierarchy, which is why it and not the rank field
+        decides: rank is a grade, the call sign is the position. This is the
+        FDMS Currency precedent, unchanged.
+        WHICH CALL SIGN IS FIRST IS NOT WRITTEN HERE (round 19, the FDMS
+        round-18 privacy lesson applied to this repository): the order falls
+        out of the `call_sign` values the roster holds, so no literal in this
+        file names a real call sign and no comment says who holds one.
      3. Anybody without a call sign sorts LAST WITHIN THEIR OWN AIR FORCE, by
         surname — they are not un-ranked, they are un-numbered.
 
@@ -2945,9 +3160,15 @@ WA.personCall = function (p, withRank) {
    and no call sign ever leave the database for a student) still arrives in
    this order. Change one, change the other.
    ══════════════════════════════════════════════════════════════════════════ */
+/* ROUND 19 — THE EXAMPLE IS INVENTED, AND IT HAS TO BE. The privacy grep of
+   this round found the illustration below quoting a call sign the squadron's
+   own roster carries — a real one, in a public repository, exactly the leak the
+   FDMS round-18 sweep removed from its own comments. The example now uses
+   numbers nobody on the roster holds; it demonstrates the rule just as well,
+   because the rule is about DIGITS and not about who flies under them. */
 WA.SENIORITY_TIP =
-  "Seniority order — HAF first, then ITAF, then any other air force; within each, by call sign in natural order (P-2 before P-14), and whoever has no call sign last by surname.";
-/* digits padded so a numeric run compares as a NUMBER: "P-14" → "P-00000014" */
+  "Seniority order — HAF first, then ITAF, then any other air force; within each, by call sign in natural order (a 2 before an 11, never the string order that reverses them), and whoever has no call sign last by surname.";
+/* digits padded so a numeric run compares as a NUMBER: "X-11" → "X-00000011" */
 WA.natKey = function (s) {
   return String(s === null || s === undefined ? "" : s).toUpperCase()
     .replace(/\d+/g, (d) => d.padStart(8, "0"));
@@ -3238,7 +3459,7 @@ WA.navMount = function (navEl, opts) {
    every item is in the terms the user can see on screen: the section, the row
    named the round-12b way (its code / date, never a stored index), and what
    changed, old → new. One builder for all three forms — the student's, the
-   CO's on-behalf twin and the instructor's general save — because three
+   admin's on-behalf twin and the instructor's general save — because three
    builders is three chances for the message and the write to disagree.
    ══════════════════════════════════════════════════════════════════════════ */
 /* "Maj ⟨SURNAME⟩" — rank + surname, and nothing else: the confirmation names
@@ -3269,6 +3490,23 @@ WA.rowLabel = function (sec, e, opts) {
   const x = e || {};
   const o = opts || {};
   const bits = [];
+  /* ROUND 19 — A CURRENCY ROW IS NAMED BY WHAT MAKES IT UNIQUE, and by nothing
+     else: the kind, the programme, the day and — where there was more than one
+     that day — which sortie of it. That is exactly WA.curIdent in words, so a
+     line the dialog prints can never stand for two different rows. It falls
+     through to the shared `seq` suffix at the bottom of this function, which is
+     where every other section's «#2» already comes from. */
+  if (sec === "ins_currency") {
+    /* only what the row ACTUALLY says. An unfilled kind renders as «—» through
+       the label helpers, and a title reading «— · — · 23/08/2026» is three
+       dashes where a half-finished row should simply be called by its date. */
+    if (x.kind) bits.push(WA.currencyKindLabel(x.kind));
+    if (x.category) bits.push(WA.currencyCatLabel(x.category));
+    if (x.date) bits.push(fmtD(x.date));
+    const nm0 = bits.filter(Boolean).join(" · ");
+    const sq0 = WA.curSeq(x);
+    return nm0 ? nm0 + (sq0 > 1 ? " #" + sq0 : "") : "";
+  }
   if (sec === "exams") {
     if (WA.examSeries(x) || x.exam) {
       bits.push(WA.examRowLabel(x, !!((o.trials || {})[String(x.exam || "").trim()])));
@@ -3307,6 +3545,11 @@ WA.rowTitle = function (sec, e, i, opts) {
 WA.rowIdent = function (sec, e) {
   const x = e || {};
   const s = (v) => String(v === null || v === undefined ? "" : v).trim().toUpperCase();
+  /* ROUND 19 — one definition, and it is the SERVER's: the uniqueness the
+     validator enforces and the identity the change list pairs rows by are the
+     same four facts, so a row the dialog calls «changed» is a row the server
+     will accept as an update rather than refuse as a duplicate. */
+  if (sec === "ins_currency") return WA.curIdent(x);
   if (sec === "flights" || sec === "fs") {
     return [s(x.track), s(x.sortie), Math.round(Number(x.seq) || 1), s(x.kind)].join("|");
   }
@@ -3324,6 +3567,15 @@ WA.rowIdent = function (sec, e) {
 /* a value, in the words the form shows */
 WA.fieldText = function (sec, field, v) {
   if (v === null || v === undefined || v === "") return "—";
+  /* ROUND 19 — THE SECTION DECIDES THE VOCABULARY, and it is asked FIRST.
+     `kind` and `category` are already spoken for below — by the flight log's
+     kind and the gradesheet's track — and a currency row means neither. Two
+     sections may share a key name and mean different things; what they must
+     never do is let one section's word be printed over the other's fact. */
+  if (sec === "ins_currency") {
+    if (field === "kind") return WA.currencyKindLabel(v);
+    if (field === "category") return WA.currencyCatLabel(v);
+  }
   if (field === "date" || field === "end_date" || field === "entrance_date" || field === "exit_date") {
     return fmtD(v);
   }
@@ -3351,6 +3603,10 @@ WA.fieldText = function (sec, field, v) {
     return m ? m.label : String(v);
   }
   if (field === "track") return WA.itemCatLabel ? WA.itemCatLabel(v) : String(v);
+  if (field === "e_items") {
+    const ids = Array.isArray(v) ? v : [];
+    return ids.length ? ids.map(WA.eItemCode).join(" · ") : "—";
+  }
   if (typeof v === "boolean") return v ? "yes" : "no";
   return String(v);
 };
@@ -3364,6 +3620,9 @@ WA.FIELD_WORDS = {
   course: "course", exam: "exam", trial: "trial", series: "series",
   series_no: "number", slot: "slot", evaluation: "checkride",
   level: "assessment", flew_with: "flown with this student", comment: "comment",
+  /* ROUND 19 — the word the FDMS currency card uses for the EVENTS table's
+     rows, so a change list and the register it feeds say the same thing */
+  e_items: "E-items",
 };
 WA.fieldWord = function (f) { return WA.FIELD_WORDS[f] || f; };
 /* THE FIELDS THAT ARE THE ROW'S NAME. WA.rowTitle already prints them, so an
@@ -3378,11 +3637,21 @@ WA.IDENT_FIELDS = {
   exams: ["exam", "trial", "series", "series_no"],
   solo_flights: ["slot"],
   evaluations: ["evaluation"],
+  /* ROUND 19 — all four facts of WA.curIdent. They ARE the row's name, so the
+     «added» line does not repeat them; change one and the row surfaces as a
+     removal plus an addition, which is the honest description of a sortie
+     re-filed under a different day, kind or programme. */
+  ins_currency: ["date", "kind", "category", "seq"],
 };
 /* the fields a change list ever mentions — the stored keys of the section,
-   minus the two the user never typed and cannot act on */
+   minus the two the user never typed and cannot act on.
+   ROUND 19 — TWO REGISTRIES, ASKED IN ORDER. The student sections are the
+   mirror of wa.entry_keys and the instructor's of wa.ins_entry_keys; each
+   surface keeps pointing at its own server function, and this is the one place
+   a caller that takes either kind of section has to know about both. */
 WA.diffFields = function (sec) {
-  return (WA.ENTRY_KEYS[sec] || []).filter((k) => k !== "legacy" && k !== "entered_by");
+  const keys = WA.ENTRY_KEYS[sec] || WA.INS_ENTRY_KEYS[sec] || [];
+  return keys.filter((k) => k !== "legacy" && k !== "entered_by");
 };
 WA.sameValue = function (a, b) {
   const n = (v) => (v === null || v === undefined || v === "") ? "" : v;

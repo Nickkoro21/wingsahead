@@ -177,6 +177,19 @@ function. Free text remains accepted in every box they fill (§4i·1).
   rank_transport_ff / nr_*` — kept in the table as the migration's audit trail,
   **refused on write by name** and returned by nothing.
 
+**instructor_records** (round 19, §4u·4) — 1:1 with an INSTRUCTOR, the mirror of
+`student_records` one table over: `instructor_id` · `data jsonb` · `last_update`.
+Its **one** section today is **`currency`**, a list of dated rows
+`{date · kind · category · e_items[] · seq}` — the instructor's own flying, for
+the squadron's currency register and the FDMS bridge. It has **no `entered_by`
+column and no admin write path**: a currency claim says who flew what, and the
+only person who can make it is the person who flew (§4u·5). Its whitelist,
+strip, caps and read-time repair are **its own** (`wa.ins_sections` /
+`wa.ins_entry_keys` / `wa.ins_strip_entry` / `wa.ins_section_cap` /
+`wa.migrate_instructor_record`) — a registry shared with the student's would
+answer `'currency'` with the student's key list, and an unregistered section is
+not rejected by the strip, it is **destroyed** by it.
+
 ## 4a. Branding & terminology (round 2/3, 2026-08-13)
 
 - **Wordmark: "Wings Ahead" — with the space** — everywhere: the topbar, the
@@ -468,8 +481,8 @@ over one source: `app/items-catalog.js` (+ `WA_EVAL_ORDER`) and the
 `wa.item_names`, 117 item names). Nobody types either list, so they cannot
 disagree.
 
-**DEMO DATA.** The seed violated rule 3 (Georgiou had I4490/F4690 over empty
-C5090/C5490/I4890; Papadopoulos C5090 over an empty C4790 and I4490 over an
+**DEMO DATA.** The seed violated rule 3 (one demo student had I4490/F4690 over
+empty C5090/C5490/I4890; another C5090 over an empty C4790 and I4490 over an
 empty C5490); the gaps were filled with the flights they must have been, in
 date order. One seeded item read "FORMATION TAKEOFF" where the printed sheet
 says "FORMATION TAKE OFF", and was corrected. Everything else was left exactly
@@ -768,12 +781,17 @@ choose from, so the closed list is expressed by the shape of the form. What
 *is* choosable inside a slot is #9, and it has its escape. A solo the syllabus
 did not foresee is an **additional solo**, the one solo row that can be added.
 
-**`app/app.js` and `app/instructor.js` carry no `<select>` and no `<datalist>`
-at all** — the shared library defines vocabularies but renders no form control,
-and the instructor board is a **radio group** (round 10 — its five levels are
+**`app/app.js` carries no `<select>` and no `<datalist>` at all** — the shared
+library defines vocabularies but renders no form control — and the instructor
+board is a **radio group** (round 10 — its five levels are
 `<input type="radio">`, not a select; the theme gallery's cards are
 `role="option"` buttons, also not a select). That is the whole surface:
 **19 dropdown fields, 3 datalists, 4 ruled exceptions.**
+*(**ROUND 19** adds three controls to `app/instructor.js`, which until then had
+none — two closed selects and one closed multi-select. They are enumerated as
+#20-#22 in the audit-table delta of §4u·A, which is where the count and the
+exception list are brought up to date: **22 dropdown fields, 3 datalists,
+8 ruled exceptions**.)*
 (Round 9's form polish moved #10 from a `<select>` to a datalist input and
 added `dl-eval`; the field count is unchanged, the ruled exceptions are
 unchanged, and #5 lost the free-text filter box that used to sit above it —
@@ -2769,10 +2787,12 @@ seniority, and it has three levels:
 1. **The air force.** HAF, then ITAF, then any other named one alphabetically
    (so a third lands somewhere definite rather than wherever the roster inserted
    it), then whoever the roster gave no country.
-2. **The call sign, in NATURAL order** — P-2 before P-14, never the string order
-   that puts P-14 first. The call sign and **not the rank** decides, because the
-   call sign is the squadron's own position (P-14 is the CO) while the rank is a
-   grade. This is the **FDMS Currency precedent**, unchanged.
+2. **The call sign, in NATURAL order** — a 2 before an 11, never the string
+   order that puts the 11 first. The call sign and **not the rank** decides,
+   because the call sign is the squadron's own position while the rank is a
+   grade. This is the **FDMS Currency precedent**, unchanged. *(Round 19: the
+   examples here are INVENTED numbers and the sentence no longer says which
+   call sign belongs to which appointment — see §4u·6.)*
 3. **No call sign sorts last within its own air force**, by surname — such a
    person is not un-ranked, they are un-numbered.
 
@@ -3003,7 +3023,7 @@ so the gate is stated here for whoever runs the deployment.
 ### SELF-VERIFICATION — ROUND 14 (live, local stack, the real forms and the real RPCs)
 
 1. **`db/schema.sql` applies twice, `ON_ERROR_STOP=1`, exit 0** both times.
-   `wa.natkey('P-14') = 'P-00000014'`, `wa.natkey('P-2') = 'P-00000002'`.
+   `wa.natkey('X-11') = 'X-00000011'`, `wa.natkey('X-2') = 'X-00000002'`.
 2. **The panel is live and it agrees with the headers.** All 13 section rows
    present; the nav badge and the section's own `.cnt` were read side by side
    and match on every section (`Evaluations 8/8` ⇄ *“8 of 8 flown”*,
@@ -3052,9 +3072,10 @@ so the gate is stated here for whoever runs the deployment.
     entries”*.
 12. **Seniority, three lists compared side by side.** People table, Overview
     submissions strip and the student form's datalist (surnames only, straight
-    off `list_instructor_names`) are in the **identical** order: HAF
-    `P-14 … P-24`, then ITAF `P-40, P-42`, then the three without a call sign,
-    last, by surname. The People header says *“— seniority order”*.
+    off `list_instructor_names`) are in the **identical** order: every HAF call
+    sign in natural order, then every ITAF one, then the three without a call
+    sign, last, by surname. *(Round 19: the real call signs this line printed
+    were removed — §4u·6.)* The People header says *“— seniority order”*.
 13. **The separator.** Read off the live radio group: `Strongly Recommended ·
     Recommended · Recommended as Alternate │ Recommended for Other Assignments ·
     Strongly Recommended for Other Assignments`.
@@ -5051,6 +5072,547 @@ no stored row is rewritten by any part of this round.
    so the migration path remains testable. Nothing else about the demo database
    differs from where this round found it.
 
+## 4u. Round 19 (2026-08-26) — THE INSTRUCTOR'S OWN CURRENCY, AND THE EXPORT NAMES ITSELF
+
+> **ΑΠΟΦΑΣΗ ΧΡΗΣΤΗ 26/08/2026** (αυτολεξεί): «*στο link που θα στέλνουμε σε κάθε
+> εκπαιδευτή θέλω να μπορεί να περάσει κι εκείνος, πέρα από την αξιολόγηση,
+> κάποια δική του πτήση S και τα αντίστοιχα Ε. Επίσης να μπορεί να περάσει Ε και
+> σε μια πτήση με μαθητή πέρα από τις S. Αυτό θα είναι μια γέφυρα για το currency
+> του FDMS.*»
+
+Until this round an instructor's link asked him **one** question — what he makes
+of each student for fighters — and told him nothing about himself. It now
+carries the second half of what he actually files with the squadron: **his own
+flying**, in the terms the 3-01 counts it in, so that the currency register the
+FDMS Scheduler keeps can be fed from the same link instead of from a second
+form nobody would open.
+
+### 4u·1. THE MODEL — FOUR FACTS AND A NUMBER
+
+An instructor's currency row is a **claim about his own logbook**:
+
+| key | what it is |
+|---|---|
+| `date` | **required** — ISO stored, DD/MM shown. A currency claim with no day claims nothing. |
+| `kind` | `own` (a sortie of his own — the «δική του πτήση S» of the ruling) · `student` (a sortie flown with a student) — `wa.currency_kinds()` |
+| `category` | `aeros` (**ΑΕΡΟΣ**, the semester AIR programme, Πίνακας 9) · `fs` (**F/S**, the semester SIMULATOR programme, Πίνακας 6) — `wa.currency_categories()` |
+| `e_items` | the **E-items** of the 3-01 EVENTS table this sortie exercised — ids of `wa.e_item_ids()`, **possibly none** |
+| `seq` | which sortie of that (kind, category, day) — 1, and 2 for the second. AUTHORED, never an array index (the round-12 doctrine) |
+
+**A `student` ROW REFERENCES NO STUDENT, DELIBERATELY.** The flight itself lives
+on the student's side and is entered there, by the student, in `flights` / `fs`.
+This row is the instructor's own currency claim about the same hour of the same
+day. Keeping them unlinked is what makes both independently correct: neither can
+corrupt the other, and revoking one link touches neither.
+
+**AND A SORTIE WITH NO EVENT IS STILL A SORTIE.** «κάποια δική του πτήση S» is
+asked for by name, so `e_items` may be empty and the row still counts. The form
+says so in its empty state, in its hint and in its column tooltip.
+
+**NO NOTE FIELD** (house minimalism, the round-12b rule, unchanged).
+
+### 4u·2. THE SORTIE CODE — **CONSIDERED, AND REFUSED** *(the round-19 judgement)*
+
+The round brief left it open: *«allow an optional free-text sortie code (closed
+to the syllabus catalog + off-catalogue escape, the R12 kind pattern) if the
+proposal-reading argues for it; judge and record.»* **It does not, and it is not
+there.** Two reasons, either of which is sufficient:
+
+1. **It would be empty by nature on half the rows.** The syllabus catalogue is
+   the STUDENT's Phase-II flow chart. An instructor's own Σ sortie under
+   Πίνακας 9 has no code in it at all — so a `kind:'own'` row could never fill
+   the box, and a field that is meaningless for half its rows teaches its user
+   to skip it on the other half.
+2. **Its destination never reads it.** The FDMS currency cell is dated by DATE
+   and by E-ITEM and by nothing else (`specs/scheduler-spec.md` §11: «*μία έξοδος
+   στο κελί, κατά τη δική της ημερομηνία · δατάρει και Ε άλλων στηλών*»). A
+   bridge that carried a field the far side discards is a field the near side
+   maintains for nobody.
+
+Recorded here rather than left silent, so the next round does not re-open it by
+accident. **If the squadron later asks for it**, the R12 `kind` pattern is the
+shape to use — and the first thing to decide will be what it means on an `own`
+row.
+
+### 4u·3. THE E-ITEMS — A GENERATED CATALOGUE, TWO MIRRORS, ONE RUN
+
+`tools/gen-currency-catalog.py` reads the FDMS research file
+`D:\FDMS\data\requirements\instructor_currency.json` (*«91 ελεγμένα items από το
+3-01/2025 ΔΑΕ — read-only research truth»*) and writes **both** mirrors in one
+run, exactly as `gen-items-catalog.py` does for the syllabus:
+
+- **`app/currency-catalog.js`** → `WA_E_ITEMS` — `{id, c, n, seat, d}`
+- **`db/schema.sql`** → the `CURRENCY GENERATED BLOCK`: `wa.e_item_ids()` and
+  `wa.e_item_name(id)`
+
+so the closed list the form offers and the closed list the server enforces
+**cannot drift** — nobody types either of them by hand.
+
+**27 OF THE CATALOGUE'S 28, AND THE ONE THAT IS NOT IS NAMED.** `e-1d-demo`
+(Ε-1δ — DEMO) is **Chapter-5 doctrine**: it belongs to the ΙΠΤΑΜΕΝΟΣ ΕΠΙΔΕΙΞΗΣ
+and to nobody else. FDMS itself hides it from every instructor who does not hold
+the post (its ✈ Demo-pilot section, `scheduler-spec` §11θ), and Wings Ahead has
+no demo-pilot flag to hide it by — so offering it in a closed list fourteen
+people see would show them all a currency for a post one of them might hold. It
+is dropped **by id**, and the drop is printed in the generated header of **both**
+mirrors, so the difference between 27 and 28 is never a silent one. A demo pilot
+records his DEMO where the demo sheet lives: FDMS.
+
+**THE STORED VALUE IS THE ASCII id.** The printed code is Greek — «Ε-1α» is a
+Greek Ε and a Greek α, homoglyphs of Latin E and a — which is the trap
+`gen-items-catalog.py` had to defuse for the course codes. Here it never arms:
+what the record stores is `e-1a-aerobatics`, the generator **asserts** that every
+emitted id matches `^[a-z0-9-]+$` and that no two collide, and the Greek code is
+display only. An unknown id is **refused on write BY NAME**:
+
+> `WA: invalid payload — «e-99-nope» is not an event of the 3-01 EVENTS table — choose one of the 27 printed events (currency[0].e_items[0])`
+
+…and an id **already stored** that the catalogue no longer knows is **kept and
+shown marked «unknown»**, never dropped behind its owner's back — the round-6
+legacy-chip rule, applied to a second catalogue.
+
+### 4u·4. STORAGE — `public.instructor_records`, THE MIRROR OF `student_records`
+
+A new table, keyed like the student's: one `jsonb` per person, sections inside
+it, every count derived and nothing typed.
+
+```sql
+create table if not exists public.instructor_records (
+  instructor_id uuid primary key references public.people(id) on delete cascade,
+  data          jsonb not null default '{}'::jsonb,
+  last_update   timestamptz not null default now(), …);
+```
+
+**WHY A TABLE AND NOT A COLUMN ON `proposals`.** A proposal is keyed
+`(instructor, student)` — a statement about somebody ELSE, one per student. A
+currency row is a statement about the instructor HIMSELF, and there is exactly
+one record of them per person. Hanging it off a proposal would tie an
+instructor's flying to whichever student happened to be first in a list, and
+lose it the day that student left.
+
+**ITS OWN REGISTRY, AND THAT IS THE LOAD-BEARING PART.** An instructor record
+shares **not one section name** with a student record, so it gets its own
+whitelist rather than a branch inside the student's — `wa.ins_sections()` ·
+`wa.ins_entry_keys()` · `wa.ins_strip_entry()` · `wa.ins_section_cap()` ·
+`wa.validate_instructor_record()` · `wa.migrate_instructor_record()`, mirrored
+client-side by `WA.INS_SECTIONS` / `WA.INS_ENTRY_KEYS` / `WA.migrateInsRecord`.
+A single `wa.entry_keys()` serving both would answer `'currency'` with the
+**student's** key list — and an unregistered section is not rejected by the
+strip, it is **DESTROYED** by it, row by row, on the first read. Two records,
+two registries, each exhaustive about its own sections.
+
+**WHAT IS ENFORCED, AND BY NAME EVERY TIME**
+
+| rule | refusal |
+|---|---|
+| unknown section | *unknown section — an instructor record holds: currency* |
+| unknown key | *unknown field for section currency — allowed: date, kind, category, e_items, seq* |
+| `date` required, ISO | *required date missing* / *date must be ISO YYYY-MM-DD* |
+| `kind` closed | *a flight is either your own or one with a student — own / student* |
+| `category` closed | *a flight is flown in the air or in the simulator — aeros / fs* |
+| `seq` 1-9 | `wa.chk_int` |
+| `e_items` ⊆ catalogue | *«…» is not an event of the 3-01 EVENTS table — choose one of the 27 printed events* |
+| no repeated event on one sortie | *«Ε-32 — BFM…» is named twice on the same sortie — one flight exercises an event once* |
+| one row per `(kind, category, date, seq)` | *this flight is already recorded (2026-08-26, aeros, flight 1 of the day) — give the second one its own number* |
+| cap | 400 rows (`wa.ins_section_cap`) |
+
+**THE SAME NORMALISATION BOUNDARY.** `wa.norm_record()` is reused unchanged —
+it is section-agnostic — so a padded `' e-32-bfm '` cannot be a known event to
+the storage and an unknown one to the membership check. (Proved: the duplicate
+check fired on `["e-32-bfm", " e-32-bfm "]`.)
+
+**AND THE RECORD IS STORED ALREADY MIGRATED**: `wa.write_instructor_record`
+runs `wa.migrate_instructor_record` on the way in, so what the table holds is
+byte-identical to what a read gives back.
+
+### 4u·5. **NO ADMIN WRITE PATH — AND THAT IS THE RULING**
+
+The admin may enter a **student's** record on their behalf, because he is
+transcribing a form somebody filled in on paper. He may **not** enter an
+instructor's currency: it is a claim about **who flew what**, and the admin was
+not in the aircraft.
+
+So `wa.write_instructor_record` has **no `p_as_admin` twin**, `public.save_instructor_currency(token, payload)`
+takes **no instructor id** (the row belongs to whoever holds the link), and the
+table therefore needs **no `entered_by` column**, no stamp, no diff-stamping and
+no lock. The admin's on-behalf form renders the section **read-only** and says
+why — but the absence of the path is what makes it true, not the absence of the
+buttons. **Revoking a link closes it the same instant it closes the
+assessments** (`wa.auth_role` refuses an inactive person), and the stored record
+survives the revocation untouched.
+
+### 4u·6. THE FORM — «MY CURRENCY», UNDER THE ASSESSMENTS
+
+A **plain table** in its own card, below the student cards and above the save
+bar — present even when the class is closed and there are no cards, because an
+instructor whose assessments are shut still flies.
+
+| | |
+|---|---|
+| **NO PRE-SEEDING, NO STATE CHIPS** | The student's log tables are pre-seeded from the printed flow chart and wear four state colours, because there the syllabus knows what is owed. Here nothing is owed **by a form**: an instructor's flying is open-ended, so there is no denominator, no placeholder row and no «owed» chip — one would invent a requirement the 3-01 states somewhere else entirely. |
+| **COLUMNS** | Date · Flight (`own` / `with a student`) · Programme (**ΑΕΡΟΣ** / **F/S**) · **#** · E-items · ✕ |
+| **ORDER** | **Newest first**, then by `#`. An open-ended list has no syllabus order; the only order it can have is a logbook's. Re-sorted on every committed cell, with the focus put back where it was. |
+| **THE EVENTS CELL** | The round-6 `.ms-chips` / `.ms-add` control, reused verbatim: chips with ✕, and a closed select of the 27 minus the ones already on the row. |
+| **NOTHING IS FILLED IN BY «+ flight»** | A date, a kind and a programme are **facts**. A form that guesses one has put a flight in an instructor's logbook that he did not fly. The row asks for what it still needs, and the client refuses to send it — *«23/08/2026 — still needs whether it was your own flight or one with a student and ΑΕΡΟΣ or F/S»* — with the row marked (`.is-problem`, the 12b pattern). |
+| **A ROW WITH NOTHING IN IT IS NOT AN ENTRY** | The `wa.slot_empty` rule for a section that has no slots: «+ flight» pressed and then ignored is not a change, not a refusal and not a stored row. |
+| **`seq` IS AUTHORED, AND NEVER A GUARANTEED REFUSAL** | The box is on the row and may be changed. But when a row's identity lands on one that already exists it takes the **lowest free** number and the toast says so — silently keeping the collision would turn a saved section into a refusal at the last moment. |
+
+**ΑΕΡΟΣ AND F/S ARE GREEK ON PURPOSE — and it is the same ruling as the ΕΕΘ
+tip.** These are the two words **printed** on the sheet the instructor is copying
+from (Πίνακας 9 / Πίνακας 6) and the two sections the FDMS currency card opens
+and closes with. An invented English pair would make him translate twice. The
+English is **one hover away** (`WA.CURRENCY_CATS[].en`, shown in the select as
+«ΑΕΡΟΣ — air» / «F/S — simulator», and in full in the tooltip), which is where a
+terminology bridge belongs: never in a stored value, never in a label alone.
+
+**THE RAIL GETS ONE ROW MORE.** The round-17 invariant — *«the rail is the card
+list, literally»* — is about the **student** rows: they and the cards are both
+built from `data.students`, in its order, so neither can drift. That is
+untouched; the currency row is **appended after the map** and is built from the
+other card on the page. Without it a section sitting below nine tall cards is a
+section most instructors never scroll to. The head count still says *«7 of 9
+chosen»*, because that is what it says it counts.
+
+### 4u·7. THE ONE GENERAL SAVE COUNTS BOTH
+
+Round 14's button said *«Save 3 assessments»*. That sentence is **kept exactly
+where it is still the whole truth** and grows a second half the moment it is not:
+
+- assessments only → **«Save 3 assessments»** *(unchanged)*
+- currency only → **«Save 2 currency changes»**
+- both → **«Save 3 assessments + 2 currency changes»**
+
+**ONE LIST IN THE CONFIRMATION, TWO KINDS OF LINE.** The currency rows name
+themselves through the **same** builder every other record uses — `WA.rowLabel`
+gained an `ins_currency` branch, `WA.rowIdent` returns `WA.curIdent` (the
+server's own uniqueness), `WA.IDENT_FIELDS.ins_currency` is all four naming
+facts, and `WA.diffFields` now asks **both** registries. Live output:
+
+```
+My currency · own · ΑΕΡΟΣ · 26/08/2026 — added (E-items Ε-1α · Ε-32)
+My currency · own · ΑΕΡΟΣ · 26/08/2026 #2 — added (E-items Ε-4)
+My currency · with a student · F/S · 25/08/2026 — added (E-items Ε-3)
+My currency · with a student · F/S · 25/08/2026 — E-items Ε-3 · e-retired-2024 → Ε-3
+```
+
+**THE CURRENCY IS WRITTEN FIRST**, in one call, before the per-student loop: a
+refusal the instructor must act on should reach him before a dozen slower
+writes, not after them — and the loop runs regardless, so nothing in the class
+is held hostage by one bad flight. A currency refusal is reported **even when
+every assessment landed**: *«12 saved ✓»* beside a section that was silently not
+written is the one sentence this form must never print.
+
+**DISCARD UNDOES BOTH**, because the dialog listed both. **`beforeunload` counts
+both** — a table of flights is more typing than an answer, not less — through a
+function (`WA._insCurDirty`) that `teardownView()` clears, so it can never be a
+stale snapshot.
+
+**AND THE PRINTED SHEET CARRIES IT.** Round 8's rule for that sheet is that it
+prints what the document actually IS; from this round the document has two
+parts, and a printout showing only the assessments would be filed as the whole
+of an instructor's return.
+
+### 4u·8. THE ADMIN SIDE — READ, NEVER WRITE
+
+- **`wa.instructor_dataset`** gains `currency` + `currency_last_update`, so the
+  section rides with the form in the same round trip as the cards (and the
+  admin's on-behalf view gets it too, read-only).
+- **`admin_get_data` → `instructors[]`** gains the same two keys. The **People**
+  tab shows the one figure that tells the admin whether to click at all —
+  a **`currency N`** chip beside Duty · Leadership · Status, with the last-saved
+  time and the read-only reason in its tooltip. The full table is one click
+  away, on «Enter assessments as…». *(The People tab is the roster editor; a
+  roster editor that grows a flight log stops being one.)*
+- **`public.admin_export`** gains `instructor_records[]` (`data` migrated,
+  `data_as_stored` raw, `entries_total`, `last_update`) **and** `e_items[]` —
+  `{id, name}` for all 27 — so a reader that has never seen the 3-01 can print
+  «Ε-32 — BFM» instead of a slug.
+
+### 4u·9. **`"schema": "wa-export-v1"`** — the pending F5 deliverable, stamped
+
+`public.admin_export` now stamps its own format in its own first field. This
+closes the finding the FDMS bridge audit recorded as **F5** and the tolerance
+its `specs/bridge-spec.md` §3 declared: *«τον δείκτη `"schema": "wa-export-v1"`
+τον σφραγίζει η `public.admin_export()` στον επόμενο γύρο του Wings Ahead»*.
+Until now the bridge had to recognise the file by its **shape** (`people[]` +
+`student_records[]`), which is a guard any JSON carrying a `people` array could
+walk past.
+
+**THE VALUE IS A CONTRACT, AND IT IS VERSIONED.** `wa-export-v1` describes the
+**shape**, not the round that wrote it: **adding** a key — this round adds
+`instructor_records` and `e_items` — leaves a v1 reader working, because a reader
+that ignores what it does not know still gets every field it came for. Only a
+change that BREAKS such a reader (a key renamed, a type changed, a section
+removed) may move it to **v2**, and nothing may move it silently. Recorded here
+so that rule outlives this round.
+
+The FDMS side needs **no change**: its store-Import already accepts marked and
+unmarked, and the unmarked branch now becomes what it always should have been —
+a compatibility path for files exported before today, not the normal case.
+
+### 4u·10. THE THREE ROUND-18 NOTES, TAKEN
+
+**(a) THE INSTRUCTOR-SUBMISSIONS BADGE IS SCOPE-TRUTHFUL, AND ✓ IS REACHABLE.**
+Round 18 narrowed what an instructor may be **asked** — one class at a time —
+and this badge went on dividing by every active student in the squadron. On the
+local stack (25 active students, 9 in the open class) an instructor who had
+answered about all nine read **«9/25» in mustard**: a progress bar whose green
+end he could not reach by doing everything asked of him, and which claimed he
+owed sixteen assessments the server would **refuse**. It now counts his
+submissions **for the students in scope**, out of **how many are in scope** —
+the same question his own form answers («7 of 9 chosen»).
+
+It is **client-only**, and it can be: the per-class breakdown round 18's note
+said the payload lacked is already there one level down — every student carries
+`proposals[]` with the `instructor_id` of everybody who submitted.
+`proposals_count` is still read for an **un-migrated** server, and only there.
+**With no class open** the badge is a **neutral em-dash**: an instructor who is
+not being asked is not behind. The card's footnote was rewritten to match — it
+used to apologise for a breakdown it could not do; it now states what the badge
+means and that the class **filter** (what the admin sees) is a different thing
+from the class **scope** (what the instructors were asked).
+
+**(b) «HAS NOT SUBMITTED … YET» IS SCOPE-AWARE.** `not_submitted` is still the
+whole truth about the DATA, but the sentence it was printed in said something the
+data does not: that the assessment is **outstanding**. For a student outside the
+open class it is not outstanding, it is **impossible** — the server refuses that
+write by name — and a list of nine officers who «have not submitted yet» about a
+student nobody is being asked about is the dashboard inventing work. **In scope**
+the debt is named instructor by instructor, exactly as round 8 wrote it, because
+that is the list the admin acts on. **Out of scope** it becomes one line:
+
+> *Assessments are open for class 98B HAF, so nobody is being asked about this
+> student (class 99A HAF). The 13 instructors who have not answered about him owe
+> nothing — the server refuses an assessment outside the open class.*
+
+One builder (`noSubHTML`), **both readers** — the analysis card and the printed
+brief. On paper it matters more: a page filed and re-read months later has no
+dashboard beside it.
+
+**(c) THE ~105-COMMENT SWEEP — THE ADMIN STOPS BEING «THE CO» IN THE PROSE TOO.**
+Round 17 stopped every **surface** from calling the admin the CO and left the
+internal prose saying it. A parser-based sweep (not a blind regex) classified
+every `\bCO\b` in `db/schema.sql` and `app/*.js` as inside a comment or not,
+then rewrote **138 comment occurrences** — «the CO» → «the admin», «the CO's» →
+«the admin's», «a CO save» → «an admin save», «CO-entered» → «admin-entered»,
+the round-4 tag note's `"CO"` → `"ADMIN"`.
+
+**PROVED BEHAVIOUR-IDENTICAL, NOT ASSERTED.** Both versions of all four files
+were run through the same comment stripper and the remaining executable text
+compared **byte for byte**: `schema.sql` 138 527 · `app.js` 113 256 · `admin.js`
+126 259 · `student.js` 130 884 — **identical**, all four. `node --check` on every
+client file and `schema.sql` applied twice at `ON_ERROR_STOP=1`, exit **0**.
+
+**THE 32 SURVIVORS, ENUMERATED.** Every one is either the **appointment** or a
+**quoted ruling**, and each was kept by a rule rather than by hand:
+
+| what | where |
+|---|---|
+| *An FPC is conducted by the **Squadron CO** or the DO* (`wa.fpc_evaluators`) | `schema.sql` 67 · 1627 · 2350 · 3058 · `app.js` 1961 · `admin.js` 1261 · 1802 · `student.js` 513 · 1791 · 3358 |
+| the CEF's evaluator roles (*DO / **Squadron CO** / an instructor*) | `schema.sql` 2339 · 3051 · `app.js` 1955 · `student.js` 448 |
+| the **ΚΕΠΕ** entry conditions — the standing *Squadron CO / DO* discretion of 3-01 ΚΕΦ.2 §32β and the §32δ(2) duty to inform | `schema.sql` 1691 · 1694 · 2152 · `student.js` 529 · 3084 |
+| the **quoted ruling** of round 17 / 17b (the words it replaced, kept as the record) | `schema.sql` 3597 · 3598 · 3604 · 4813-4815 · 4827 · `app.js` 776 · 777 · 797 · 799 |
+| *the admin is the flight commander and the developer, never the squadron CO* | `app.js` 3429 |
+
+Untouched, as round 17 ruled: the code's private vocabulary (`asCO`, `WA.isCO`,
+`.cotag`, `is-colock`, `wa.co_entry_count`, `co_entries`), the stored
+`entered_by = 'admin'`, the doctrine **string literals**, and the `CO 101-105` /
+`CO 109` / `CO 110` **course codes** of the syllabus catalogue.
+
+**(d) `WA.EXAM_SERIES[0].en` IS GONE.** Round 18 added it as *«the ASCII spelling
+of the stored key, kept for the file names and log lines that must stay ASCII»*,
+and not one file name or log line ever read it — the stored key is **already**
+ASCII, so the field was a copy of `id` under a second name. A dead field is a
+promise the code does not keep. *(The round-19 `WA.CURRENCY_CATS[].en` is not
+its twin: it is **read**, by the category select, which is what earns it a
+place.)*
+
+**(e) THE ΕΕΘ HOVER TIP STAYS — RULING (Claude, 2026-08-26), standing unless the
+user overrules it.** Round 18 renamed the series to «Weekly» on every surface and
+left one Greek word inside the tooltip: *«the squadron's ΕΕΘ, renamed on
+2026-08-26»*. That is **not a missed surface, it is a terminology bridge**. The
+English-UI rule exists so a foreign student officer can read this application; it
+has never meant that a Greek word may not be **named as the thing an English one
+replaced**. Every user of the form has spent a year hearing «ΕΕΘ» in the squadron
+and reading it on the programme board, and a tooltip pretending the word did not
+exist would make each of them work out for himself that «Weekly» is the same
+examination. The bridge is where a bridge belongs: **one hover away**, never in a
+label, never in a stored value, and **dated**. It is a sentence with an expiry —
+when nobody in the squadron says «ΕΕΘ» any more it has done its work and goes.
+The same judgement governs §4u·6's ΑΕΡΟΣ / F/S labels.
+
+### 4u·11. **PRIVACY — WHAT THE ROUND-19 GREP FOUND** *(and it found something)*
+
+The grep this round runs is not a spot check: every value of every roster column
+that could identify a person — `last_name`, `first_name`, `call_sign`, `mn`,
+`external_oid`, `token`, **187 terms** — was matched, word-boundary and
+case-insensitively, against **every one of the 19 tracked files**.
+
+**It found ten leaks, all inherited, all now removed:**
+
+| where | what |
+|---|---|
+| `app/app.js` → `WA.SENIORITY_TIP` | a **user-facing tooltip** illustrating natural order with a call sign the roster actually carries |
+| `app/app.js` → `WA.natKey` comment | the same call sign as the padding example |
+| `db/schema.sql` → `wa.natkey` header | *«the call sign is the squadron's own position (⟨call sign⟩ is the CO)»* — a real call sign **named as the Commander** |
+| `app/app.js` → seniority header | the same sentence, client side |
+| `specs/wingsahead-spec.md` §4n·4 | the same sentence again, plus two more real call signs |
+| `specs/wingsahead-spec.md` §4n / §4o self-verification | four real call signs in a verification transcript, and one in a `wa.natkey` example |
+| `specs/wingsahead-spec.md` §4e demo-data note | **two real surnames** |
+
+This is **precisely** the defect the FDMS round-18 slice-1b sweep removed from
+its own files (`scheduler-spec` §11: *«έγραφαν αυτούσια δύο πραγματικά call signs
+του ιδιωτικού roster, ονομάζοντάς τα Δκτή και ΑΕ — σε δημόσιο repository»*), and
+the lesson is the same one: **a call sign attached to an appointment is a name**.
+Every occurrence is replaced by an invented number or a neutral phrase; the rules
+they illustrate are unchanged, because the rules were always about digits and
+never about who flies under them. **No literal call sign, surname, Military
+Number, roster id or token lives in any tracked file** — re-run of the grep: **0
+real-person hits**, the only matches being the English word *delta* colliding
+with the deliberate `Maj DELTA` fixture of §4s.
+
+> **STILL OPEN, AND IT IS THE FLIGHT COMMANDER'S CALL — NOT CLAUDE'S.** The **git
+> history keeps them**. Rewriting history is an act with consequences in every
+> clone, and it belongs to the user exactly as the identical FDMS item does. It
+> is recorded here so it is not silence.
+
+### 4u·A. AUDIT-TABLE DELTA (§4h) — **THREE NEW CONTROLS, ALL CLOSED**
+
+§4h's enumeration said *«`app/app.js` and `app/instructor.js` carry no `<select>`
+and no `<datalist>` at all»*. That was true of the instructor form for eighteen
+rounds and this one ends it, so the table is extended rather than left to rot.
+
+| # | Dropdown (surface · field) | Selector / builder (file) | Values | «Other…» escape? | If CLOSED — why |
+|---|---|---|---|---|---|
+| 20 | **My currency · Flight** | `select[data-curf$=":kind"]` (instructor.js) · `WA.CURRENCY_KINDS` ⇄ `wa.currency_kinds()` | own · with a student — **exactly two** | **NO — ✱ RULED EXCEPTION** | the ruling names two and the squadron counts two. A third kind of flight is not a wording the instructor is missing, it is a claim the currency register has no column for |
+| 21 | **My currency · Programme** | `select[data-curf$=":category"]` · `WA.CURRENCY_CATS` ⇄ `wa.currency_categories()` | **ΑΕΡΟΣ** (Πίνακας 9) · **F/S** (Πίνακας 6) — **exactly two** | **NO — ✱ RULED EXCEPTION** | the 3-01 prints two semester programmes and the FDMS currency card has two sections. A third value would be a programme the doctrine does not have |
+| 22 | **My currency · E-items** | `select.ms-add[data-curadd]` · `WA.E_ITEMS` ⇄ `wa.e_item_ids()` | the **27** events of the 3-01 EVENTS table (§4u·3), minus those already on the row | **NO — ✱ RULED EXCEPTION** | the **same argument as #5**: an event nobody else can have is an event nobody can count across the squadron or look up in the 3-01. Client and server share one **generated** list; a stored id the catalogue no longer knows is greyed *unknown* and blocks the save until it is replaced |
+
+**No `<datalist>` is added**, and no free-text box: this section has **no note
+field** (§4u·1) and **no sortie code** (§4u·2), so there is nothing on it a
+user types except a date and a small integer.
+
+**THE DATE AND THE `#` ARE NOT DROPDOWNS**, for the same reason §4h says the solo
+slots are not: `input[type=date]` is the browser's own control over a real
+calendar, and `input[type=number][min=1][max=9]` is a counted integer whose whole
+range is nine values. Neither has a list to close.
+
+**RUNNING TOTAL: 22 dropdown fields, 3 datalists, 8 ruled exceptions** — the
+**four** of round 9 (the gradesheet items · the eight evaluation slots · the FPC
+evaluator · the solo slots), the **fifth** of round 10 (the assessment scale,
+a radio group and not a select), and the **three** above.
+
+### 4u·12. CACHE-BUSTER
+
+`?v=20260826b` on the **six** files this round touched — `styles.css`, `app.js`,
+`student.js`, `instructor.js`, `admin.js`, and the new `currency-catalog.js`.
+`config.js` and `items-catalog.js` are untouched and keep `?v=20260821b`.
+*(`student.js` is touched by the comment sweep alone — zero executable bytes —
+but a file whose bytes changed gets a new buster, or a proxy will serve the old
+one for ever and the next round will not be able to tell what is deployed.)*
+
+### 4u·13. DEPLOYMENT GATE — **SCHEMA FIRST, AND THREE COMMITS RIDE IT**
+
+`db/schema.sql` is touched and it **creates a table**. The database moves first:
+the user runs the new `schema.sql` on the cloud project, confirms it, and only
+then is the client deployed. The script is **idempotent** — re-running it changes
+nothing, `create table if not exists` guards the new table, the two migration
+ledgers are untouched, and **no stored row is rewritten by any part of this
+round**.
+
+**A CLIENT DEPLOYED FIRST WOULD BREAK** (`list_students_for_instructor` would
+return no `currency` key and `save_instructor_currency` would not exist), which
+is the whole reason the gate is stated. A SERVER deployed first is harmless: the
+old client simply ignores the two new keys.
+
+**THIS ROUND'S COMMIT IS THE THIRD ON THE SAME UNPUSHED GATE** — round 17b,
+round 18 and round 19 are all ahead of `origin/main` and **none of them is
+pushed**.
+
+### 4u·14. SELF-VERIFICATION — ROUND 19 (live, local stack, the real form and the real RPCs)
+
+1. **THE CATALOGUE.** `python tools/gen-currency-catalog.py` → *«27 e-items
+   (e-1d-demo excluded), source generated 2026-08-14»* + *«every emitted id is
+   pure ASCII kebab-case (assert: 27 checked, 0 collisions)»*. `node --check
+   app/currency-catalog.js` clean; `wa.e_item_ids()` returns **27** and
+   `wa.e_item_name('e-32-bfm')` = **«Ε-32 — BFM (Basic Fighter Manoeuvres)»**.
+   Loaded in the browser: `WA.E_ITEMS.length = 27`, `WA._E_BY_ID` 27 keys.
+2. **SCHEMA ×2.** `schema.sql` applied twice with `ON_ERROR_STOP=1`, **exit 0**
+   both times; the seed/migration ledger still holds exactly its two rows.
+3. **THE WRITE, THROUGH THE REAL FORM.** On a real instructor link: «+ flight»
+   ×3, cells filled by real `change` events. The second row of 26/08 took **#2
+   by itself** (toast: *«A flight of 26/08/2026 (ΑΕΡΟΣ, own) is already recorded
+   — this one is #2»*). Button read **«Save 1 assessment + 3 currency changes»**,
+   dialog listed all four lines (§4u·7), «Confirm & save» → *«1 assessment + 3
+   currency changes saved ✓»*. `public.instructor_records` holds the three rows,
+   `seq` present **only** on the second, `e_items` absent on none that has them.
+4. **RENDER SORTED, AND CLEAN ON RELOAD.** Reload → 26/08 #1, 26/08 #2, 25/08;
+   Save **disabled**, float hidden, status back to its idle sentence — the
+   fingerprint round-trips through the server's own returned record.
+5. **UNKNOWN E, REFUSED BY NAME.** Through the page's own `rpc()`:
+   *«…«e-99-nope» is not an event of the 3-01 EVENTS table — choose one of the 27
+   printed events (currency[0].e_items[1])»*. A **stored** unknown id
+   (`e-retired-2024`, planted directly in the table) renders as a dashed
+   `is-legacy` chip reading **«e-retired-2024 unknown»** with the tooltip that
+   says what to do; a save while it is present is refused **by name** and the
+   status line carries the sentence. Removing the chip and saving succeeds, and
+   the dialog names the change: *«E-items Ε-3 · e-retired-2024 → Ε-3»*.
+6. **THE OTHER FIVE REFUSALS**, each by name: duplicate `(kind, category, date,
+   seq)`; `kind:'solo'`; an unknown key `note`; the same event twice on one
+   sortie (which also **proves the normalisation boundary** — it fired on
+   `["e-32-bfm", " e-32-bfm "]`); an unknown section `proposals`.
+7. **THE CLIENT'S OWN REFUSAL.** A row with a date and nothing else:
+   *«Currency not saved — 23/08/2026 — still needs whether it was your own flight
+   or one with a student and ΑΕΡΟΣ or F/S»*, and the row wears `.is-problem`.
+8. **DISCARD.** *«Are you sure you want to discard change 1?»* → discard → the
+   four saved rows are back, Save disabled.
+9. **REVOKE.** With the instructor deactivated, `save_instructor_currency` and
+   `list_students_for_instructor` both raise **«WA: invalid or revoked token»**,
+   and `public.instructor_records` still holds its row — a revocation closes the
+   door, it does not burn the file.
+10. **THE ADMIN, READ-ONLY.** «Enter assessments as…» on that instructor:
+    the currency card renders with **0** editable controls
+    (`[data-curf]`, `.ms-add`, `[data-curdel]`, `[data-curerm]`, `#cur-add` all
+    absent), the hint says why, the four rows read as text. People tab: the chip
+    **«currency 4»** with *«4 flights and 4 events recorded for the currency
+    register, last saved …»*.
+11. **THE EXPORT.** `public.admin_export` →
+    `schema = "wa-export-v1"`, `instructor_records` **1** (4 rows,
+    `entries_total 4`), `e_items` **27** with
+    `{id:"e-32-bfm", name:"Ε-32 — BFM (Basic Fighter Manoeuvres)"}`.
+12. **THE BADGE, AT THREE SCOPES.** Scope `98B HAF`, one proposal filed:
+    **«1/9»** (not «1/25»). Nine filed through `admin_save_proposal`: **«✓ 9/9»**
+    — green reachable. Scope `— none —`: every badge a neutral **«—»** and the
+    card reads *«Nothing is outstanding…»*. Scope restored to `98B HAF`.
+13. **THE SCOPE-AWARE SENTENCE.** Out-of-scope student (99A HAF): **one** line,
+    *«Assessments are open for class 98B HAF, so nobody is being asked about this
+    student (class 99A HAF). The 13 instructors who have not answered about him
+    owe nothing…»*. In-scope student: the **12 named** per-instructor lines,
+    word for word as round 8 wrote them.
+14. **THE SWEEP, PROVED.** Comment-stripped executable text identical in all four
+    files (§4u·10c); the scanner re-run reports **32** surviving `\bCO\b` in
+    comments, every one enumerated in the table above, and **zero** admin-as-CO
+    prose.
+15. **HYGIENE.** `node --check` clean on all six client files. **Zero console
+    errors** on a fresh tab through the whole instructor flow and the whole admin
+    flow. No horizontal page scroll at **375 px** (`body.scrollWidth === 375`)
+    with the table scrolling inside its own `.tblwrap`; at **1440 px** the table
+    fits with **0** overflowing cells, no ellipsis and no clipped header.
+16. **PRIVACY.** The 187-term grep over all 19 tracked files: **0** real-person
+    hits after §4u·11 (the only matches being the English word *delta*).
+
+### 4u·15. OPEN ITEMS RAISED BY THIS ROUND
+
+1. **The git-history rewrite** (§4u·11) — the removed call signs and surnames
+   are still in the history. **The Flight Commander's decision**, not Claude's.
+2. **A `student`-kind row still names no sortie.** If the squadron later wants
+   the instructor's currency row tied to the student's flight, the join key
+   would be `(instructor, date, seq)` against the student's log — and the
+   argument of §4u·2 would have to be re-made first.
+3. **The FDMS bridge lane is not yet written.** This round produces the data and
+   the marker; reading `instructor_records` into `instructorCurrency` is the
+   FDMS side's own round.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -5073,8 +5635,16 @@ no stored row is rewritten by any part of this round.
    after the slots in date order. The same form, bound to somebody else, is what
    **the admin** fills in on a student's behalf (§4s·4 — the admin is the flight
    commander and the developer, **not** the squadron CO).
-2. **Instructor form**: student list — **round 18 (§4t·1): the students of the
-   ONE class the admin has opened for assessment, and nobody else**, filtered
+2. **Instructor form**: **TWO things now** — the assessments, and **round 19
+   (§4u): «MY CURRENCY», the instructor's own flying**, in a plain table under
+   the cards (Date · Flight `own`/`with a student` · Programme **ΑΕΡΟΣ**/**F/S**
+   · # · **E-items** · ✕), rows added by «+ flight», sorted newest first, with
+   the 27 events of the 3-01 EVENTS table as a closed multi-select. It names no
+   student and changes no student's record; the ONE general Save writes both
+   halves and the confirmation lists both. On the admin's on-behalf twin it is
+   **read-only** — the server has no admin write path for it at all.
+   The assessments themselves: student list — **round 18 (§4t·1): the students
+   of the ONE class the admin has opened for assessment, and nobody else**, filtered
    server-side (`wa.student_in_scope`) so the cards, the nav rail and the
    «N of M chosen» head all follow from one list; the form names the class in a
    badge, in its head sentence, on the rail and on the printed sheet, and with
@@ -5223,6 +5793,27 @@ no stored row is rewritten by any part of this round.
    button. That rename lives in the database and **only** there.
 
 ## 7. Open items
+
+- **ΑΠΟΦΑΝΣΗ 2026-08-26 (Γύρος 19, §4u) — ΤΟ CURRENCY ΤΟΥ ΕΚΠΑΙΔΕΥΤΗ.**
+  «*στο link που θα στέλνουμε σε κάθε εκπαιδευτή θέλω να μπορεί να περάσει κι
+  εκείνος, πέρα από την αξιολόγηση, κάποια δική του πτήση S και τα αντίστοιχα Ε.
+  Επίσης να μπορεί να περάσει Ε και σε μια πτήση με μαθητή πέρα από τις S. Αυτό
+  θα είναι μια γέφυρα για το currency του FDMS.*» — νέος πίνακας
+  `public.instructor_records`, ενότητα `currency`, κατάλογος **27 E-items** από
+  το 3-01 (παραγόμενος από την έρευνα του FDMS), **καμία διαδρομή εγγραφής για
+  τον admin**, και ο δείκτης **`"schema": "wa-export-v1"`** στο `admin_export`
+  που κλείνει το εκκρεμές F5 της γέφυρας.
+  **ΤΡΙΑ ΑΝΟΙΧΤΑ ΠΟΥ ΓΕΝΝΗΣΕ Ο ΓΥΡΟΣ** (§4u·15):
+  1. **Το rewrite του git history** — τα call signs και τα δύο επώνυμα που
+     αφαιρέθηκαν από τα tracked αρχεία (§4u·11) **ζουν ακόμη στο ιστορικό**.
+     Πράξη με συνέπειες σε κάθε clone: **ανήκει στην απόφανση του Διοικητή
+     Σμήνους**, όπως ακριβώς και το πανομοιότυπο εκκρεμές του FDMS.
+  2. **Μια γραμμή `student` δεν ονομάζει sortie** — αν ζητηθεί σύνδεση με την
+     πτήση του μαθητή, το κλειδί θα είναι `(instructor, date, seq)` και το
+     επιχείρημα του §4u·2 πρέπει να ξαναγίνει πρώτο.
+  3. **Η λωρίδα της γέφυρας δεν έχει γραφτεί ακόμη** — ο γύρος παράγει τα
+     δεδομένα και τον δείκτη· η ανάγνωση των `instructor_records` στο
+     `instructorCurrency` είναι δικός γύρος της πλευράς FDMS.
 
 - **ΑΠΟΦΑΝΣΕΙΣ 2026-08-26 (Γύρος 18, §4t) — ΔΥΟ, ΚΑΙ ΜΙΑ ΕΚΚΡΕΜΟΤΗΤΑ ΤΟΥ 17b
   ΕΚΛΕΙΣΕ.**

@@ -1418,3 +1418,41 @@ tr.is-problem, .rrow.is-problem {
   outline-offset: -2px;
   transition: background 0.6s ease, outline-color 0.6s ease;
 }
+
+/* ── ROUND 19 — «MY CURRENCY» ON THE INSTRUCTOR FORM ───────────────────────
+   The instructor's own flights, in the SAME .ftbl the student's log tables use
+   — so the two records read alike and this section inherits the scroll box, the
+   header treatment and the row rules for free. What it needs of its own is
+   four things the log tables never had a cell for: bare controls (there is no
+   .cellin here, because every column of this table is one control and the
+   column heading is its label), a narrow number box for the flight of the day,
+   an events cell that is ALLOWED to wrap (a sortie may name several, and a
+   nowrap cell would push the whole table sideways for one busy row), and the
+   small ✕ that removes a flight. Tokens only — no literal colour anywhere. */
+.curtbl td { white-space: nowrap; }
+.curtbl input[type="date"], .curtbl select {
+  min-height: 30px; padding: 4px 6px; font-size: 12px;
+  border-radius: 6px; background: var(--surface);
+}
+.curtbl input[type="date"] { width: 138px; }
+.curtbl select { max-width: 220px; }
+.curtbl td.num { text-align: right; }
+.curtbl .seqbox {
+  width: 52px; min-height: 30px; padding: 4px 6px; font-size: 12px;
+  border-radius: 6px; background: var(--surface);
+  text-align: right; font-variant-numeric: tabular-nums;
+}
+/* THE ONE CELL THAT MAY GROW DOWNWARDS. Its chips are the row's content, and a
+   row that exercised six events must show six without the table having to be
+   six columns wider. */
+.curtbl td.ecell { white-space: normal; min-width: 240px; max-width: 420px; }
+.curtbl td.ecell .ms-chips { margin-bottom: 4px; }
+.curtbl .ms-add {
+  min-height: 28px; padding: 3px 6px; font-size: 11.5px; max-width: 240px;
+  border-radius: 6px; background: var(--surface); color: var(--muted);
+}
+.btn-x {
+  background: transparent; border: 1px solid var(--line); color: var(--muted);
+  padding: 3px 8px; line-height: 1.1;
+}
+.btn-x:hover { color: var(--bad); border-color: var(--bad); }

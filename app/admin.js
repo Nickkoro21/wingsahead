@@ -19,7 +19,7 @@ WA.renderAdmin = async function (view, me) {
   WA._admReturn = null;
   /* ── THE OVERVIEW CLASS FILTER (round 11) ─────────────────────────────────
      «Στο overview να μπορώ να φιλτράρω ανά class.» The choice survives a
-     reload — a CO who briefs 98B all morning should not re-pick 98B after
+     reload — an admin who briefs 98B all morning should not re-pick 98B after
      every refresh — so it lives in localStorage, exactly like the palette.
      "" is All, and a stored class that no longer has a student falls back to
      All rather than showing an empty table nobody asked for. */
@@ -83,9 +83,9 @@ WA.renderAdmin = async function (view, me) {
         s._evalSlots = WA.evalSlotRows(s.record);
         s._fpc = WA.fpcRows(s.record);
         /* WHOSE record this is, counted from the entries (round 4b): _src.all
-           = the CO entered all of it, _src.some = the owner's record with
-           _src.n CO additions. The record-level flag alone cannot tell them
-           apart, and reading it as "CO record" is what round 4 got wrong. */
+           = the admin entered all of it, _src.some = the owner's record with
+           _src.n admin additions. The record-level flag alone cannot tell them
+           apart, and reading it as "admin record" is what round 4 got wrong. */
         s._src = WA.coSource(s.record, s.entered_by);
       }
       if (A.sel >= A.data.students.length) A.sel = Math.max(0, A.data.students.length - 1);
@@ -98,9 +98,9 @@ WA.renderAdmin = async function (view, me) {
     A.loading = false;
   }
 
-  /* how many records the students reported themselves and how many the CO
+  /* how many records the students reported themselves and how many the admin
      entered for them — the one line the class summary owes the reader.
-     A record the CO merely ADDED to stays in the self-reported count and is
+     A record the admin merely ADDED to stays in the self-reported count and is
      named separately; folding it into "entered by the admin" would say the student
      never reported anything (round-4b fix). */
   function sourceLine(list) {
@@ -157,21 +157,25 @@ WA.renderAdmin = async function (view, me) {
      The three CSVs FOLLOW THE FILTER; the JSON export does NOT, and both are
      said out loud on the buttons themselves.
      WHY: the CSVs are one row per student (summary, assessments) or per entry
-     of a student (entries) — they are the table the CO is looking at, in a
+     of a student (entries) — they are the table the admin is looking at, in a
      spreadsheet — and they live in the toolrow directly above the filtered
      table. A button that sits over 6 visible rows and silently writes 20 is a
      button that produces the wrong attachment on a Monday morning, and the
      filename is the only place that mistake can be caught. So the scope
      travels in the filename: wings-ahead-summary-98B-20260819.csv.
      WHY NOT THE JSON: that one is not a view, it is the BACKUP — a raw
-     server-side dump (public.admin_export) of people, records and proposals,
-     the thing you restore from. A partial backup that looks like a full one is
-     a trap, and the RPC has no class argument to narrow it with anyway. It
-     stays complete, and its tooltip says so. */
+     server-side dump (public.admin_export) of people, student records,
+     assessments and, from round 19, the instructors' own currency — the thing
+     you restore from. A partial backup that looks like a full one is a trap,
+     and the RPC has no class argument to narrow it with anyway. It stays
+     complete, and its tooltip says so.
+     ROUND 19 — AND IT NAMES ITS OWN FORMAT. The payload's first field is
+     "schema": "wa-export-v1", so the FDMS Bridge no longer has to guess whether
+     the file it was handed is one of these. */
   const CSV_SCOPE_TIP =
     "Follows the class filter above — exactly the rows you can see, and the class travels in the file name. Pick “All classes” to export the whole squadron.";
   const JSON_SCOPE_TIP =
-    "ALWAYS COMPLETE — the class filter does not apply. This is the raw backup of every person, record and assessment, straight from the server; a partial file that looked like a full one would be a trap to restore from.";
+    "ALWAYS COMPLETE — the class filter does not apply. This is the raw backup of every person, student record, assessment and instructor currency row, straight from the server; a partial file that looked like a full one would be a trap to restore from. It carries the marker “wa-export-v1”, so the FDMS bridge can tell it apart from any other JSON.";
   const CLASS_READONLY_TIP =
     "The classes are read-only here — they follow the members. A class appears because a student carries its name, and disappears when the last one stops; there is no list to maintain. Change a student's class under People & links.";
 
@@ -263,7 +267,7 @@ WA.renderAdmin = async function (view, me) {
      thirteen-column table and the log tables in the analysis.
 
      BUT THE PATTERN'S REAL HOME IN THE ADMIN IS THE STUDENT ANALYSIS, which IS
-     a document: ten cards, several screens, and the CO reading it is looking
+     a document: ten cards, several screens, and the admin reading it is looking
      for a section (the evaluations plot, the FAIL table, the flight log, the
      assessment). So the panel goes THERE, listing that tab's cards and carrying
      the same live states, mounted from the same WA.navMount the student form
@@ -299,7 +303,7 @@ WA.renderAdmin = async function (view, me) {
        The student form's rail prints the two FIXED sections as slots flown out
        of slots prescribed; this rail left the same row with an EMPTY chip, so
        one component said two different things about one record — and the row
-       the CO most often opens this tab for was the one row that said nothing.
+       the admin most often opens this tab for was the one row that said nothing.
        Same arithmetic as navItems(): distinct non-empty checkrides, capped at
        the eight, and the two-segment bar beside it.
        STUDENT AND COMPARISON STAY STATELESS, and that is a ruling, not an
@@ -433,23 +437,57 @@ WA.renderAdmin = async function (view, me) {
 
     const noRecord = students.filter((s) => !s.completion.has_record)
       .map((s) => esc(WA.personName(s.person, true)));
-    /* THE INSTRUCTOR CARD IS NOT FILTERABLE, and pretending otherwise would be
-       a lie in a badge. proposals_count arrives from the server counted over
-       EVERY student an instructor has assessed; there is no per-class
-       breakdown in the payload, so "7/12" cannot be re-derived for one class
-       here. It therefore stays the whole squadron's number and says so out
-       loud the moment a filter is on. */
+    /* ══ ROUND 19 — THE BADGE IS SCOPE-TRUTHFUL, AND ✓ IS REACHABLE AGAIN ═══
+       ──────────────────────────────────────────────────────────────────────
+       WHAT WAS WRONG. Round 18 narrowed what an instructor may be ASKED — one
+       class at a time — and this badge went on dividing by every active student
+       in the squadron. So on a database with 25 active students and 9 in the
+       open class, an instructor who had answered about all nine read «9/25» in
+       mustard: a progress bar whose green end he could not reach by doing
+       everything asked of him, and which said he owed sixteen assessments the
+       server would REFUSE if he tried to write them.
+       WHAT IT COUNTS NOW. The numerator is his submissions FOR THE STUDENTS IN
+       SCOPE and the denominator is how many students are in scope — the same
+       question the instructor's own form asks («7 of 9 chosen»), so the two
+       surfaces finally answer alike.
+       IT IS CLIENT-ONLY, AND IT CAN BE. The per-class breakdown round 18's note
+       said the payload lacked is already there, one level down: every student
+       carries `proposals[]` with the `instructor_id` of everybody who submitted
+       about him. `proposals_count` (the whole-squadron figure) is still read —
+       for the un-migrated server below, and only there.
+       WITH NO CLASS OPEN there is nothing to be done and nothing to be owed, so
+       the badge is a NEUTRAL em-dash rather than a red «nothing yet»: an
+       instructor who is not being asked is not behind. */
+    const scopeCls = A.data.assessment_class;          /* undefined = old server */
+    const scopedStu = (scopeCls === undefined || !scopeCls)
+      ? [] : all.filter((s) => (s.person.class || "") === scopeCls);
+    const nScope = scopedStu.length;
+    const subsOf = (id) => scopedStu.filter((s) =>
+      (s.proposals || []).some((p) => p.instructor_id === id)).length;
+    const SCOPE_BADGE_TIP = scopeCls === undefined
+      ? "This database has not been migrated yet, so the assessments are still open for EVERY active student and the badge counts every one of them."
+      : !scopeCls
+        ? "No class is open for assessment, so nothing is being asked of anybody and nothing is owed. Assessments already submitted are all still stored — this badge is about what is OUTSTANDING, and right now nothing is."
+        : "Assessments submitted for class " + scopeCls + " — the class that is open — out of the " +
+          nScope + " student" + (nScope === 1 ? "" : "s") + " in it. It is the same count the instructor sees on his own form, and it is deliberately NOT the whole squadron: the server refuses an assessment for any student outside the open class, so counting them would show a debt nobody is allowed to pay.";
     /* ROUND 14 — SENIORITY, not the alphabet. The server already orders this
        list (wa.seniority_key), and the client sorts it again with the SAME
        comparator: the dashboard payload carries the country and the call sign,
        so this surface can hold the order even against a cloud instance whose
        schema has not been re-run yet. One comparator, both sides. */
     const insRows = WA.sortBySeniority(A.data.instructors).map((i) => {
-      const done = i.proposals_count, n = all.length;
+      /* an un-migrated server has no scope at all, so it keeps the figure it
+         has always shown — over every active student, which is exactly who it
+         is still asking about */
+      const legacy = scopeCls === undefined;
+      const done = legacy ? i.proposals_count : subsOf(i.id);
+      const n = legacy ? all.length : nScope;
       const badge = !i.active ? `<span class="badge badge-bad">revoked</span>`
-        : done === 0 ? `<span class="badge badge-bad">nothing yet</span>`
-        : done < n ? `<span class="badge badge-warn">${done}/${n}</span>`
-        : `<span class="badge badge-good">✓ ${done}/${n}</span>`;
+        : (!legacy && !scopeCls) ? `<span class="badge" title="${esc(SCOPE_BADGE_TIP)}">&mdash;</span>`
+        : n === 0 ? `<span class="badge" title="${esc(SCOPE_BADGE_TIP)}">&mdash;</span>`
+        : done === 0 ? `<span class="badge badge-bad" title="${esc(SCOPE_BADGE_TIP)}">nothing yet</span>`
+        : done < n ? `<span class="badge badge-warn" title="${esc(SCOPE_BADGE_TIP)}">${done}/${n}</span>`
+        : `<span class="badge badge-good" title="${esc(SCOPE_BADGE_TIP)}">✓ ${done}/${n}</span>`;
       return `<span style="margin-right:14px; white-space:nowrap">${esc(WA.personCall(i, true))} ${badge}</span>`;
     }).join(" ");
 
@@ -500,10 +538,27 @@ WA.renderAdmin = async function (view, me) {
         <div class="card"><h3>Instructor submissions</h3>
           ${assessmentScopeHTML()}
           <p class="hint" style="line-height:2">${insRows || "No instructors yet."}</p>
-          ${cls ? `<p class="hint"><b>Not filtered.</b> Each badge counts the assessments that
-            instructor has submitted across <b>all ${all.length}</b> students — the payload carries
-            no per-class breakdown, so this card cannot honestly be narrowed to
-            ${esc(classLabel(cls))}.</p>` : ""}</div>
+          ${/* ROUND 19 — THE NOTE SAYS WHAT THE BADGE NOW MEANS. Round 18's
+               version said the card «cannot honestly be narrowed» to a class,
+               and that stopped being true the moment the badge was narrowed to
+               the one class the squadron is actually asking about. Two facts
+               have to be kept apart here: the chip row above is what the ADMIN
+               is looking at, and the badge is what the INSTRUCTORS were asked —
+               so a class filter still does not move these badges, and now the
+               note says why instead of apologising for a missing breakdown. */ ""}
+          <p class="hint">${scopeCls === undefined
+            ? `<b>Not migrated.</b> Each badge counts the assessments that instructor has
+               submitted across <b>all ${all.length}</b> students, because this database is
+               still asking about all of them.`
+            : !scopeCls
+              ? `<b>Nothing is outstanding.</b> No class is open for assessment, so no
+                 instructor owes one and every badge is a dash. Everything already submitted
+                 is still stored and still shown everywhere else on this dashboard.`
+              : `Each badge counts that instructor's assessments <b>for class ${esc(scopeCls)}</b>
+                 &mdash; the class that is open &mdash; out of the <b>${nScope}</b> student${
+                   nScope === 1 ? "" : "s"} in it.${cls && cls !== scopeCls
+                   ? ` The class filter above does not move these badges: it narrows what YOU see,
+                       while the badges follow what the INSTRUCTORS were asked.` : ""}`}</p></div>
       </div>`;
   }
 
@@ -568,7 +623,7 @@ WA.renderAdmin = async function (view, me) {
   /* ── THE AXIS FOLLOWS THE DATA (round 8) ──────────────────────────────────
      A grade chart pinned to 0-100 spends four fifths of its height on a range
      nobody in the class is in: 69 · 77 · 87 draw three bars of almost exactly
-     the same length, and the CO cannot see at a glance what he came to see.
+     the same length, and the admin cannot see at a glance what he came to see.
      `o.min0` asks for a floor derived from the plot itself — the LOWEST value
      actually drawn, less 5, floored at 0 — while the top stays the honest 100
      so a grade is never made to look bigger than it is. Counts keep their
@@ -672,7 +727,7 @@ WA.renderAdmin = async function (view, me) {
      "eval" — ALL EIGHT CHECKRIDES ON ONE LINE, in syllabus order. The four
      per-category tabs are gone: «Στο Grades per category να πλωτάρονται οι 8
      αξιολογήσεις όλες μαζί. Ανά κατηγορία απλώς στα χ labels άλλο χρώμα.»
-     A tab per track meant the CO saw four charts of two or three points each
+     A tab per track meant the admin saw four charts of two or three points each
      and had to hold the shape of the stage in his head; one line of eight
      shows it. The track survives where it belongs — in the COLOUR of the x
      label (WA.evalCatColor), which needs no click to read.
@@ -815,7 +870,7 @@ WA.renderAdmin = async function (view, me) {
 
   /* ── the summary table every plot point points at ──
      ROUND 5: all EIGHT checkrides are always listed, in syllabus order —
-     the ones nobody has flown yet say so, which is half of what the CO is
+     the ones nobody has flown yet say so, which is half of what the admin is
      looking for during the brief. */
   /* the band a grade fell in, as the chip the attempt rows wear: "ΥΣΤΕΡΗΣΗ"
      and "ΑΠΟΤΥΧΙΑ" are the squadron's own words for what did not pass, and an
@@ -892,7 +947,7 @@ WA.renderAdmin = async function (view, me) {
         </tbody></table></div>`;
   }
 
-  /* ── the dated-entry tables the CO asked to see in full ── */
+  /* ── the dated-entry tables the admin asked to see in full ── */
   function evTable(head, rows) {
     if (!rows.length) return "";
     return `<div class="tblwrap" style="margin-bottom:10px"><table class="tbl">
@@ -940,7 +995,7 @@ WA.renderAdmin = async function (view, me) {
           <td>${esc(e.instructor || "—")}</td>${srcCell(e)}</tr>`));
   }
 
-  /* the solo section as the CO must see it: the FIXED syllabus slots, in
+  /* the solo section as the admin must see it: the FIXED syllabus slots, in
      syllabus order, each either flown or openly unflown, plus any extra solo
      reality produced (round 5) */
   function soloRows(s) {
@@ -973,9 +1028,9 @@ WA.renderAdmin = async function (view, me) {
 
 
   /* ══════════════════════════════════════════════════════════════════════════
-     ROUND 12 — THE LOG TABLES, AS THE CO READS THEM.
+     ROUND 12 — THE LOG TABLES, AS THE ADMIN READS THEM.
      Here they ARE real tables, with the directive's own columns — the screen is
-     wide, and the CO is reading rather than typing. Same order as the form:
+     wide, and the admin is reading rather than typing. Same order as the form:
      4 Flights + 4 F/S + Ground lessons + Ground exams.
      ══════════════════════════════════════════════════════════════════════════ */
   /* the grade cell of a log row — and the one place the debrief lag is shown
@@ -992,7 +1047,7 @@ WA.renderAdmin = async function (view, me) {
      squadron said about the flight without one. A mission the squadron
      recorded as INCOMPLETE must never be indistinguishable from a flight still
      waiting for its debrief — that is the whole reason the key exists, and the
-     column is where the CO sees it. */
+     column is where the admin sees it. */
   function logMissionCell(e) {
     if (e.ng) {
       return `<td><span class="k" title="A non-graded (NG) flight is not scorable at all — it carries neither a grade nor a mission">&mdash;</span></td>`;
@@ -1006,12 +1061,12 @@ WA.renderAdmin = async function (view, me) {
       : def.tip || "")}">${esc(def.label || m)}${
       derived ? ` <span class="k">read from the grade</span>` : ""}</span></td>`;
   }
-  /* ROUND 13 — THE FOUR STATES, ON THE CO'S SIDE TOO. The record the CO reads
+  /* ROUND 13 — THE FOUR STATES, ON THE ADMIN'S SIDE TOO. The record the admin reads
      is SPARSE — an owed slot is stored nowhere — so the owed rows are drawn
      from the same catalogue the student's form draws them from, through the
-     same WA.slotRows. The result is that the CO's table and the student's form
+     same WA.slotRows. The result is that the admin's table and the student's form
      are THE SAME TABLE: same order, same colours, same four counts, and the
-     one question the CO actually asks — what is this student still owed — is
+     one question the admin actually asks — what is this student still owed — is
      answered without opening the student's own link. */
   /* ROUND 14b (verify finding 3) — the WORD is the four-state vocabulary, the
      SENTENCE is the row's: a Weekly exam and a minted re-sit are grey because
@@ -1086,7 +1141,7 @@ WA.renderAdmin = async function (view, me) {
   /* ROUND 12b — GROUP · COURSE · DATES, and nothing else: «Μη βαλεις
      εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο», and the same
      review removed the note field and with it the periods and attendance
-     boxes. What the CO reads is what the student's own table holds. */
+     boxes. What the admin reads is what the student's own table holds. */
   function lessonsTable(s) {
     const rows = WA.slotRows("lessons", s.record.lessons).map((r) => {
       const e = r.e;
@@ -1130,7 +1185,7 @@ WA.renderAdmin = async function (view, me) {
       const x = WA.exam(e.exam);
       const has = WA.examGraded(e);
       /* ROUND 14 — the row says WHICH ATTEMPT it is, and a Weekly exam says
-         its number: the CO reading two IN190 lines has to be able to tell the
+         its number: the admin reading two IN190 lines has to be able to tell the
          re-sit from the first sitting, and a series row names no exam at all */
       const ser = WA.examSeries(e);
       const tn = ser ? 1 : WA.examTrial(e);
@@ -1141,10 +1196,10 @@ WA.renderAdmin = async function (view, me) {
          ROUND 15 — the operative attempt is accented only when it actually
          PASSED (80 % on a ground exam). At 60 those were the same fact; at 80
          a 78 can be operative and not a pass, and an accent on it would be the
-         table telling the CO the exam is behind him.
+         table telling the admin the exam is behind him.
          ROUND 16 — THE MIRROR OF THE STUDENT'S OWN BADGE, and now literally so:
          the two gates are WA.examTrialShown / WA.examNotPassed, read here and
-         in student.js and nowhere else, because the CO and the student must
+         in student.js and nowhere else, because the admin and the student must
          never be told two different things about one row. Ruling 5A-a puts the
          verdict on a SINGLE sitting (this table said «79% · fail» in the Grade
          column and nothing in the name column — true, muted, and easy to skim
@@ -1198,7 +1253,7 @@ WA.renderAdmin = async function (view, me) {
         <td title="${esc((WA.nfsReason(e.reason) || {}).el || "")}">${esc(WA.nfsReasonShort(e))}</td>
         <td>${esc(e.note || "—")}</td>${srcCell(e)}</tr>`);
     /* ROUND 8 — the entrance names its ΚΕΠΕ condition (3-01 ΚΕΦ.2 §32β). A row
-       recorded before the rule shows the gap, marked, so the CO can see which
+       recorded before the rule shows the gap, marked, so the admin can see which
        rows the student still has to complete. */
     const sms = (r.sms || []).map((e) =>
       `<tr><td>${esc(fmtD(e.entrance_date))}</td>
@@ -1208,7 +1263,7 @@ WA.renderAdmin = async function (view, me) {
         <td>${e.exit_date ? esc(fmtD(e.exit_date)) : `<span class="badge badge-warn">still open</span>`}</td>
         <td>${esc(e.note || "—")}</td>${srcCell(e)}</tr>`);
     /* ROUND 6 — an FPC is conducted by the Squadron CO or the DO. A stored FPC
-       naming anybody else is shown as it was written, marked, so the CO can see
+       naming anybody else is shown as it was written, marked, so the admin can see
        at a glance which rows the student still has to correct. */
     const evalCell = (k, e) => {
       const v = e.evaluator || "";
@@ -1262,6 +1317,47 @@ WA.renderAdmin = async function (view, me) {
       esc(small ? l.short : l.label)}<b>${l.w}</b></span>`;
   }
 
+  /* ══ ROUND 19 — «HAS NOT SUBMITTED YET» IS A DEBT, AND DEBTS NEED A SCOPE ══
+     ─────────────────────────────────────────────────────────────────────────
+     Round 18 made the assessments a decision about ONE class. `not_submitted`
+     is still the whole truth about the DATA — these instructors have no row for
+     this student — but the SENTENCE it was printed in («has not submitted an
+     assessment for this student yet») says something the data does not: that
+     the assessment is outstanding. For a student outside the open class it is
+     not outstanding, it is IMPOSSIBLE — the server refuses that write by name —
+     and reading a list of nine officers who «have not submitted yet» about a
+     student nobody is being asked about is the dashboard inventing work.
+     SO THE FACT STAYS AND THE FRAMING FOLLOWS THE SCOPE: in scope it is the
+     debt it always was, named instructor by instructor, because that is the
+     list the admin acts on. Out of scope it becomes ONE line that says why
+     nobody answered and that nothing is owed — the names are not the point when
+     the answer is «nobody was asked».
+     ONE BUILDER, BOTH READERS — the screen box below and the printed brief. */
+  function scopeOf() { return A.data ? A.data.assessment_class : undefined; }
+  function inScope(s) {
+    const sc = scopeOf();
+    if (sc === undefined) return true;              /* an un-migrated server asks about everyone */
+    return !!sc && (s.person.class || "") === sc;
+  }
+  function noSubHTML(s) {
+    const names = s.not_submitted || [];
+    if (!names.length) return "";
+    if (inScope(s)) {
+      return names.map((n) =>
+        `<li>${esc(n)} has not submitted an assessment for this student yet</li>`).join("");
+    }
+    const sc = scopeOf();
+    const cl = s.person.class ? "class " + s.person.class : "no class on the roster";
+    const n = names.length;
+    return `<li>${esc(sc
+      ? "Assessments are open for class " + sc + ", so nobody is being asked about this student (" + cl +
+        "). The " + n + " instructor" + (n === 1 ? " who has" : "s who have") +
+        " not answered about him owe" + (n === 1 ? "s" : "") + " nothing — the server refuses an assessment outside the open class."
+      : "The assessments are closed — no class is open, so nobody is being asked about any student right now. The " +
+        n + " instructor" + (n === 1 ? " who has" : "s who have") + " not answered about him owe" +
+        (n === 1 ? "s" : "") + " nothing.")}</li>`;
+  }
+
   /* ── THE ASSESSMENT BOX (round 10) ────────────────────────────────────────
      One box where three branch boxes used to be, because there is one question
      now. It prints the WEIGHTED MEAN, then the ARITHMETIC THAT PRODUCED IT —
@@ -1279,7 +1375,7 @@ WA.renderAdmin = async function (view, me) {
     const flewPct = total ? Math.round((flew / total) * 100) : 0;
     /* ROUND 14 — THE SAME RULE THE FORM DRAWS, on the readout. The line sits
        between «Recommended as Alternate» and «Recommended for Other
-       Assignments» and marks the FIGHTER / OTHER split, so the CO reading a
+       Assignments» and marks the FIGHTER / OTHER split, so the admin reading a
        distribution sees the same boundary the instructor answered against —
        and it is drawn from WA.LEVEL_SEP_AT, so the two cannot drift. */
     const rows = LV.map((l, i) => {
@@ -1296,8 +1392,7 @@ WA.renderAdmin = async function (view, me) {
     }).join("");
     const noView = (a.no_level || []).map((n) =>
       `<li>${esc(n)} has submitted but has not formed a view yet</li>`).join("");
-    const noSub = s.not_submitted.map((n) =>
-      `<li>${esc(n)} has not submitted an assessment for this student yet</li>`).join("");
+    const noSub = noSubHTML(s);
     const formula = a.n ? WA.levelFormula(a.counts, a.n) + " = " + WA.meanText(a.mean) : "";
     return `
       <div class="assessbox">
@@ -1396,7 +1491,7 @@ WA.renderAdmin = async function (view, me) {
         <div class="chartbox">${evalCompare(s)}</div>
 
         ${/* ROUND 11 — ONE CHART, ALL EIGHT. The four per-category tabs are
-             gone with the heading that named them: what the CO asked to see is
+             gone with the heading that named them: what the admin asked to see is
              the whole stage in one line, and the track now rides in the colour
              of the x label. */ ""}
         <h3 style="margin-top:16px">Grades — the eight checkrides</h3>
@@ -1526,7 +1621,7 @@ WA.renderAdmin = async function (view, me) {
               : ""}</div>
           ${/* ROUND 12 — the flight log, as ONE line the brief can carry: per
                track, how many were flown, how many hours, and how many are
-               still waiting for a grade. The rows themselves are in the CO's
+               still waiting for a grade. The rows themselves are in the admin's
                drill-down; what a brief needs is the shape of the log. */ ""}
           ${["flights", "fs"].map((k) => {
             const list = Array.isArray(s.record[k]) ? s.record[k] : [];
@@ -1534,7 +1629,7 @@ WA.renderAdmin = async function (view, me) {
             const hrs = list.reduce((a, e) => a + (isFinite(Number(e.duration)) ? Number(e.duration) : 0), 0);
             /* ROUND 13 — and how much of the syllabus is STILL OWED. A brief
                that said only what was flown could never answer the question the
-               CO actually asks of it: how far through the stage is this one. */
+               admin actually asks of it: how far through the stage is this one. */
             const cn = WA.stateCounts(k, list);
             return `<div class="kline"><span class="k">${esc(WA.secLabel(k))}</span>
               ${list.length
@@ -1601,7 +1696,7 @@ WA.renderAdmin = async function (view, me) {
               : "<span class='k'>none reported</span>"}</div>
           ${["fpc", "cef"].map((k) => {
             const list = s.record[k] || [];
-            /* "FPC (C4590) — DO — 12/08/2026" — the line the CO asked for */
+            /* "FPC (C4590) — DO — 12/08/2026" — the line the admin asked for */
             return `<div class="kline"><span class="k">${esc(WA.secLabel(k))}</span>
               ${list.length ? list.map((e) => `<div class="sub">${WA.checkLineHTML(k, e)}` +
                 (e.grade === null || e.grade === undefined ? "" : " <b>" + WA.pct(e.grade) + "</b>") +
@@ -1649,9 +1744,12 @@ WA.renderAdmin = async function (view, me) {
           <td>${esc(names.join(", ") || "—")}</td></tr>`;
       }).join("");
       /* the two silences, still each in its own words (round 8's rule, kept) */
+      /* ROUND 19 — the printed brief takes the SAME sentence the screen does
+         (noSubHTML): a paper page that says nine officers are late about a
+         student nobody may be assessed on is worse than the screen, because it
+         is filed and read again months later with no dashboard beside it. */
       const politeAll = (ass.no_level || []).map((n) =>
-        `<li>${esc(n)} has submitted but has not formed a view yet</li>`).join("") +
-        s.not_submitted.map((n) => `<li>${esc(n)} has not submitted an assessment for this student yet</li>`).join("");
+        `<li>${esc(n)} has submitted but has not formed a view yet</li>`).join("") + noSubHTML(s);
       /* round 14 — the printed comments are in seniority order too */
       const comments = WA.sortBySeniority(s.proposals).filter((p) => p.comment).map((p) =>
         `<li><b>${esc((p.rank ? p.rank + " " : "") + p.last_name)}:</b> ${esc(p.comment)}</li>`).join("");
@@ -1976,6 +2074,31 @@ WA.renderAdmin = async function (view, me) {
     return location.origin + location.pathname + "#t=" + tok;
   }
 
+  /* ── ROUND 19 — THE CURRENCY, READ-ONLY, WHERE THE ADMIN ALREADY LOOKS ────
+     WHERE IT FITS, AND WHERE IT DOES NOT. The full table belongs on the
+     instructor's own form, and the admin already reaches exactly that through
+     «Enter assessments as…» — which now renders the currency section read-only
+     beside the cards. What this row adds is the ONE FIGURE that tells the admin
+     whether to click at all: how many flights the instructor has filed and when
+     he last filed one. It is a chip, not a second table: the People tab is the
+     roster editor, and a roster editor that grows a flight log stops being one.
+     It is READ-ONLY here for the same reason it is read-only there — the server
+     has no admin path into an instructor's own record. */
+  function curChip(p) {
+    const row = ((A.data && A.data.instructors) || []).find((i) => i.id === p.id);
+    if (!row) return "";
+    const rows = Array.isArray(row.currency) ? row.currency : [];
+    const ev = rows.reduce((a, e) => a + ((e && Array.isArray(e.e_items)) ? e.e_items.length : 0), 0);
+    const tip = rows.length
+      ? rows.length + " flight" + (rows.length === 1 ? "" : "s") + " and " + ev + " event" +
+        (ev === 1 ? "" : "s") + " recorded for the currency register" +
+        (row.currency_last_update ? ", last saved " + fmtDT(row.currency_last_update) : "") +
+        ". Read-only: an instructor's currency can only be entered from his own link. Open «Enter assessments as…» to read the rows."
+      : "Nothing recorded for the currency register yet. Read-only: an instructor's currency can only be entered from his own link.";
+    return ` <span class="badge${rows.length ? " badge-good" : ""}" title="${esc(tip)}">${
+      esc(rows.length ? "currency " + rows.length : "no currency")}</span>`;
+  }
+
   function peopleRows(list, kind) {
     if (!list.length) return `<tr><td colspan="5" class="hint">None yet.</td></tr>`;
     return list.map((p) => {
@@ -1985,7 +2108,7 @@ WA.renderAdmin = async function (view, me) {
       return `
         <tr>
           <td><b>${esc(WA.personName(p, true))}</b>${WA.rosterTags(p)}</td>
-          <td>${esc(extra || "—")}</td>
+          <td>${esc(extra || "—")}${kind === "instructor" ? curChip(p) : ""}</td>
           <td>${p.active ? `<span class="badge badge-good">active</span>` : `<span class="badge badge-bad">revoked</span>`}</td>
           <td class="linkcell">…${esc(String(p.token).slice(-8))}</td>
           <td style="white-space:nowrap">
