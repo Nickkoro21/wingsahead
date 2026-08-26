@@ -1964,6 +1964,41 @@ WA.renderStudent = async function (view, me, opts) {
             ${esc(who.last_name || "the student")} saves this form themselves.</div>
           ${backBtn}
         </div>` : ""}
+      ${/* ══════════════════════════════════════════════════════════════════
+           ROUND 20 — THE WELCOME HEADER, AND WHY THE STUDENT GETS NO DOORS.
+           ────────────────────────────────────────────────────────────────
+           RULING (2026-08-27), about the instructor link: «το landing page να
+           έχει τα στοιχεία αυτού που μπαίνει, ώστε να κάνει και επιβεβαίωση,
+           και να έχουμε μήνυμα καλωσορίσματος.»
+
+           THE CONFIRMATION IS THE HALF THAT APPLIES HERE TOO. A personal link
+           forwarded, pasted into the wrong chat or opened on a shared machine
+           is the one failure this application cannot detect and its holder can,
+           in one glance — and that is as true of a student's record as of an
+           instructor's. So the header states the identity in the same words,
+           with the same instruction if it is wrong.
+
+           THE DOORS ARE THE HALF THAT DOES NOT. The instructor's link led to
+           two unrelated jobs — a questionnaire about other people and his own
+           logbook — and the landing exists to tell them apart. A student's link
+           leads to ONE record: a landing whose only door opens onto the only
+           room is a click that teaches nothing and costs everybody one. The
+           sections of that record already have a rail (round 17), which is the
+           right instrument for parts of one thing.
+           JUDGEMENT RECORDED, spec §4v·2.                                 */ ""}
+      <section class="card welcome stu-welcome">
+        <p class="wl-hi">${esc(asCO ? "Editing the record of" : "Welcome,")}</p>
+        <h2 class="wl-nm">${esc(WA.personName(who, true) || "student")}</h2>
+        <p class="wl-meta">${esc([who.mn ? "MN " + who.mn : "",
+          who.class ? "Class " + who.class : ""].filter(Boolean).join(" · ")
+          || "no MN or class recorded on the roster")}</p>
+        <p class="wl-cf">${asCO
+          ? `You are the admin, filling this in on <b>${esc(WA.personName(who, true))}</b>&rsquo;s behalf.`
+          : `You are signed in as <b>${esc(WA.personName(who, true))}</b>${
+              who.mn ? ", MN " + esc(who.mn) : ""}${who.class ? ", class " + esc(who.class) : ""}.
+             <b>If this is not you, close this page and tell the squadron administration</b> &mdash;
+             this is a personal link and everything saved through it is recorded in your name.`}</p>
+      </section>
       <section class="card">
         <div class="idhead">
           <span class="nm">${esc(WA.personName(who, true))}</span>

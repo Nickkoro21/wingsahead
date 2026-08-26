@@ -347,7 +347,7 @@ input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent);
 /* the free-text box a picker reveals when "Other…" is chosen */
 .freein { margin-top: 4px; }
 /* round 9 — the People modal toggles its "Other…" box IN PLACE instead of
-   re-rendering the form under the CO's fingers, so it needs a plain hider.
+   re-rendering the form under the admin's fingers, so it needs a plain hider.
    The two pre-existing users (.veil.hidden, .thm-pop.hidden) already resolve
    to display:none, so this generalises the rule without changing them. */
 .hidden { display: none; }
@@ -578,9 +578,9 @@ p.legend .lgchip.st-owed    { color: var(--muted); background: var(--st-owed); b
 p.legend .lgchip.st-extra   { color: var(--mustard); background: var(--st-extra); border-color: rgba(var(--mustard-rgb), 0.50); }
 p.legend .lgsep { opacity: 0.5; margin: 0 3px; }
 
-/* the CO's log tables — a real table, because there the screen is wide */
+/* the admin's log tables — a real table, because there the screen is wide */
 .tbl td.lag { color: var(--muted); font-style: italic; }
-/* the same four states in the CO's read-only tables and on paper */
+/* the same four states in the admin's read-only tables and on paper */
 .tbl tr.st-done    { background: var(--st-done); }
 .tbl tr.st-started { background: var(--st-started); }
 .tbl tr.st-owed    { background: var(--st-owed); color: var(--muted); }
@@ -589,7 +589,7 @@ p.legend .lgsep { opacity: 0.5; margin: 0 3px; }
 .offcat { color: var(--warn); font-weight: 700; cursor: help; margin-left: 1px; }
 /* a grade shown rounded because the stored value is fractional */
 .rnd { border-bottom: 1px dotted var(--warn); cursor: help; }
-/* a fixed slot nobody has flown yet, in the CO's tables and on paper */
+/* a fixed slot nobody has flown yet, in the admin's tables and on paper */
 .tbl tbody tr.is-unflown td { color: var(--muted); }
 .tbl td.items { min-width: 220px; }
 
@@ -642,7 +642,7 @@ input:disabled, select:disabled { background: var(--panel); }
   padding: 5px 8px; line-height: 1.45;
 }
 
-/* ── ENTERED BY THE CO — the transparency tag (round 4) ──
+/* ── ENTERED BY THE ADMIN — the transparency tag (round 4) ──
    Small, quiet and everywhere: drill-downs, summary tables, brief, print.
    It states a fact about the SOURCE of a row, so it must never look like an
    alert (warn/bad are taken); the accent tint reads as "noted, not wrong". */
@@ -652,9 +652,9 @@ input:disabled, select:disabled { background: var(--panel); }
   border: 1px solid rgba(var(--accent-rgb), 0.55); border-radius: 4px;
   padding: 0 4px; margin-left: 5px; vertical-align: baseline; cursor: help; white-space: nowrap;
 }
-/* PART of the record is the CO's — hollow chip reading "+1 CO" (round 4b).
+/* PART of the record is the admin's — hollow chip reading "+1 ADMIN" (round 4b).
    Filled means every entry is his; a record of 17 self-reported entries plus
-   one CO addition is still the student's record, and must not look like his. */
+   one admin addition is still the student's record, and must not look like his. */
 .cotag.part { background: transparent; border-style: dashed; font-weight: 600; }
 .conote {
   font-size: 11.5px; color: var(--accent); background: var(--accent-soft);
@@ -662,7 +662,7 @@ input:disabled, select:disabled { background: var(--panel); }
   padding: 4px 8px; line-height: 1.4;
 }
 .conote .cotag { margin-left: 0; margin-right: 4px; }
-/* ── LOCKED BY THE CO (round 8) ────────────────────────────────────────────
+/* ── LOCKED BY THE ADMIN (round 8) ─────────────────────────────────────────
    The owner sees the row exactly as it stands and can do nothing to it. That
    has to look like a state and not like a failure: the accent border it
    already had (is-co), a padlock chip, and controls that are visibly inert.
@@ -739,6 +739,10 @@ input:disabled, select:disabled { background: var(--panel); }
   padding: 10px max(12px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-bottom));
   background: var(--top-bg); border-top: 1px solid var(--line);
 }
+/* ROUND 20 — `display:flex` above outranks the UA's [hidden] rule, so a bar the
+   landing hides would otherwise stay on screen offering to save a door nobody
+   has opened. Same one-line guard .savefloat has carried since round 9. */
+.savebar[hidden] { display: none; }
 .savebar .btn-primary { flex: 0 0 auto; padding: 10px 22px; font-size: 14px; }
 .savebar .st { font-size: 12px; color: var(--muted); min-width: 0; }
 .savebar .st.ok { color: var(--good); }
@@ -1356,12 +1360,12 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
      list existed. Colour is not available on paper, so it is said in words
      (WA.itemsLabel appends "(legacy)") and set in italic here. */
   .itlegacy { font-style: italic; color: #333; text-decoration: none; }
-  /* the CO tag on paper — monochrome like everything else, still unmistakable */
+  /* the admin tag on paper — monochrome like everything else, still unmistakable */
   .cotag {
     color: #000 !important; background: #ffffff !important; border: 1px solid #000 !important;
     font-size: 8.5px; padding: 0 3px; margin-left: 4px;
   }
-  /* partial ("+1 CO") stays distinguishable without colour: dashed border */
+  /* partial ("+1 ADMIN") stays distinguishable without colour: dashed border */
   .cotag.part { border-style: dashed !important; }
   /* the wordmark on paper — the emblem is forced monochrome like everything else */
   .pr-brand {
@@ -1447,12 +1451,122 @@ tr.is-problem, .rrow.is-problem {
    six columns wider. */
 .curtbl td.ecell { white-space: normal; min-width: 240px; max-width: 420px; }
 .curtbl td.ecell .ms-chips { margin-bottom: 4px; }
-.curtbl .ms-add {
-  min-height: 28px; padding: 3px 6px; font-size: 11.5px; max-width: 240px;
-  border-radius: 6px; background: var(--surface); color: var(--muted);
-}
 .btn-x {
   background: transparent; border: 1px solid var(--line); color: var(--muted);
   padding: 3px 8px; line-height: 1.1;
 }
 .btn-x:hover { color: var(--bad); border-color: var(--bad); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 20 — THE Σ COLUMN, THE PICKER, THE LANDING AND ITS TWO DOORS.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── the Σ category box. It is the widest control on the row because it holds
+   the longest true sentence on it («Σ-3 — Air-to-Ground missions, day/night»),
+   and a select that has to be opened before it can be read is a select that
+   gets left on whatever it happened to show. */
+.curtbl .catbox {
+  min-height: 30px; padding: 4px 6px; font-size: 12px;
+  border-radius: 6px; background: var(--surface);
+  min-width: 210px; max-width: 300px;
+}
+/* the PROGRAMME cell is derived, never typed — so it is rendered as text and
+   wears the muted colour every other read-only fact on this page wears */
+.curtbl td.prog { color: var(--muted); font-weight: 600; white-space: nowrap; }
+/* the button that opens the picker. It carries the count, so it is a control
+   and a reading at once — «✎ 3 events» says what is there and what to press. */
+.ms-pick { min-height: 28px; padding: 3px 9px; font-size: 11.5px; }
+
+/* ── THE E PICKER ──────────────────────────────────────────────────────────
+   Wider than the confirmation dialog because it is a LIST OF 27 and the point
+   of it is that they are all reachable without hunting. The list scrolls inside
+   itself so the filter and the count never leave the screen. */
+.modal.epick { width: min(680px, 100%); }
+.epick-bar {
+  display: flex; gap: 8px; align-items: center; margin: 10px 0 8px;
+}
+.epick-q {
+  flex: 1 1 auto; min-height: 34px; padding: 6px 10px; font-size: 13px;
+  border-radius: 8px; background: var(--surface);
+  border: 1px solid var(--line); color: var(--text);
+}
+.epick-list {
+  max-height: min(46vh, 380px); overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 10px; padding: 4px;
+  background: var(--surface);
+}
+.epick-row {
+  display: grid; grid-template-columns: 20px 74px 1fr; gap: 8px;
+  align-items: center; padding: 5px 8px; border-radius: 7px; cursor: pointer;
+}
+.epick-row:hover { background: var(--panel-2); }
+.epick-row input { margin: 0; }
+.epick-c { font-weight: 700; font-size: 12.5px; white-space: nowrap; }
+.epick-n { font-size: 12.5px; color: var(--muted); }
+.epick-row:has(input:checked) .epick-n { color: var(--text); }
+@media (max-width: 480px) {
+  .epick-row { grid-template-columns: 20px 62px 1fr; gap: 6px; }
+}
+
+/* ── THE WELCOME ───────────────────────────────────────────────────────────
+   A confirmation, so it reads like one: the name is the largest thing on the
+   page and everything else is a caption under it. */
+.card.welcome { text-align: center; padding: 22px 16px 18px; }
+.wl-hi { color: var(--muted); font-size: 13px; letter-spacing: .04em; text-transform: uppercase; }
+.wl-nm { font-size: clamp(22px, 4.4vw, 32px); margin: 4px 0 2px; line-height: 1.15; }
+.wl-meta { color: var(--muted); font-size: 13px; }
+.wl-cf {
+  margin: 12px auto 0; max-width: 62ch; font-size: 13px; line-height: 1.55;
+  color: var(--muted);
+}
+.wl-scope {
+  margin: 12px auto 0; max-width: 62ch; font-size: 13px; padding: 8px 12px;
+  border-radius: 9px; border: 1px solid var(--line); background: var(--surface);
+}
+.wl-scope.is-open { border-color: rgba(var(--good-rgb), .45); background: var(--good-soft); }
+.wl-scope.is-shut { border-color: rgba(var(--warn-rgb), .45); background: var(--warn-soft); }
+
+/* ── THE TWO DOORS ─────────────────────────────────────────────────────────
+   Two, side by side, equal — the ruling asked for two choices and neither of
+   them is the default one. They collapse to one column on a phone, in the
+   order the ruling names them. */
+.doors {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0 10px;
+}
+@media (max-width: 720px) { .doors { grid-template-columns: 1fr; } }
+.doortile {
+  display: grid; grid-template-rows: auto auto auto 1fr auto; gap: 3px;
+  text-align: left; padding: 16px; min-height: 168px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  color: var(--text); font: inherit;
+}
+.doortile:hover { border-color: var(--accent); background: var(--panel-2); }
+.doortile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dt-ic { font-size: 26px; line-height: 1; color: var(--accent); }
+.dt-t { font-size: 17px; font-weight: 700; }
+.dt-s { font-size: 12.5px; color: var(--muted); }
+.dt-w { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: 6px; }
+.dt-b { margin-top: 10px; }
+
+/* ── A DOOR'S OWN BAR ──────────────────────────────────────────────────────
+   The way out is at the TOP of the pane, because a reader who wants out is
+   already looking there — and beside it, the name of the room he is in. */
+/* the same width the pane under it uses, so the button sits over the left edge
+   of the content and not over an arbitrary column of its own */
+.doorbar {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  width: min(1420px, 100%); margin: 0 auto; padding: 14px 12px 0;
+}
+/* ── THE CURRENCY DOOR IS WIDER THAN A FORM COLUMN ────────────────────────
+   It holds ONE table and nothing else, and round 20 gave that table a seventh
+   column (the Σ category, which carries the longest true sentence on the row).
+   At 760 px — the width a page of prose wants — it scrolled sideways inside its
+   own wrapper on a 1440 px screen, which is the reading a wrapper exists to
+   avoid, not one it exists to provide. `.tblwrap` keeps its `overflow-x: auto`
+   for the phone, where sideways scrolling IS the right answer; the desktop just
+   stops needing it. The assessment door is untouched: it is prose and cards,
+   and prose does not get wider because a table next door did. */
+#ins-pane-currency .doorbar,
+#ins-pane-currency > .wrap { max-width: 1040px; }
+.doorttl { font-size: 14px; }
+.doorttl .k { color: var(--muted); font-size: 12.5px; }

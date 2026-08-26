@@ -6,7 +6,7 @@
 <meta name="robots" content="noindex">
 <title>Wings Ahead &mdash; Student utilization</title>
 <link rel="icon" href="assets/364mea-240.png">
-<link rel="stylesheet" href="styles.css?v=20260826b">
+<link rel="stylesheet" href="styles.css?v=20260827a">
 <script>
 /* Palette before first paint — no flash of the default theme on reload.
    Mirrors app.js (PALETTES / apply): same keys, same default (DEFAULT_PAL).
@@ -50,12 +50,15 @@
 <script src="config.js?v=20260821b"></script>
 <script src="items-catalog.js?v=20260821b"></script>
 <!-- ROUND 19 — the 3-01 EVENTS table, generated beside app.js's mirror of it.
-     It must load BEFORE app.js, which reads WA_E_ITEMS as it defines WA.E_ITEMS,
-     exactly as items-catalog.js loads before the syllabus pickers. -->
-<script src="currency-catalog.js?v=20260826b"></script>
-<script src="app.js?v=20260826b"></script>
-<script src="student.js?v=20260826b"></script>
-<script src="instructor.js?v=20260826b"></script>
-<script src="admin.js?v=20260826b"></script>
+     ROUND 20 — and, from the same generator and the same source file, the Σ
+     taxonomy of Πίνακας 9 / Πίνακας 6 (WA_S_CATEGORIES).
+     It must load BEFORE app.js, which reads both as it defines WA.E_ITEMS and
+     WA.S_CATEGORIES, exactly as items-catalog.js loads before the syllabus
+     pickers. -->
+<script src="currency-catalog.js?v=20260827a"></script>
+<script src="app.js?v=20260827a"></script>
+<script src="student.js?v=20260827a"></script>
+<script src="instructor.js?v=20260827a"></script>
+<script src="admin.js?v=20260827a"></script>
 </body>
 </html>

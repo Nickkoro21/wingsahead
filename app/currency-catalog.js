@@ -22,9 +22,36 @@
    27 of the catalog's 28 e-items. The one that is not, by name:
      e-1d-demo — Chapter 5 of the 3-01 — the display pilot's own currency, which FDMS shows only to the instructor who holds the post.
 
-   MIRROR: db/schema.sql → wa.e_item_ids() / wa.e_item_name(), written by the
-   same run of the same script, so the closed list the form offers and the
-   closed list the server enforces cannot drift.
+   WA_S_CATEGORIES — the Σ TAXONOMY (round 20): WHICH sortie was flown, not
+                merely which table it belongs to. The 6 printed rows of Πίνακας 9
+                (ΑΕΡΟΣ) and Πίνακας 6 (F/S), the 2 recording aids FDMS carries as
+                columns of its own, and 2 legacy ids for the rows round 19 stored
+                before this taxonomy existed.
+
+   WA_S_CATEGORIES.items[]
+     id     — THE STORED VALUE, pure ASCII, asserted like the e-item ids
+     c      — the printed code («Σ-3», «SIM-ΔΑ») or, for the two aids, the Greek
+              head FDMS prints over the column
+     n      — the name in English, as the source prints it
+     g      — the PROGRAMME: 'aeros' (Πίνακας 9) or 'fs' (Πίνακας 6). Round 19
+              stored this on the row; from round 20 it is DERIVED from the
+              category, so a Σ-3 cannot claim to have been flown in the simulator.
+     p / a  — the printed semester quota for a POSTED / ATTACHED instructor, or
+              absent where the 3-01 prints a dash. Tooltip only: this application
+              records that a sortie was flown and on what day, and FDMS is where
+              the semester is counted against the printed table.
+     aid    — true for a row the 3-01 does not print (FDMS's two columns); `why`
+              carries the reason.
+     tp     — true where only Test Pilots fly it. The option is MARKED, never
+              hidden: this application's test_pilot flag comes from the shared
+              roster, and an unset one must not stop a man recording a flight.
+     legacy — true for a value that may be STORED and must never be OFFERED.
+
+   MIRROR: db/schema.sql → wa.e_item_ids() / wa.e_item_name() /
+   wa.s_category_ids() / wa.s_category_name() / wa.s_category_group() /
+   wa.s_category_legacy_ids(), written by the same run of the same script, so the
+   closed lists the form offers and the closed lists the server enforces cannot
+   drift.
    ════════════════════════════════════════════════════════════════════════ */
 var WA_E_ITEMS = {
   source: "FDMS instructor currency catalogue (instructor_currency.json, 2026-08-14) — 3-01/2025 ΔΑΕ Ch.4 §48, EVENTS table",
@@ -58,5 +85,30 @@ var WA_E_ITEMS = {
     { id: "e-49c-las-day", c: "Ε-49Γ", n: "LAS (Low Angle Strafe), day", seat: "A&B", d: 150 },
     { id: "e-62-oca-strike", c: "Ε-62", n: "OCA (STRIKE)", seat: "A&B" },
     { id: "e-67-cas", c: "Ε-67", n: "CAS (Close Air Support)", seat: "A&B" },
+  ],
+};
+
+var WA_S_CATEGORIES = {
+  source: "FDMS instructor currency catalogue (instructor_currency.json, 2026-08-14) — 3-01/2025 ΔΑΕ Ch.4, Πίνακας 9 (ΑΕΡΟΣ) and Πίνακας 6 (F/S), plus the two recording aids FDMS carries as columns of its own",
+  total: 16,
+  excluded: [{ id: "sim-refresh-after-abstention", why: "§49 prints a THRESHOLD IN DAYS, not a category — the sortie it demands is a SIM-1, which is in the list already" }, { id: "semiannual-air-total-t6", why: "the printed ΣΥΝΟΛΟ ΕΞΟΔΩΝ row of Πίνακας 9 — a total is not a sortie anybody flies" }, { id: "semiannual-fs-total-t6", why: "the printed ΣΥΝΟΛΑ row of Πίνακας 6 — a total is not a sortie anybody flies" }],
+  legacyWhy: "a round-19 row that stored only the programme. The Σ was never recorded and cannot be guessed from a date — it is shown marked, everywhere, and needs the developer's hand",
+  items: [
+    { id: "s-1-general-adaptation", c: "Σ-1", n: "General Adaptation", g: "aeros", p: 1, a: 1 },
+    { id: "s-2-pdo-day", c: "Σ-2", n: "Instrument flight (PDO), day", g: "aeros", p: 1, a: 1 },
+    { id: "s-2-pdo-night", c: "Σ-2", n: "Instrument flight (PDO), night", g: "aeros", p: 1 },
+    { id: "s-3-air-to-ground", c: "Σ-3", n: "Air-to-Ground missions, day/night", g: "aeros", p: 2, a: 1 },
+    { id: "s-4-air-to-air", c: "Σ-4", n: "Air-to-Air missions, day/night", g: "aeros", p: 1 },
+    { id: "s-20-no-requirements", c: "Σ-20", n: "No-requirements missions", g: "aeros" },
+    { id: "x-night-students", c: "Νυχτερινή με μαθητές", n: "Night sortie flown with students", g: "aeros", aid: true, why: "the 3-01 prints no such requirement — FDMS carries it as a column of its own because the squadron flies it, and because a night sortie is what keeps the night-landing currency alive" },
+    { id: "x-fcf-flight", c: "Πτήση δοκιμής (FCF)", n: "Aircraft test flight", g: "aeros", aid: true, why: "a functional check flight is flown by the squadron's Test Pilots and is not a Πίνακας 9 requirement — FDMS carries it as a column of its own, and it is what dates the Ε-1γ row of the EVENTS table", tp: true },
+    { id: "legacy-aeros-unspecified", c: "ΑΕΡΟΣ", n: "unspecified (recorded before the Σ taxonomy)", g: "aeros", legacy: true },
+    { id: "sim-1", c: "SIM-1", n: "Precision handling / ACRO (F/S)", g: "fs", p: 1, a: 1 },
+    { id: "sim-2", c: "SIM-2", n: "IFR (F/S)", g: "fs", p: 1, a: 1 },
+    { id: "sim-3", c: "SIM-3", n: "Air-to-Ground missions (F/S)", g: "fs", p: 1 },
+    { id: "sim-4", c: "SIM-4", n: "Air-to-Air missions (F/S)", g: "fs" },
+    { id: "sim-5", c: "SIM-5", n: "Emergency procedures (F/S)", g: "fs", p: 1, a: 1 },
+    { id: "sim-da", c: "SIM-ΔΑ", n: "Aircraft test in the simulator (Test Pilots only)", g: "fs", p: 1, a: 1, tp: true },
+    { id: "legacy-fs-unspecified", c: "F/S", n: "unspecified (recorded before the Σ taxonomy)", g: "fs", legacy: true },
   ],
 };

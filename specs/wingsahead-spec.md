@@ -180,15 +180,19 @@ function. Free text remains accepted in every box they fill (§4i·1).
 **instructor_records** (round 19, §4u·4) — 1:1 with an INSTRUCTOR, the mirror of
 `student_records` one table over: `instructor_id` · `data jsonb` · `last_update`.
 Its **one** section today is **`currency`**, a list of dated rows
-`{date · kind · category · e_items[] · seq}` — the instructor's own flying, for
-the squadron's currency register and the FDMS bridge. It has **no `entered_by`
+`{date · kind · s_category · e_items[] · seq}` — the instructor's own flying, for
+the squadron's currency register and the FDMS bridge. **Round 20 (§4v·1)**:
+`category` (the programme) is **replaced** by `s_category` (the printed Σ row of
+Πίνακας 9 / Πίνακας 6, plus FDMS's two recording columns), and the programme is
+**derived** from it (`wa.s_category_group`) — one fact where there were two, and
+no way for them to contradict each other. It has **no `entered_by`
 column and no admin write path**: a currency claim says who flew what, and the
 only person who can make it is the person who flew (§4u·5). Its whitelist,
 strip, caps and read-time repair are **its own** (`wa.ins_sections` /
 `wa.ins_entry_keys` / `wa.ins_strip_entry` / `wa.ins_section_cap` /
-`wa.migrate_instructor_record`) — a registry shared with the student's would
-answer `'currency'` with the student's key list, and an unregistered section is
-not rejected by the strip, it is **destroyed** by it.
+`wa.migrate_ins_entry` / `wa.migrate_instructor_record`) — a registry shared with
+the student's would answer `'currency'` with the student's key list, and an
+unregistered section is not rejected by the strip, it is **destroyed** by it.
 
 ## 4a. Branding & terminology (round 2/3, 2026-08-13)
 
@@ -5095,9 +5099,9 @@ An instructor's currency row is a **claim about his own logbook**:
 |---|---|
 | `date` | **required** — ISO stored, DD/MM shown. A currency claim with no day claims nothing. |
 | `kind` | `own` (a sortie of his own — the «δική του πτήση S» of the ruling) · `student` (a sortie flown with a student) — `wa.currency_kinds()` |
-| `category` | `aeros` (**ΑΕΡΟΣ**, the semester AIR programme, Πίνακας 9) · `fs` (**F/S**, the semester SIMULATOR programme, Πίνακας 6) — `wa.currency_categories()` |
+| `category` | `aeros` (**ΑΕΡΟΣ**, the semester AIR programme, Πίνακας 9) · `fs` (**F/S**, the semester SIMULATOR programme, Πίνακας 6) — `wa.currency_categories()`. **RETIRED IN ROUND 20 (§4v·1)**: replaced by `s_category`, from which the programme is now **derived**. A round-19 row is migrated to a **legacy** Σ id that says the category was never recorded. |
 | `e_items` | the **E-items** of the 3-01 EVENTS table this sortie exercised — ids of `wa.e_item_ids()`, **possibly none** |
-| `seq` | which sortie of that (kind, category, day) — 1, and 2 for the second. AUTHORED, never an array index (the round-12 doctrine) |
+| `seq` | which sortie of that (kind, category, day) — 1, and 2 for the second. AUTHORED, never an array index (the round-12 doctrine). **Round 20**: the tuple is `(kind, s_category, date, seq)`. |
 
 **A `student` ROW REFERENCES NO STUDENT, DELIBERATELY.** The flight itself lives
 on the student's side and is entered there, by the student, in `flights` / `fs`.
@@ -5397,6 +5401,12 @@ then rewrote **138 comment occurrences** — «the CO» → «the admin», «the
 «the admin's», «a CO save» → «an admin save», «CO-entered» → «admin-entered»,
 the round-4 tag note's `"CO"` → `"ADMIN"`.
 
+> **SUPERSEDED, 27/08/2026 (§4v·5c): the figure «138» is not reproducible.** It
+> was the output of a one-off classifier that no longer exists. The re-runnable
+> number is **142**, from the shipped commits themselves:
+> `for f in db/schema.sql app/app.js app/admin.js app/student.js app/instructor.js; do git show b1a8dcc:$f; done | grep -oE '\bCO\b' | wc -l` → **195**, the same over `7a84c69` → **53**.
+> Where the two disagree, **the command is right**.
+
 **PROVED BEHAVIOUR-IDENTICAL, NOT ASSERTED.** Both versions of all four files
 were run through the same comment stripper and the remaining executable text
 compared **byte for byte**: `schema.sql` 138 527 · `app.js` 113 256 · `admin.js`
@@ -5405,6 +5415,15 @@ client file and `schema.sql` applied twice at `ON_ERROR_STOP=1`, exit **0**.
 
 **THE 32 SURVIVORS, ENUMERATED.** Every one is either the **appointment** or a
 **quoted ruling**, and each was kept by a rule rather than by hand:
+
+> **SUPERSEDED, 27/08/2026 (§4v·5c): the figure «32» is not reproducible either,
+> and the line numbers below went stale the moment rounds 19 and 20 moved them.**
+> The re-runnable count is **57** across `db/schema.sql app/*.js app/*.css`
+> (`grep -oE '\bCO\b' db/schema.sql app/*.js app/*.css | wc -l`), of which **8**
+> are the syllabus **course codes** (`grep -oE "\bCO 1[0-9][0-9]\b" db/schema.sql app/items-catalog.js | wc -l`)
+> and the other **49** are the families the table below names. Read them all with
+> `grep -nE '\bCO\b' db/schema.sql app/*.js app/*.css`. The table stays as **the
+> argument** for each family; the numbers beside it are no longer the count.
 
 | what | where |
 |---|---|
@@ -5592,7 +5611,9 @@ pushed**.
 14. **THE SWEEP, PROVED.** Comment-stripped executable text identical in all four
     files (§4u·10c); the scanner re-run reports **32** surviving `\bCO\b` in
     comments, every one enumerated in the table above, and **zero** admin-as-CO
-    prose.
+    prose. *(Superseded 27/08/2026 — §4v·5c: the greppable count is **57**, of
+    which **8** are course codes; **zero** admin-as-CO prose still holds, and
+    from round 20 it holds in `app/styles.css` too.)*
 15. **HYGIENE.** `node --check` clean on all six client files. **Zero console
     errors** on a fresh tab through the whole instructor flow and the whole admin
     flow. No horizontal page scroll at **375 px** (`body.scrollWidth === 375`)
@@ -5612,6 +5633,525 @@ pushed**.
 3. **The FDMS bridge lane is not yet written.** This round produces the data and
    the marker; reading `instructor_records` into `instructorCurrency` is the
    FDMS side's own round.
+
+## 4v. Round 20 (2026-08-27) — WHICH Σ IT WAS, THE TWO DOORS, THE CHIPS EVERYWHERE, AND THE SEARCH-PATH SWEEP
+
+**FIVE RULINGS OF 27/08/2026**, one open item of Γύρος 11 closed, and the
+hardening §4φ scheduled. The lettering continues the round series (4a … 4u → 4v);
+§4φ is a **dated ruling appendix** and keeps its own place at the end of the file.
+
+---
+
+### 4v·1. «MY CURRENCY» LEARNS WHICH Σ IT IS
+
+> **ΑΠΟΦΑΝΣΗ**: *«θα έπρεπε να έχουμε ποια S είναι και δυνατότητα πολλαπλών Ε.
+> Αφού θα τροφοδοτούν το ίδιο σχήμα με το FDMS να τα έχουμε σωστά.»*
+
+**WHAT WAS WRONG.** Round 19 stored the **programme** — `category` = `'aeros'` /
+`'fs'` — and stopped there. That is the **table** a sortie belongs to, not the
+sortie: Πίνακας 9 prints six ΑΕΡΟΣ rows and Πίνακας 6 six F/S rows, and «ΑΕΡΟΣ»
+names one of them exactly as little as «a flight» names an aircraft. A currency
+register that cannot say **which** sortie was flown cannot feed the register FDMS
+keeps, which is the whole reason this lane exists.
+
+**THE ROW MODEL.** `{date, kind: own|student, s_category, e_items[], seq}` —
+`category` is **gone**, and the programme is **derived** (`wa.s_category_group`,
+`WA.sCatGroup`). One fact where there were two, and no way for them to disagree:
+nothing can now claim a Σ-3 flown in the simulator.
+
+**THE CATALOGUE IS GENERATED, 1:1, FROM THE FDMS SOURCE.**
+`tools/gen-currency-catalog.py` — the same script, the same run, the same source
+file the 27 E-items come from (`D:\FDMS\data\requirements\instructor_currency.json`,
+generated 2026-08-14) — now emits `WA_S_CATEGORIES` into `app/currency-catalog.js`
+and `wa.s_category_ids()` / `wa.s_category_name()` / `wa.s_category_group()` /
+`wa.s_category_legacy_ids()` into the CURRENCY GENERATED BLOCK of `db/schema.sql`.
+**16 rows:**
+
+| # | what | where it comes from |
+|---|---|---|
+| 6 | **ΑΕΡΟΣ** — Σ-1 · Σ-2 day · Σ-2 night · Σ-3 · Σ-4 · Σ-20 | source `kind: 's-category'` (Πίνακας 9) |
+| 6 | **F/S** — SIM-1 · SIM-2 · SIM-3 · SIM-4 · SIM-5 · SIM-ΔΑ | source `kind: 'sim'` (Πίνακας 6) |
+| 2 | the **recording aids** FDMS carries as columns of its own — «Νυχτερινή με μαθητές» and «Πτήση δοκιμής (FCF)» | **declared** in the generator, **asserted** against `D:\FDMS\app\currency.js` → `SYNTH` |
+| 2 | the **legacy** ids — `legacy-aeros-unspecified`, `legacy-fs-unspecified` | declared; see 4v·1b |
+
+**EXCLUDED BY NAME, WITH THE REASON PRINTED IN BOTH MIRRORS**:
+`semiannual-air-total-t6` and `semiannual-fs-total-t6` (the printed **ΣΥΝΟΛΟ /
+ΣΥΝΟΛΑ** rows — a total is not a sortie anybody flies) and
+`sim-refresh-after-abstention` (§49 prints a **threshold in days**, not a
+category; the sortie it demands is a SIM-1, already in the list).
+
+**THE TWO AIDS ARE FDMS'S, AND THE BUILD SAYS SO.** They are not rows of the
+research file — the 3-01 prints neither — so they are declared in the generator
+under **FDMS's own ids and printed names**, and `assert_aids_against_fdms()`
+fails the build if either string has left `D:\FDMS\app\currency.js`. The check
+**never changes an emitted byte**: FDMS absent prints a note, and the catalogue
+is identical either way, so the output stays byte-idempotent on a machine that
+has Wings Ahead and not FDMS.
+
+**TEST PILOTS: MARKED, NEVER HIDDEN.** `sim-da` and `x-fcf-flight` carry `tp`.
+FDMS *hides* its FCF column from a man without the flag; Wings Ahead does not,
+because its `test_pilot` comes from the shared roster and an unset one would stop
+an instructor recording a flight he really flew. The option says «(Test Pilots)»
+— and does not say it twice where the printed name already ends in *«(Test
+Pilots only)»*.
+
+**BYTE-IDEMPOTENT, PROVED**: two consecutive runs, identical md5 on both mirrors.
+
+#### 4v·1b. THE MIGRATION — IT DOES NOT GUESS, AND THAT IS THE DESIGN
+
+Cloud `instructor_records` **verified EMPTY on 27/08/2026**, so there is no cloud
+data migration. The **local demo does** hold a round-19 fixture (4 rows), and any
+instance that ran round 19 before this deploy will too.
+
+Nobody can reconstruct from *«ΑΕΡΟΣ on the 26th»* whether the sortie was a Σ-1 or
+a Σ-3 — the fact was never recorded — so `wa.migrate_ins_entry` / `WA.migrateInsEntry`
+carry across the **only thing the old row knew** (the programme) onto a category
+whose printed name **says** the Σ is unspecified.
+
+> **JUDGEMENT — TWO LEGACY IDS AND NOT ONE.** The ruling asked for *«a
+> catalog-level unspecified legacy id»*. It is **two**, one per programme,
+> because `'aeros'` / `'fs'` is a fact the old row really did carry: folding both
+> into a single «unspecified» would throw away something **true** in order to be
+> honest about something it did not know. Nothing is lost by the split and the
+> bridge gets a better signal.
+
+> **JUDGEMENT — STORABLE, NEVER OFFERED.** A legacy id passes
+> `wa.validate_instructor_record` (so a migrated record round-trips without the
+> server refusing rows the instructor never touched) and is **not** in
+> `WA.sCatOptions()` (so no new row can claim one). A row that HOLDS one keeps it
+> selectable in its own box, marked, so it can be corrected instead of vanishing.
+> The ruling asked for a value *«the bridge will surface as needing the
+> developer's hand»* — hence `wa.ins_legacy_count()`, the `legacy_rows` field on
+> every `instructor_records` entry of `admin_export`, the **red-edged row** in
+> the table and the **«N without a Σ»** badge on the card.
+
+**ORDER MATTERS AND IS COMMENTED**: the legacy pass runs **before** the key
+whitelist, because the whitelist is what makes `category` stop existing.
+
+#### 4v·1c. THE SERVER REFUSES BY NAME
+
+`s_category` is validated against `wa.s_category_ids()` and the refusal prints the
+**printed names**, not slugs, and counts what it then lists (the legacy ids are
+excluded from both):
+
+> *«s-99-invented» is not a category of Πίνακας 9 (ΑΕΡΟΣ) or Πίνακας 6 (F/S) —
+> choose one of the 14 a flight may be recorded under: Σ-1 — General Adaptation ·
+> Σ-2 — Instrument flight (PDO), day · … · SIM-ΔΑ — Aircraft test in the simulator
+> (Test Pilots only)  (currency[0].s_category)*
+
+The **uniqueness key** becomes `(kind, s_category, date, seq)` — server
+(`wa.validate_instructor_record`) and client (`WA.curIdent`, `WA.IDENT_FIELDS`)
+in step, as round 19 established. Two sorties of one day in **different** Σ
+categories are now two rows at `seq 1` each, which is more correct than round 19
+could be. The duplicate refusal names the Σ:
+
+> *this flight is already recorded (2026-08-27, Σ-3 — Air-to-Ground missions,
+> day/night, flight 1 of the day) — give the second one its own number*
+
+And the retired key is refused by name: *unknown field for section currency —
+allowed: date, kind, s_category, e_items, seq  (currency[0].category)*.
+
+**`WA.rowLabel` says the Σ PRINTED NAME**, as the ruling asked — and no longer
+prints the programme beside it, because the programme is now derived from the
+same value and printing both would print one fact twice:
+
+```
+My currency · own · Σ-3 — Air-to-Ground missions, day/night · 27/08/2026 #2 — added (E-items Ε-21 · Ε-46)
+```
+
+#### 4v·1d. MULTI-E: IT EXISTED, AND NOW IT SAYS SO
+
+Multi-E has been in the data since round 19. What was missing was any **sign** of
+it: the cell offered a «— add an event —» `<select>`, which is a list of ONE that
+happens to be repeatable — what a form looks like when it does **not** take many
+— so a sortie that exercised four events was recorded with one.
+
+The select is gone. `WA.pickEvents()` (app.js, the `.veil`/`.modal` pattern of
+`WA.confirmSave`) opens the **FDMS dialog's shape**: all 27 events on screen at
+once, a **filter** over them (code or words), a **count chip** *«3 of 27
+selected»*, a checkbox per row, **Clear all**, **Cancel**, **Done**. The cell
+carries the count on its own button («✎ 3 events» / «+ events»).
+
+- **the boxes are STATE, not a write** — nothing reaches the row until Done, so
+  Cancel really cancels;
+- **the filter re-renders only the list** and re-reads the ticks from the Set, so
+  a box ticked before filtering is still ticked after it;
+- **an unknown id is never silently dropped** — it survives the dialog and
+  survives Clear all, so the server can still refuse it by name.
+
+---
+
+### 4v·2. THE INSTRUCTOR LANDING PAGE, AND THE TWO DOORS
+
+> **ΑΠΟΦΑΝΣΗ**: *«το landing page να έχει τα στοιχεία αυτού που μπαίνει, ώστε να
+> κάνει και επιβεβαίωση, και να έχουμε μήνυμα καλωσορίσματος. Και μετά δύο
+> επιλογές: My currency, Student Assessment. Τώρα είναι μπερδεμένα.»*
+
+**WHAT WAS CONFUSED.** Round 19 put the instructor's own currency at the bottom
+of the assessment form because there was nowhere else to put it, and the page
+became two different jobs in one scroll: a questionnaire about twelve other
+people, and a logbook about himself. They share a link and nothing else —
+different subject, different verb, different Save.
+
+**THE LINK NOW OPENS ON NEITHER.** It opens on **who you are**: rank + full name
+as the roster holds them, the duty / leadership / status line with the call sign,
+and the class scope — stated as a **confirmation**, with the sentence that makes
+it actionable: *«You are signed in as … If this is not you, close this page and
+tell the squadron administration — this is a personal link and everything saved
+through it is recorded in your name.»* A personal link forwarded, pasted into the
+wrong chat or opened on a shared machine is the one failure this application
+cannot detect and its holder can, in one glance.
+
+**TWO DOORS, EACH ITS OWN VIEW.** `★ Student Assessment` (the scoped form with
+the R17 rail) and `✈ My currency` (the table alone). Each has a **back-to-landing
+control at the top** of its pane, its **own Save**, and its own count of unsaved
+work; the landing shows **both** counts on the tiles, so an instructor who left
+something half-typed is told **which door** holds it.
+
+**DEEP LINKS — the existing router pattern.** `WA.DOORS`, `getDoor()`,
+`WA.doorHash()` in `app.js`, same regex shape as the round-4 `&co=` sub-route:
+
+| hash | view |
+|---|---|
+| `#t=<token>` | the welcome page |
+| `#t=<token>&v=assess` | Student Assessment |
+| `#t=<token>&v=currency` | My currency |
+
+**A DOOR IS NOT A RELOAD.** `route()` offers every hash change to `WA._insDoor`
+**before** `teardownView()`; the mounted view takes it only for **the link it was
+built for** (token + co target) and switches panes without re-fetching. Otherwise
+switching doors would throw away whatever is half-typed in the other one. The
+door buttons only ever **set `location.hash`**, so a click, the Back button, a
+bookmark and a reload are **one path** with one behaviour.
+
+**THE RAIL LIVES AND DIES WITH ITS DOOR.** Mounted when the assessment door
+opens, destroyed when it closes — not merely hidden, because the panel keeps a
+scroll spy on `window` that measures its cards, and a hidden card measures zero.
+**The currency row is out of the rail** (round 19 had appended it): the rail is
+the student cards again, in their order, which is the rule round 19 had to bend.
+
+**THE SAVE COUNTS THE OPEN DOOR ONLY.** Round 19's combined sentence («Save 3
+assessments + 2 currency changes») was honest for a page that held both at once;
+from inside «My currency» it would offer to write twelve assessments the reader
+cannot see and did not come to think about. So `doorCounts()` zeroes the closed
+door, `saveAll(ids, withCur)` takes the open door as an argument, and
+`confirmedSaveAll()` builds the dialog from the open door's list. **The DIFF
+BUILDERS are unchanged and still shared** — `WA.proposalChanges` for the
+assessments, `WA.recordChanges` (through `curChanges()`) for the flights: the
+door decides which of them is asked for, never how either is written. The
+`beforeunload` guard and the admin's Back still ask about **both**.
+
+> **JUDGEMENT — THE STUDENT GETS THE HEADER AND NOT THE DOORS** (ruling asked for
+> the judgement to be recorded). The **confirmation** half applies identically: a
+> student's link is as forwardable as an instructor's, so the student form now
+> opens with the same welcome card — *Welcome, ⟨rank + name⟩ · MN · Class*, and
+> the same «if this is not you» sentence. The **doors** half does not: the
+> instructor's link led to two unrelated jobs and the landing exists to tell them
+> apart; a student's link leads to **one** record, and a landing whose only door
+> opens onto the only room is a click that teaches nothing and costs everybody
+> one. The parts of that record already have a rail (round 17), which is the
+> right instrument for parts of one thing.
+
+---
+
+### 4v·3. THE CLASS CHIPS ON ALL FOUR ADMIN PAGES
+
+> **ΑΠΟΦΑΝΣΗ**: *«όπως στο overview χωρίζεις τους μαθητές ανά τάξη να γίνεται και
+> στις υπόλοιπες σελίδες.»*
+
+**ONE COMPONENT, ONE STATE, FOUR PAGES.** `classChipsHTML()` is the single
+builder; `A.cls` is the single state, persisted under the Overview's **existing**
+key `wa-adm-class`, and the single `[data-cls]` click branch already served every
+tab the moment the other three started drawing the row. Choosing a class anywhere
+**follows everywhere**, and survives a reload.
+
+| page | what the filter does |
+|---|---|
+| **Overview** | the table, the three CSV exports (unchanged behaviour) |
+| **Student analysis** | the **deck**: the picker, the ← → arrows, the *«3 / 9»* pager, and the rail's card |
+| **Brief mode** | the **deck** + its pager + **the printed brief** (see below) |
+| **People & links** | the **students** table only — instructors are always shown |
+
+**THE CHIP SET IS ONE SET, FROM ONE UNION; THE COUNTS ARE PER PAGE.** The
+Overview is about the **active** students of the dashboard payload; People & links
+is about **every** student row the roster holds. Chips derived from whichever page
+happened to be open would appear and disappear as the admin moved between tabs,
+**silently dropping a filter he had chosen**. So `classIds()` is the union of both
+populations and `classList(pop, keyOf)` counts over the page's own — the chips
+never move, and what each one says is true of the page you are reading. A chip
+whose count is 0 here stays clickable and the page says *«nobody in this class»*
+in its own words. `activeClass()` reverts to All only when the class has left the
+roster **entirely**, which is the case it was written for.
+
+**A.sel STILL INDEXES `A.data.students`** — the Overview rows, `data-goto` and the
+round-11 return-to-where-you-were all depend on it — and `anaList()` / `anaPos()`
+/ `anaStudent()` are the whole translation, used by both one-at-a-time tabs. A
+selection the filter has just excluded **falls to the first of what is left**; the
+alternative is showing a 99A student under a chip reading 98B.
+
+> **JUDGEMENT — INSTRUCTORS ARE NEVER FILTERED.** An instructor carries no class
+> (he flies with whoever is on the programme), so a class filter over the
+> instructor table would either hide everybody or nobody, and both answers are a
+> lie about what a class means. The heading says so while a filter is on.
+
+> **JUDGEMENT — THE PRINTED BRIEF FOLLOWS THE FILTER.** Round 11 ruled the CSVs
+> follow it: *«a button that sits over 6 visible rows and silently writes 20 is a
+> button that produces the wrong attachment on a Monday morning.»* The deck on
+> screen is the class the chips chose; a **Print brief** that quietly produced the
+> whole squadron would be that same trap **on paper**, where it cannot be noticed
+> until it has been handed out. The scope is now printed in the summary page's
+> meta line, and the matrix's *«Class average»* row becomes an average of **one**
+> class — which is the only thing that row ever claimed.
+
+---
+
+### 4v·4. RULING 2Α — «CLASS» MEANS THE STUDENT'S OWN CLASS (Γύρος 11 open item CLOSED)
+
+**THE OPEN ITEM (§7, Γύρος 11):** *«Οι τέσσερις μπάρες, η σύγκριση ανά checkride
+και η διακεκομμένη γραμμή αναφοράς υπολογίζονται πάνω σε όλους τους ενεργούς
+μαθητές όλων των τμημάτων … Με 25 μαθητές σε τρία τμήματα στο ίδιο instance, το
+«class best/worst/average» είναι αριθμητική πάνω σε πληθυσμό που η ετικέτα δεν
+περιγράφει. **Ζητείται απόφαση**: να ακολουθεί το φίλτρο του Overview, να
+περιορίζεται πάντα στο τμήμα του μαθητή, ή να μένει σε επίπεδο μοίρας;»*
+
+> **Η ΑΠΟΦΑΝΣΗ (27/08/2026): ΤΟ ΤΜΗΜΑ ΤΟΥ ΙΔΙΟΥ ΤΟΥ ΜΑΘΗΤΗ.**
+
+A 99A cadet three weeks into the stage and a 98B officer at the end of it are not
+a population: «class average» over both is arithmetic about nobody, and it
+flatters the one and punishes the other for a difference that is **calendar, not
+ability**. The class a student is **in** is the cohort he flew the same syllabus
+with on the same dates, which is what a comparison is for — and it is what the
+label always claimed.
+
+**AND NOT THE OVERVIEW FILTER, DELIBERATELY.** That filter is what the **admin**
+is looking at; this chart is about who the **student** is measured against. Tying
+them would make the same student's «best in class» change because somebody
+clicked a chip — a number that moves without the data moving is a number nobody
+can quote in a brief.
+
+**ONE FUNCTION, EVERY CHART**: `peers(s)` / `peerLabel(s)` / `peerTip(s)` in
+`app/admin.js`. It feeds
+
+- the **four bars** (`fourBarSVG`) — caption now *«Solo flights — higher is better
+  — class 2026B»*;
+- the **per-checkride comparison** (`evalValues(id, s)`, `evalCompare`) — the
+  `n = X of Y in class Z` line and the axis;
+- the **dashed reference line** of the eight-checkride plot (`catPlotSVG`);
+- the **FPC axis depth** (`plotDef`) — «#2» means the same position for the people
+  he is actually compared with;
+- the **legend**, which used to read *«all classes, not only this student's»* and
+  now names the class it is the average of;
+- the card heading, *«Comparison vs class 98B HAF»*, with `peerTip` on a `tipdot`.
+
+**PROVED ON THE RUNNING APP**: for a 2026B student the bars read
+`8 · 8 · 8 · 8` (own class, n = 3) where the squadron-wide population would have
+produced `8 · 8 · 0 · 1.0` (n = 25).
+
+---
+
+### 4v·5. THE HARDENING SWEEP
+
+#### 4v·5a. `search_path` PINNED ON ALL 102 FLAGGED FUNCTIONS
+
+The 27/08 advisor triage (§4φ) counted `function_search_path_mutable` **×102** —
+every helper in the `wa` schema. All 102 now carry
+
+```sql
+set search_path = public, wa, pg_temp
+```
+
+**WHICH IS THE STRING THE PUBLIC RPCs ALREADY SET.** A `wa` helper is only ever
+reached from a `public` RPC that has already put exactly those three schemas on
+the path, so pinning them to it is **behaviour-identical by construction** rather
+than by hope. `wa.gen_token` keeps its own (`public, extensions, pg_temp`),
+because pgcrypto lives in a fourth schema on Supabase — which is why it was the
+one function pinned already.
+
+**THE GENERATED FUNCTIONS PIN THEMSELVES.** `wa.e_item_ids` / `wa.e_item_name`
+and the four new Σ functions are written by
+`tools/gen-currency-catalog.py`, so the clause lives in its emitter (`SQL_SET`) —
+otherwise the next regeneration would silently unpin them.
+
+**AND THE PIN IS AUDITED, NOT REMEMBERED.** `create or replace function` replaces
+a function's SET clauses along with its body, so a future round that re-creates
+one helper without the clause would silently unpin it and the advisor would grow
+the lint back one function at a time. A `do $$ … $$` block at the end of
+`db/schema.sql` **fails the deployment**, naming every function that lost it. It
+reads `pg_proc`, so what it asserts is true of the **database**, not of this file:
+
+```
+NOTICE:  r20: search_path pinned on all 110 wa functions
+```
+
+**PROVED LOCALLY** (`docker exec supabase_db_WingsAhead psql`):
+
+```sql
+select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'wa'
+   and not exists (select 1 from unnest(coalesce(p.proconfig,'{}')) c
+                   where c like 'search_path=%');
+--  before: 102     after: 0
+```
+
+**THE CLOUD ADVISOR RE-RUN IS NOT THIS ROUND'S TO DO** — see §4φ·2: rounds work
+only in the local laboratory. The lint that remains to be re-counted on the cloud
+is `function_search_path_mutable`, and the number this change is expected to move
+it by is **102 → 0**; the other two families of §4φ (`…security_definer_function_executable`
+×42 and `rls_enabled_no_policy` ×6) are **accepted by design** and untouched.
+
+#### 4v·5b. `app/styles.css` STOPS CALLING THE ADMIN «THE CO»
+
+Round 19's sweep covered `db/schema.sql` and `app/*.js` and never opened the
+stylesheet. **11 occurrences on 10 lines**, all inside `/* */` comments, all
+rewritten: *«under the CO's fingers» → «under the admin's fingers»*, *«the CO's
+log tables» → «the admin's log tables»*, *«ENTERED BY THE CO» → «ENTERED BY THE
+ADMIN»*, *«"+1 CO"» → «"+1 ADMIN"»*, *«LOCKED BY THE CO» → «LOCKED BY THE
+ADMIN»*, *«the CO tag on paper» → «the admin tag on paper»*.
+**Zero behaviour**: the class names `.cotag`, `.cotag.part`, `.conote`,
+`.is-colock`, `.is-co` are the code's private vocabulary and are **untouched**,
+as round 17 ruled.
+
+#### 4v·5c. THE TWO UNREPRODUCIBLE FIGURES, REPLACED BY GREP-DERIVED ONES
+
+§4u·10c claimed the sweep *«rewrote **138** comment occurrences»* and left
+*«**32** survivors»*. **Neither number can be reproduced by any command in this
+repository** — they were the output of a one-off classifier that no longer
+exists — so both are superseded here by numbers anybody can re-derive, with the
+command beside them. (The old figures are kept above as the record of what was
+claimed; where they disagree with the commands below, **the commands are right**.)
+
+**HOW BIG THE ROUND-19 SWEEP ACTUALLY WAS — 142 occurrences, from the history:**
+
+```bash
+for f in db/schema.sql app/app.js app/admin.js app/student.js app/instructor.js; do
+  git show b1a8dcc:$f; done | grep -oE '\bCO\b' | wc -l      # 195   (round 18, pre-sweep)
+for f in db/schema.sql app/app.js app/admin.js app/student.js app/instructor.js; do
+  git show 7a84c69:$f; done | grep -oE '\bCO\b' | wc -l      #  53   (round 19, post-sweep)
+```
+
+195 − 53 = **142** standalone `CO` occurrences rewritten. (The old «138» counted
+only what its own parser classified as a comment occurrence; `git` + `grep` count
+**57 − 4 = 53**, and 142 is the figure the shipped commits prove.)
+
+**WHAT SURVIVES TODAY — 57 occurrences, and what each one is:**
+
+```bash
+grep -oE '\bCO\b' db/schema.sql app/*.js app/*.css | wc -l                # 57
+for f in db/schema.sql app/*.js app/*.css; do n=$(grep -oE '\bCO\b' "$f" | wc -l);
+  [ "$n" -gt 0 ] && printf "%-24s %s\n" "$f" "$n"; done
+#   db/schema.sql            23
+#   app/app.js               15
+#   app/student.js           13
+#   app/items-catalog.js      4
+#   app/admin.js              2
+grep -oE "\bCO 1[0-9][0-9]\b" db/schema.sql app/items-catalog.js | wc -l  #  8
+grep -nE '\bCO\b' db/schema.sql app/*.js app/*.css                        # read all 57
+```
+
+**8** are the syllabus **course codes** (`CO 101` · `CO 106` · `CO 109` · `CO 110`,
+mirrored in the schema and in `items-catalog.js`). The remaining **49** are the
+**real Squadron CO** where the doctrine names him — `wa.fpc_evaluators` /
+`WA.FPC_EVALUATORS`, the CEF evaluator roles, the ΚΕΠΕ discretion of 3-01 ΚΕΦ.2
+§32β and the §32δ(2) duty to inform — or the **quoted rulings of round 17 / 17b**
+kept as the record of what was changed. **Zero admin-as-CO prose**, in any of the
+six files, `app/styles.css` now included:
+
+```bash
+git show fba495e:app/styles.css | grep -oE '\bCO\b' | wc -l   # 11  (before round 20)
+grep -oE '\bCO\b' app/styles.css | wc -l                      #  0  (after)
+```
+
+---
+
+### 4v·6. VERIFY — WHAT WAS RUN, ON THE RUNNING APP AND THE RUNNING DATABASE
+
+1. **Σ CATALOG 1:1 vs FDMS, re-derived.** The generator re-run from the FDMS
+   source: **27 e-items** (1 excluded) + **16 Σ categories** (6 ΑΕΡΟΣ + 6 F/S
+   printed rows + 2 recording aids + 2 legacy; 3 excluded by name). **43 ids
+   asserted** pure ASCII kebab-case, **0 collisions**. The 2 aids **matched FDMS
+   verbatim**. Two consecutive runs → identical md5 on `app/currency-catalog.js`
+   and on `db/schema.sql`.
+2. **s_category REFUSALS BY NAME** — 5 real RPC refusals, quoted in 4v·1c:
+   unknown id (names all 14 choosable categories), duplicate E on one sortie,
+   duplicate `(kind, s_category, date, seq)`, the retired `category` key, and the
+   admin having no currency write path at all.
+3. **LEGACY RENDERS HONESTLY** — the 4-row round-19 fixture migrates to
+   `legacy-aeros-unspecified` ×2 / `legacy-fs-unspecified` ×2, every row
+   **red-edged**, the card badge reads **«4 without a Σ»**, `legacy_rows: 1` (as
+   a count of rows: 4) rides in `admin_export`, and the legacy option is
+   selectable **only** on the row that holds it.
+4. **THE LANDING SHOWS THE RIGHT IDENTITY FOR TWO DIFFERENT INSTRUCTOR TOKENS** —
+   two links opened in the running app, each welcoming its own holder by rank +
+   full name, duty line and call sign, with the class-scope line *«Assessments
+   are open for class 98B HAF. 9 students are being asked about.»*
+5. **THE STUDENT HEADER** — a student token opens on *«Welcome, ⟨rank + name⟩ ·
+   MN ⟨n⟩ · Class 98B HAF»* with the confirmation sentence and **0 door tiles**.
+6. **BOTH DOORS + DEEP-LINKS + BACK.** `&v=currency` → currency pane only, save
+   bar visible, 4 rows; `&v=assess` → **9 rail rows, 9 cards**, rail summary
+   *«9 of 9 chosen»*; `history.back()` walks the doors; the landing tiles carry
+   **«1 unsaved»** on the door that holds it, and the unsaved edit **survived
+   every door switch**.
+7. **THE PICKER.** Opened on a row holding 2 events → chip *«2 of 27 selected»*,
+   **27 rows**; filter `ifr` → **1 row (Ε-4)** and the two ticks **kept** in the
+   Set; ticking Ε-4 → *«3 of 27 selected»*; Done → the cell reads **«✎ 3
+   events»** and the Save reads **«Save 1 currency change»**.
+8. **THE SAVE BAR IS THE OPEN DOOR'S** — hidden on the landing
+   (`display: none`, after `.savebar[hidden]` was added: `display:flex` outranks
+   the UA `[hidden]` rule, and the bar had stayed on screen).
+9. **CLASS CHIPS FILTER ALL FOUR PAGES AND STAY IN SYNC.** Chips
+   `All 25 · 2026B 3 · 98B HAF 9 · 99A HAF 13`. Picked **98B HAF** on the
+   Overview → Student analysis opened **already on it**, pager **«1 / 9»**,
+   heading *«Comparison vs class 98B HAF»*; Brief mode **«1 / 3»** on 2026B;
+   People & links *«Students (3 of 25) — class 2026B»* with **3** rows and
+   *«Instructors (16) — every instructor, whatever class is filtered»*.
+10. **THE ANALYSIS BARS CHANGE POPULATION** — 98B *n = 0 of 9* vs 99A *n = 0 of
+    13* on the same checkride; and the 2026B student's solo bars read
+    `8 · 8 · 8 · 8` where the squadron-wide numbers are `8 · 8 · 0 · 1.0`.
+11. **search_path** — 102 → **0** unpinned `wa` functions; the audit block prints
+    *«r20: search_path pinned on all 110 wa functions»* and **would raise** on a
+    single unpinned one.
+12. **THE FULL RPC REGRESSION**, 35 checks over the pinned path: `keepalive`,
+    `whoami` ×4 (+ *no `token` key in the payload*), `get_student_form`,
+    `list_instructor_names`, `list_students_for_instructor`, `admin_get_data`,
+    `admin_list_people`, `admin_export` (`wa-export-v1`, **16** s_categories,
+    **27** e_items, *no `"token"` anywhere in the payload*),
+    `admin_get_proposals_of`, `admin_get_student_form`, `save_student_record`
+    (write-back-what-was-read), `save_instructor_currency` ×6 (3 accepted,
+    5 refused by name), and the role refusals. **Every one behaved as before the
+    pin.**
+13. **SCHEMA APPLIED TWICE**, `ON_ERROR_STOP=1`, exit **0** both times.
+14. **THE LOCAL DEMO WAS RESTORED BYTE-FOR-BYTE** after the regression: the
+    round-19-shaped fixture (with `category`, no `s_category`) written straight
+    into the table with the touch trigger disabled, its original `last_update`
+    put back, and the second instructor's test record deleted — **1 record, 4
+    rows**, exactly as found. The fixture stays round-19-shaped **on purpose**:
+    it is what proves the migration on every future run.
+15. **HYGIENE.** `node --check` clean on all six client files. **Zero console
+    errors** through the instructor landing, both doors, the picker, the student
+    form and all four admin tabs.
+16. **PRIVACY.** The grep over every tracked file: **0 real-person hits**. No
+    name, call sign or token from the local roster reached a tracked file.
+
+### 4v·7. OPEN ITEMS RAISED BY THIS ROUND
+
+1. **THE CLOUD ADVISOR RE-RUN.** §4φ·2 forbids a round from touching the Supabase
+   MCP; the schema must be deployed and the advisor re-run by the **main session,
+   on the user's word**. Expected: `function_search_path_mutable` **102 → 0**,
+   the other 48 lints unchanged and accepted.
+2. **THE Σ QUOTAS ARE CARRIED AND NOT COUNTED.** `p` / `a` (posted / attached
+   sorties per semester) ride in the catalogue for the tooltip only. Wings Ahead
+   records **that** a sortie was flown and **on what day**; FDMS is where the
+   semester is counted against Πίνακας 6 / Πίνακας 9. If the squadron ever wants
+   the *«3 of 6 this semester»* chip here, it needs the **posted/attached axis**
+   on the instructor row first — which §4u already listed as a future axis.
+3. **THE TEST-PILOT FLAG IS OFFERED, NOT ENFORCED.** `sim-da` and `x-fcf-flight`
+   are marked and shown to everybody (4v·1). If the roster's `test_pilot` is ever
+   trustworthy enough to gate on, FDMS's `hide` behaviour is the precedent —
+   **but the failure mode of gating wrongly is a man who cannot record a flight
+   he flew**, which is worse than an option he will not pick.
+4. **THE LEGACY ROWS NEED THE DEVELOPER'S HAND.** The cloud has none; the local
+   demo has 4. `admin_export` surfaces `legacy_rows` per record so the FDMS
+   bridge can list them — the bridge lane itself is still unwritten (§4u·15·3).
 
 ## 4. Screens
 
@@ -5635,13 +6175,30 @@ pushed**.
    after the slots in date order. The same form, bound to somebody else, is what
    **the admin** fills in on a student's behalf (§4s·4 — the admin is the flight
    commander and the developer, **not** the squadron CO).
-2. **Instructor form**: **TWO things now** — the assessments, and **round 19
-   (§4u): «MY CURRENCY», the instructor's own flying**, in a plain table under
-   the cards (Date · Flight `own`/`with a student` · Programme **ΑΕΡΟΣ**/**F/S**
-   · # · **E-items** · ✕), rows added by «+ flight», sorted newest first, with
-   the 27 events of the 3-01 EVENTS table as a closed multi-select. It names no
-   student and changes no student's record; the ONE general Save writes both
-   halves and the confirmation lists both. On the admin's on-behalf twin it is
+2. **Instructor link — round 20 (§4v·2): it opens on a WELCOME PAGE, and then
+   TWO DOORS.** First the identity as a **confirmation** (rank + full name, duty
+   / leadership / status + call sign, the class scope, and *«if this is not you,
+   close this page and tell the squadron administration»*), then two large
+   tiles: **★ Student Assessment** and **✈ My currency**. Each is its own view
+   with a **back-to-landing control**, its **own Save** and its own unsaved
+   count — and the landing shows **both** counts, so an instructor is told which
+   door holds his half-typed work. The doors are **hash sub-routes**
+   (`#t=…&v=assess` / `&v=currency`, the round-4 `&co=` pattern), so one can be
+   bookmarked and **Back** returns through them; switching does **not** re-fetch
+   or rebuild, so nothing typed is lost. The R17 rail lives inside the
+   assessment door (mounted and destroyed with it) and no longer carries a
+   currency row.
+   **MY CURRENCY** (round 19 §4u, **round 20 §4v·1**): a plain table —
+   **Date · Flight `own`/`with a student` · Σ CATEGORY · Programme · # ·
+   E-items · ✕** — rows added by «+ flight», sorted newest first. The **Σ
+   category** is the printed row of **Πίνακας 9** (Σ-1 · Σ-2 day · Σ-2 night ·
+   Σ-3 · Σ-4 · Σ-20) or **Πίνακας 6** (SIM-1 … SIM-ΔΑ) plus the **two columns
+   FDMS keeps** (night-with-students, FCF), grouped in the box by table; the
+   **programme is derived from it** and rendered as text. Rows recorded before
+   the taxonomy wear a **legacy** value, are **red-edged**, and the card counts
+   them («N without a Σ»). **E-items are a picker** — all 27 on screen, a filter,
+   a count chip, checkboxes, Clear all / Cancel / Done. It names no student and
+   changes no student's record. On the admin's on-behalf twin it is
    **read-only** — the server has no admin write path for it at all.
    The assessments themselves: student list — **round 18 (§4t·1): the students
    of the ONE class the admin has opened for assessment, and nobody else**, filtered
@@ -5693,6 +6250,16 @@ pushed**.
       not-filterable instructor card labelled as such, and scoping **the three
       CSV exports** (class in the file name) while the **JSON backup stays
       complete**.
+      **Round 20 (§4v·3): THE SAME CHIP ROW IS ON ALL FOUR TABS**, one component
+      and **one** choice (the same `wa-adm-class` key), so a class picked
+      anywhere follows everywhere. The chip **set** is the union of the
+      dashboard's active students and the roster's, so it never changes between
+      tabs; the **counts** are per page. It narrows the Overview table, the
+      **deck** of Student analysis and Brief mode (picker, ← →, the *«3 / 9»*
+      pager) and the **students** table of People & links. **Instructors are
+      never filtered** — an instructor carries no class. The **printed brief now
+      follows it too**, for the round-11 export reason, and says which class it
+      covers.
       **Round 18 (§4t·1): «ASSESSMENTS OPEN FOR: ⟨class ▾⟩»**, a boxed strip
       inside the *Instructor submissions* card — the classes present plus
       «— none —», written through `public.admin_set_assessment_class`. It is a
@@ -5705,7 +6272,13 @@ pushed**.
       - Identity header (MN, rank, name, class) + entries still to correct.
       - **Comparison chart** (vanilla SVG, mifchart discipline): the selected
         metric shown as FOUR bars — **this student · class best · class worst ·
-        class average**. Metric selected by CLICK on chips: FAIL · ALMOST GOOD ·
+        class average**. **Round 20, ruling 2Α (§4v·4): «class» is THE
+        STUDENT'S OWN CLASS** — the four bars, the per-checkride comparison, the
+        dashed reference line, the FPC axis depth and the legend all read one
+        function (`peers`), and every label **names** the class it means. It is
+        deliberately **not** the chip row above: that says what the admin is
+        looking at, this says who the student is measured against.
+        Metric selected by CLICK on chips: FAIL · ALMOST GOOD ·
         NFS · SMS entries · airsickness · solo flights · FPC · CEF.
         **Round 2/3**: no mean-evaluation metric and no evaluation COUNT chip
         (every student converges to the same eight checkrides). Every chip
@@ -5793,6 +6366,48 @@ pushed**.
    button. That rename lives in the database and **only** there.
 
 ## 7. Open items
+
+- **ΑΠΟΦΑΝΣΕΙΣ 2026-08-27 (Γύρος 20, §4v) — ΠΕΝΤΕ, ΚΑΙ ΚΛΕΙΝΕΙ ΤΟ ΑΝΟΙΧΤΟ
+  ΣΗΜΕΙΟ ΤΟΥ ΓΥΡΟΥ 11.**
+  1. **ΠΟΙΑ Σ ΕΙΝΑΙ, ΚΑΙ ΠΟΛΛΑΠΛΑ Ε** (§4v·1). «*θα έπρεπε να έχουμε ποια S
+     είναι και δυνατότητα πολλαπλών Ε. Αφού θα τροφοδοτούν το ίδιο σχήμα με το
+     FDMS να τα έχουμε σωστά.*» Η γραμμή γίνεται
+     `{date, kind, s_category, e_items[], seq}`· το `category` **φεύγει** και το
+     πρόγραμμα **παράγεται** από την κατηγορία. Κατάλογος **16 Σ** από την ΙΔΙΑ
+     πηγή FDMS και τον ΙΔΙΟ generator (6 ΑΕΡΟΣ + 6 F/S + **2 στήλες που κρατά το
+     FDMS** + **2 legacy**), byte-idempotent, με **assert** ότι οι δύο στήλες
+     του FDMS δεν μετονομάστηκαν. Το picker των Ε γίνεται **checkbox list με
+     φίλτρο και μετρητή**, όπως ο διάλογος του FDMS.
+  2. **LANDING PAGE ΜΕ ΔΥΟ ΠΟΡΤΕΣ** (§4v·2). «*το landing page να έχει τα
+     στοιχεία αυτού που μπαίνει, ώστε να κάνει και επιβεβαίωση … Και μετά δύο
+     επιλογές: My currency, Student Assessment. Τώρα είναι μπερδεμένα.*»
+     Καλωσόρισμα + **επιβεβαίωση ταυτότητας**, δύο πόρτες με **δικό τους
+     hash sub-route** (`&v=assess` / `&v=currency`), **back** σε κάθε μία, και
+     το γενικό Save μετράει **μόνο την ανοιχτή πόρτα**. Ο **μαθητής** παίρνει
+     την ίδια κεφαλίδα επιβεβαίωσης και **όχι** πόρτες (κρίση καταγεγραμμένη).
+  3. **CLASS CHIPS ΣΕ ΟΛΕΣ ΤΙΣ ΣΕΛΙΔΕΣ ΤΟΥ ADMIN** (§4v·3). «*όπως στο overview
+     χωρίζεις τους μαθητές ανά τάξη να γίνεται και στις υπόλοιπες σελίδες.*»
+     **Ένα** component, **μία** επιλογή (το υπάρχον `wa-adm-class`), τέσσερις
+     σελίδες — και η επιλογή **ακολουθεί παντού**. Οι **εκπαιδευτές δεν
+     φιλτράρονται ποτέ**· το **τυπωμένο brief ακολουθεί** το φίλτρο, όπως τα CSV.
+  4. **ΑΠΟΦΑΝΣΗ 2Α** (§4v·4) — **ΚΛΕΙΝΕΙ** το ανοιχτό σημείο του Γύρου 11: κάθε
+     σύγκριση του Student analysis γίνεται πάνω στο **τμήμα του ίδιου του
+     μαθητή**, και η ετικέτα το **ονομάζει**.
+  5. **ΘΩΡΑΚΙΣΗ** (§4v·5): `search_path` καρφωμένο σε **όλες τις 102**
+     συναρτήσεις `wa` (+ **audit** που ρίχνει το deployment αν κάποια το χάσει),
+     τα **11** σχόλια «CO» του `styles.css` γίνονται «the admin», και οι **δύο
+     μη-αναπαραγώγιμοι αριθμοί** (138 / 32) αντικαθίστανται από **grep-derived**
+     νούμερα με τις εντολές τους.
+  **ΤΕΣΣΕΡΑ ΑΝΟΙΧΤΑ ΠΟΥ ΓΕΝΝΗΣΕ Ο ΓΥΡΟΣ** (§4v·7):
+  1. **Το re-run του cloud advisor** — ο §4φ·2 απαγορεύει σε γύρο να αγγίξει το
+     Supabase MCP· το schema και ο advisor **ανήκουν στην κύρια συνεδρία, με τον
+     λόγο του χρήστη**. Αναμενόμενο: `function_search_path_mutable` **102 → 0**.
+  2. **Τα quotas των Σ ταξιδεύουν, δεν μετριούνται** — χρειάζεται πρώτα ο άξονας
+     **τοποθετημένος / προσκολλημένος** στη γραμμή του εκπαιδευτή.
+  3. **Το flag Δοκιμαστή προσφέρεται, δεν επιβάλλεται** — το χειρότερο σφάλμα
+     είναι ένας άνθρωπος που **δεν μπορεί να καταγράψει πτήση που πέταξε**.
+  4. **Οι legacy γραμμές θέλουν το χέρι του developer** — το cloud δεν έχει
+     καμία, το τοπικό demo έχει 4· το `admin_export` τις εκθέτει (`legacy_rows`).
 
 - **ΑΠΟΦΑΝΣΗ 2026-08-26 (Γύρος 19, §4u) — ΤΟ CURRENCY ΤΟΥ ΕΚΠΑΙΔΕΥΤΗ.**
   «*στο link που θα στέλνουμε σε κάθε εκπαιδευτή θέλω να μπορεί να περάσει κι
@@ -5956,14 +6571,24 @@ pushed**.
   πλήρες ίχνος). Στο πραγματικό 98B ο πίνακας ξεκινά άδειος, οπότε δεν αφορά
   κανένα αληθινό δεδομένο· μελλοντικές μεταπτώσεις να τυλίγονται σε
   trigger-disable ώστε να μην αγγίζουν χρονοσφραγίδες.
-- **ΝΕΟ (Γύρος 11, §4k) — «class average» στο Student analysis.** Οι τέσσερις
-  μπάρες, η σύγκριση ανά checkride και η διακεκομμένη γραμμή αναφοράς
-  υπολογίζονται πάνω σε **όλους τους ενεργούς μαθητές όλων των τμημάτων** —
-  όπως πάντα, ο Γύρος 11 δεν άλλαξε κανέναν αριθμό, μόνο έκανε τα tooltips
-  ειλικρινή. Με 25 μαθητές σε τρία τμήματα στο ίδιο instance, το «class
+- ~~**ΝΕΟ (Γύρος 11, §4k) — «class average» στο Student analysis**~~ —
+  **ΕΚΛΕΙΣΕ στον Γύρο 20 (27/08/2026, §4v·4) με την ΑΠΟΦΑΝΣΗ 2Α: «ΤΟ ΤΜΗΜΑ ΤΟΥ
+  ΙΔΙΟΥ ΤΟΥ ΜΑΘΗΤΗ».** Οι τέσσερις μπάρες, η σύγκριση ανά checkride, η
+  **διακεκομμένη γραμμή αναφοράς**, το βάθος του άξονα των FPC και το legend
+  διαβάζουν πλέον **μία** συνάρτηση (`peers(s)`), και η ετικέτα **ονομάζει** το
+  τμήμα («Comparison vs class 98B HAF»). Ένας δόκιμος της 99A τρεις εβδομάδες
+  μέσα στο στάδιο και ένας αξιωματικός της 98B στο τέλος του **δεν είναι
+  πληθυσμός**: ο μέσος όρος πάνω και στους δύο είναι αριθμητική για κανέναν.
+  **ΟΧΙ** το φίλτρο του Overview, σκοπίμως: εκείνο λέει τι βλέπει ο **admin**,
+  αυτό λέει με ποιους συγκρίνεται ο **μαθητής** — αν δένονταν, η θέση ενός
+  μαθητή θα άλλαζε επειδή κάποιος πάτησε ένα chip. Το αρχικό κείμενο μένει ως
+  ίχνος: *«Οι τέσσερις μπάρες, η σύγκριση ανά checkride και η διακεκομμένη
+  γραμμή αναφοράς υπολογίζονται πάνω σε **όλους τους ενεργούς μαθητές όλων των
+  τμημάτων** — όπως πάντα, ο Γύρος 11 δεν άλλαξε κανέναν αριθμό, μόνο έκανε τα
+  tooltips ειλικρινή. Με 25 μαθητές σε τρία τμήματα στο ίδιο instance, το «class
   best/worst/average» είναι αριθμητική πάνω σε πληθυσμό που η ετικέτα δεν
   περιγράφει. **Ζητείται απόφαση**: να ακολουθεί το φίλτρο του Overview, να
-  περιορίζεται πάντα στο τμήμα του μαθητή, ή να μένει σε επίπεδο μοίρας;
+  περιορίζεται πάντα στο τμήμα του μαθητή, ή να μένει σε επίπεδο μοίρας;»*
 - **ΝΕΟ (Γύρος 11) — παρατήρηση από τη ζωντανή δοκιμή, ΟΧΙ σφάλμα του γύρου:**
   η εγγραφή ενός demo μαθητή δεν αποθηκεύεται ξανά επειδή μια παλιά γραμμή SMS
   δεν ονομάζει τη συνθήκη ΚΕΠΕ (κανόνας Γύρου 8, §4f). Λειτουργεί ακριβώς όπως
@@ -5997,3 +6622,25 @@ select και token.» Το βήμα «ο χρήστης επικολλά το d
 - `function_search_path_mutable` ×102 — **ΠΡΟΓΡΑΜΜΑΤΙΣΜΕΝΗ ΘΩΡΑΚΙΣΗ** για τον
   επόμενο γύρο schema: κάρφωμα search_path σε όλες τις συναρτήσεις (φθηνό,
   best-practice, χαμηλό πρακτικό ρίσκο σήμερα).
+
+**ΕΓΙΝΕ ΣΤΟΝ ΓΥΡΟ 20 (27/08/2026, §4v·5a).** Και οι **102** φέρουν πλέον
+`set search_path = public, wa, pg_temp` — **την ίδια συμβολοσειρά που ήδη
+ορίζουν τα public RPC**, άρα η αλλαγή είναι behaviour-identical **εκ
+κατασκευής**: μια `wa` συνάρτηση φτάνεται μόνο μέσα από ένα public RPC που έχει
+ήδη βάλει ακριβώς αυτά τα τρία σχήματα στο path. Η `wa.gen_token` κρατά το δικό
+της (`public, extensions, pg_temp` — pgcrypto). Ένα **audit block** στο τέλος του
+`db/schema.sql` **ρίχνει το deployment** αν έστω μία `wa` συνάρτηση χάσει τη
+ρήτρα (το `create or replace` αντικαθιστά και τα SET), και τυπώνει
+*«r20: search_path pinned on all 110 wa functions»*. Τοπικά: **102 → 0**
+(`pg_proc` / `proconfig`), schema εφαρμοσμένο **δύο φορές** με `ON_ERROR_STOP=1`,
+και **35 RPC** έλεγχοι πάνω από το καρφωμένο path χωρίς καμία αλλαγή
+συμπεριφοράς.
+
+**ΤΟ RE-RUN ΤΟΥ ADVISOR ΔΕΝ ΑΝΗΚΕΙ ΣΕ ΓΥΡΟ — Η ΠΥΛΗ ΕΠΑΝΑΔΙΑΤΥΠΩΝΕΤΑΙ.** Ο όρος
+2 παραπάνω μένει απαράβατος: **ποτέ από subagents/γύρους**. Το `db/schema.sql`
+του Γύρου 20 είναι **committed και ΟΧΙ pushed**· η εκτέλεσή του μέσω Supabase MCP
+και το επακόλουθο `get_advisors` γίνονται **από την κύρια συνεδρία, με ρητή
+εντολή του χρήστη ανά εκτέλεση**, **χωρίς** το τελικό SELECT που τυπώνει το admin
+token, και **καμία** εντολή δεν επιστρέφει ποτέ στήλη token. Αναμενόμενο
+αποτέλεσμα: `function_search_path_mutable` **102 → 0**, τα υπόλοιπα **48** lints
+αμετάβλητα και **αποδεκτά by design**.

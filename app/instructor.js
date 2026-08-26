@@ -294,29 +294,13 @@ WA.renderInstructor = async function (view, me, opts) {
      grouping added here later moves both or neither — they cannot drift.
      ══════════════════════════════════════════════════════════════════════════ */
   function hasChoice(sid) { return !!(P[sid] && P[sid].level); }
-  /* ROUND 19 — AND ONE ROW MORE, AT THE END. The rail's own rule («the rail is
-     the card list, literally») is about the STUDENT rows: they and the cards
-     are both built from data.students, in its order, so neither can drift from
-     the other. That rule is untouched here — this row is appended after the map
-     and is built from the currency section instead, which is the other card on
-     this page. Without it a section that sits below nine tall cards is a
-     section most instructors never scroll to, and the head count keeps counting
-     students because that is what it says it counts. */
-  function curNavItem() {
-    const n = curLive().length;
-    const dirty = curIsDirty();
-    return {
-      id: CUR_NAV_ID,
-      label: WA.secLabel(CUR_SEC),
-      tip: (curRO ? "This instructor's own flying" : "Your own flying") +
-        " for the squadron's currency register — " +
-        (n ? n + " flight" + (n === 1 ? "" : "s") + " recorded" : "nothing recorded yet") +
-        (dirty ? " — changed, not saved yet" : "") + ". Click to go to the section.",
-      badge: n ? String(n) : "none",
-      tone: n ? "good" : "mustard",
-      rowTone: n ? "done" : "extra",
-    };
-  }
+  /* ROUND 19 APPENDED A CURRENCY ROW HERE, AND ROUND 20 TOOK IT BACK OUT. The
+     rail's own rule — «the rail is the card list, literally» — held for the
+     students and was bent for that one row, because the currency section sat
+     below nine tall cards on the same page and would otherwise never be
+     scrolled to. The doors solved that better: the currency is its own view
+     with its own tile on the landing, so the rule is unbent and the rail is
+     the student cards again, in their order, and nothing else. */
   function navItems() {
     return data.students.map((s) => {
       const sid = s.person.id;
@@ -339,7 +323,13 @@ WA.renderInstructor = async function (view, me, opts) {
         tone: lv ? "good" : "mustard",
         rowTone: lv ? "done" : "extra",
       };
-    }).concat([curNavItem()]);
+    });
+    /* ROUND 20 — AND THE CURRENCY ROW IS GONE FROM IT. Round 19 appended it
+       here because the section sat below nine tall cards on the same page and
+       would otherwise never be scrolled to. It is now behind its own door with
+       its own tile on the landing, so a rail row pointing at a card that is not
+       in this view would scroll to nothing. The rail is about the students
+       again, which is what its head has always counted. */
   }
   function navSummary() {
     const n = data.students.length;
@@ -373,7 +363,6 @@ WA.renderInstructor = async function (view, me, opts) {
      not a client-side courtesy a hand-made request could step around.
      ══════════════════════════════════════════════════════════════════════════ */
   const CUR_SEC = "ins_currency";
-  const CUR_NAV_ID = "__cur";
   const curRO = asCO;
   /* the working rows, materialised: `seq` and `e_items` are always present, so
      the fingerprint of a row the server just returned and of the row the form
@@ -386,7 +375,7 @@ WA.renderInstructor = async function (view, me, opts) {
   /* A ROW WITH NOTHING IN IT IS NOT AN ENTRY — the wa.slot_empty rule, said for
      a section that has no slots: «+ flight» pressed and then ignored must not
      become a refusal, a change line or a stored row. */
-  const curBlank = (e) => !e.date && !e.kind && !e.category && !(e.e_items || []).length;
+  const curBlank = (e) => !e.date && !e.kind && !e.s_category && !(e.e_items || []).length;
   const curLive = () => C.rows.filter((e) => !curBlank(e));
   const curFp = (rows) => JSON.stringify(rows.map(WA.fpEntry));
   let CUR_SAVED = curFp(curLive());
@@ -398,14 +387,15 @@ WA.renderInstructor = async function (view, me, opts) {
      so a record never stores «seq: 1» or an empty event list */
   function curPayload() {
     return curLive().map((e) => {
-      const o = { date: e.date || null, kind: e.kind || null, category: e.category || null };
+      const o = { date: e.date || null, kind: e.kind || null,
+                  s_category: e.s_category || null };
       if (WA.curSeq(e) > 1) o.seq = WA.curSeq(e);
       if ((e.e_items || []).length) o.e_items = (e.e_items || []).slice();
       return o;
     });
   }
   /* the three facts that make two sorties of one day two rows and not one */
-  const curTrip = (e) => [String(e.kind || ""), String(e.category || ""),
+  const curTrip = (e) => [String(e.kind || ""), String(e.s_category || ""),
                           String(e.date || "")].join("|");
   /* SEQ IS AUTHORED — the box is on the row and the instructor may change it —
      but the form never hands him a number the server is about to refuse. When a
@@ -430,10 +420,10 @@ WA.renderInstructor = async function (view, me, opts) {
      (currency[2].date)» is an address, and this is a sentence. */
   function curIncomplete() {
     return C.rows.map((e, i) => ({ e, i })).filter(({ e }) =>
-        !curBlank(e) && (!e.date || !e.kind || !e.category)).map(({ e, i }) => {
+        !curBlank(e) && (!e.date || !e.kind || !e.s_category)).map(({ e, i }) => {
       const miss = [!e.date ? "a date" : "",
                     !e.kind ? "whether it was your own flight or one with a student" : "",
-                    !e.category ? "ΑΕΡΟΣ or F/S" : ""].filter(Boolean);
+                    !e.s_category ? "which Σ category it was" : ""].filter(Boolean);
       const nm = WA.rowLabel(CUR_SEC, e) ||
         (e.e_items || []).map(WA.eItemCode).join(" · ") || "a new flight";
       return { i, text: nm + " — still needs " + miss.join(" and ") };
@@ -452,13 +442,16 @@ WA.renderInstructor = async function (view, me, opts) {
     setTimeout(() => tr.classList.remove("is-problem"), 4000);
   }
 
-  function curEventOptions(e) {
-    const has = {};
-    for (const id of (e.e_items || [])) has[id] = true;
-    return `<option value="" selected>&mdash; add an event &mdash;</option>` +
-      WA.E_ITEMS.filter((it) => !has[it.id]).map((it) =>
-        `<option value="${esc(it.id)}">${esc(it.c + " — " + it.n)}</option>`).join("");
-  }
+  /* ── ROUND 20 — THE E CELL SAYS «MANY», AND IT SAYS IT FIRST ─────────────
+     «δυνατότητα πολλαπλών Ε». Multi-E has been in the data since round 19; what
+     was missing was any sign of it. The cell offered a «— add an event —»
+     select — a list of ONE that happens to be repeatable, which is what a form
+     looks like when it does not take many — so a sortie that exercised four
+     events was recorded with one. The select is gone: the cell now carries a
+     COUNT CHIP and one button that opens the picker (WA.pickEvents), which puts
+     all 27 on screen at once with a filter over them, exactly as the FDMS
+     dialog does. The chips stay, and each keeps its own ✕: taking one event off
+     a sortie is a single gesture and should not require opening a dialog. */
   function curEventsCell(i, e) {
     const ids = e.e_items || [];
     const chips = ids.map((id, k) => {
@@ -468,23 +461,71 @@ WA.renderInstructor = async function (view, me, opts) {
         : `<button type="button" class="x" data-curerm="${esc(i)}:${esc(k)}"
                    aria-label="Remove ${esc(WA.eItemCode(id))}">&#10005;</button>`}</span>`;
     }).join("");
-    return `<div class="ms-chips">${ids.length > 1
-        ? `<span class="ms-n">${esc(ids.length)}</span>` : ""}${chips
-        || `<span class="ms-none">${curRO ? "no event recorded" : "no event yet"}</span>`}</div>` +
-      (curRO ? "" : `<select class="ms-add" data-curadd="${esc(i)}"
-         aria-label="Add an event to this flight">${curEventOptions(e)}</select>`);
+    const countTip = ids.length
+      ? ids.length + " of the " + WA.E_ITEMS.length + " events of the 3-01 are recorded on this sortie: " +
+        ids.map(WA.eItemText).join(" · ")
+      : "No event is recorded on this sortie. A sortie that exercised none is still a sortie — " +
+        "this is a valid row, not an unfinished one.";
+    return `<div class="ms-chips">${ids.length
+        ? `<span class="ms-n" title="${esc(countTip)}">${esc(ids.length)}</span>` : ""}${chips
+        || `<span class="ms-none" title="${esc(countTip)}">${curRO ? "no event recorded" : "no event yet"}</span>`}</div>` +
+      (curRO ? "" : `<button type="button" class="btn btn-sm ms-pick" data-curepick="${esc(i)}"
+         title="${esc("Opens the EVENTS table of the 3-01 (Ch.4 §48) — all " + WA.E_ITEMS.length +
+                      " of them, with a filter — and you tick every event this sortie exercised. " +
+                      "A sortie exercises as many as it exercises; nothing is written until you press Done.")}"
+         aria-label="Choose the events of this flight">${ids.length
+           ? "&#9998; " + ids.length + " event" + (ids.length === 1 ? "" : "s")
+           : "+ events"}</button>`);
+  }
+  /* ── ROUND 20 — THE CATEGORY BOX, GROUPED BY THE TABLE IT IS PRINTED IN ──
+     Twelve printed rows plus FDMS's two columns is a list an <optgroup> makes
+     readable and a flat list does not: ΑΕΡΟΣ (Πίνακας 9) above, F/S (Πίνακας 6)
+     below, in the order the 3-01 prints them. THE LEGACY IDS ARE NOT OFFERED —
+     they may be stored and must never be chosen — but a row that HOLDS one
+     keeps it selectable in its own box, marked, so the value is visible and can
+     be corrected instead of vanishing the moment the select is drawn. */
+  function curCatOptions(e) {
+    const cur = String(e.s_category || "");
+    /* the Test-Pilot mark is a HINT and not a gate (the option is offered to
+       everybody — see the generator's argument), and it is added only where the
+       printed name does not already carry it: SIM-ΔΑ's own name ends in «(Test
+       Pilots only)», and «(Test Pilots only) (Test Pilots)» is what a rule
+       applied without looking at its subject reads like. */
+    const opt = (c) => `<option value="${esc(c.id)}"${cur === c.id ? " selected" : ""}
+        title="${esc(WA.sCatTip(c.id))}">${esc(c.c + " — " + c.n)}${
+        (c.tp && !/test pilot/i.test(c.n)) ? " (Test Pilots)" : ""}</option>`;
+    const grp = (g) => {
+      const items = WA.sCatOptions().filter((c) => c.g === g);
+      if (!items.length) return "";
+      return `<optgroup label="${esc(WA.currencyCatLabel(g) + " — " +
+        (g === "aeros" ? "Πίνακας 9, the air programme" : "Πίνακας 6, the simulator"))}">${
+        items.map(opt).join("")}</optgroup>`;
+    };
+    const lost = cur && !WA.sCat(cur)
+      ? `<option value="${esc(cur)}" selected>${esc(cur)} &mdash; not in the 3-01 list</option>` : "";
+    const legacy = WA.sCatIsLegacy(cur)
+      ? `<optgroup label="Recorded before the Σ taxonomy">
+           <option value="${esc(cur)}" selected title="${esc(WA.sCatTip(cur))}">${
+             esc(WA.sCatText(cur))}</option></optgroup>` : "";
+    return `<option value=""${cur ? "" : " selected"}>&mdash; choose &mdash;</option>` +
+      lost + legacy + grp("aeros") + grp("fs");
   }
   function curRowHTML(e, i) {
+    const legacy = WA.sCatIsLegacy(e.s_category);
     if (curRO) {
-      return `<tr>
+      return `<tr${legacy ? ` class="is-legacy"` : ""}>
         <td>${esc(e.date ? fmtD(e.date) : "—")}</td>
         <td>${esc(WA.currencyKindLabel(e.kind))}</td>
-        <td title="${esc((WA.currencyCat(e.category) || {}).tip || "")}">${esc(WA.currencyCatLabel(e.category))}</td>
+        <td title="${esc(WA.sCatTip(e.s_category))}">${esc(e.s_category
+          ? WA.sCatText(e.s_category) : "—")}</td>
+        <td title="${esc((WA.currencyCat(WA.sCatGroup(e.s_category)) || {}).tip ||
+          "The programme is read off the Σ category.")}">${esc(e.s_category
+          ? WA.sCatGroupLabel(e.s_category) : "—")}</td>
         <td class="num">${esc(WA.curSeq(e))}</td>
         <td class="ecell">${curEventsCell(i, e)}</td>
       </tr>`;
     }
-    return `<tr data-currow="${esc(i)}">
+    return `<tr data-currow="${esc(i)}"${legacy ? ` class="is-legacy"` : ""}>
       <td><input type="date" data-curf="${esc(i)}:date" value="${esc(e.date || "")}"
                  aria-label="Date of the flight"></td>
       <td><select data-curf="${esc(i)}:kind" aria-label="Whose flight this was">
@@ -492,14 +533,16 @@ WA.renderInstructor = async function (view, me, opts) {
         ${WA.CURRENCY_KINDS.map((k) => `<option value="${esc(k.id)}"${
           e.kind === k.id ? " selected" : ""} title="${esc(k.tip)}">${esc(k.label)}</option>`).join("")}
       </select></td>
-      <td><select data-curf="${esc(i)}:category" aria-label="Aircraft or simulator">
-        <option value=""${e.category ? "" : " selected"}>&mdash; choose &mdash;</option>
-        ${WA.CURRENCY_CATS.map((c) => `<option value="${esc(c.id)}"${
-          e.category === c.id ? " selected" : ""} title="${esc(c.tip)}">${esc(c.label + " — " + c.en)}</option>`).join("")}
-      </select></td>
+      <td><select class="catbox" data-curf="${esc(i)}:s_category"
+             title="${esc(WA.sCatTip(e.s_category))}"
+             aria-label="Which Σ category this sortie was">${curCatOptions(e)}</select></td>
+      <td class="prog" title="${esc(e.s_category
+          ? ((WA.currencyCat(WA.sCatGroup(e.s_category)) || {}).tip || "")
+          : "The programme is read off the Σ category — choose one and it fills itself.")}">${esc(
+          e.s_category ? WA.sCatGroupLabel(e.s_category) : "—")}</td>
       <td class="num"><input type="number" min="1" max="9" step="1" class="seqbox"
              data-curf="${esc(i)}:seq" value="${esc(WA.curSeq(e))}"
-             title="${esc("Which flight of that day this is, for that kind and that programme. It is 1 unless you flew the same thing twice on the same day; the form takes the next free number when it has to.")}"
+             title="${esc("Which flight of that day this is, for that kind and that Σ category. It is 1 unless you flew the same thing twice on the same day; the form takes the next free number when it has to.")}"
              aria-label="Which flight of the day"></td>
       <td class="ecell">${curEventsCell(i, e)}</td>
       <td><button type="button" class="btn btn-sm btn-x" data-curdel="${esc(i)}"
@@ -517,18 +560,24 @@ WA.renderInstructor = async function (view, me, opts) {
       <thead><tr>
         <th>Date</th>
         <th title="${esc("Your own sortie, or one flown with a student. Neither of them names the student: their flight is recorded on their own form.")}">Flight</th>
-        <th title="${esc("ΑΕΡΟΣ — the semester air programme (Πίνακας 9 of the 3-01). F/S — the semester simulator programme (Πίνακας 6). The squadron counts the two separately.")}">Programme</th>
-        <th class="num" title="${esc("Which flight of that day — 1, and 2 for a second sortie of the same kind and programme on the same date.")}">#</th>
-        <th title="${esc("The events of the 3-01 EVENTS table (Ch.4 §48) this sortie exercised — the closed list of " + WA.E_ITEMS.length + " the register is built on. It may be left empty.")}">E-items</th>
+        <th title="${esc("WHICH SORTIE it was: the printed rows of Πίνακας 9 (Σ-1 · Σ-2 day · Σ-2 night · Σ-3 · Σ-4 · Σ-20) and of Πίνακας 6 (SIM-1 … SIM-ΔΑ), plus the two columns FDMS keeps for a night sortie with students and for an FCF. This is the fact the squadron's currency register is keyed by.")}">Σ category</th>
+        <th title="${esc("ΑΕΡΟΣ — the semester air programme (Πίνακας 9 of the 3-01). F/S — the semester simulator programme (Πίνακας 6). It is READ OFF the Σ category and never typed: one fact cannot be two answers.")}">Programme</th>
+        <th class="num" title="${esc("Which flight of that day — 1, and 2 for a second sortie of the same kind and Σ category on the same date.")}">#</th>
+        <th title="${esc("The events of the 3-01 EVENTS table (Ch.4 §48) this sortie exercised — the closed list of " + WA.E_ITEMS.length + " the register is built on. A sortie may exercise MANY, and one that exercised none is still a sortie.")}">E-items</th>
         ${curRO ? "" : "<th></th>"}
       </tr></thead>
       <tbody>${ord.map(({ e, i }) => curRowHTML(e, i)).join("")}</tbody>
     </table></div>`;
   }
+  /* HOW MANY ROWS STILL CARRY A LEGACY CATEGORY — the rows round 19 stored with
+     a programme and no Σ. They are not a fault to hide: they are work somebody
+     owes, so the card says how many there are and the table marks each one. */
+  const curLegacy = () => curLive().filter((e) => WA.sCatIsLegacy(e.s_category));
   function curCardHTML() {
     const live = curLive();
     const n = live.length;
     const ev = live.reduce((a, e) => a + (e.e_items || []).length, 0);
+    const leg = curLegacy().length;
     return `
       <section class="card" id="ins-cur">
         <div class="idhead">
@@ -536,6 +585,11 @@ WA.renderInstructor = async function (view, me, opts) {
           <span class="meta">${n
             ? esc(n + " flight" + (n === 1 ? "" : "s") + " · " + ev + " event" + (ev === 1 ? "" : "s"))
             : "nothing recorded yet"}</span>
+          ${leg ? `<span class="badge badge-bad" title="${esc(
+            leg + " row" + (leg === 1 ? "" : "s") + " recorded before the Σ taxonomy existed (round 19): " +
+            "the programme was stored and the category was not. Nobody can tell from a date whether a " +
+            "sortie was a Σ-1 or a Σ-3, so the form will not guess — pick the right category on " +
+            (leg === 1 ? "that row" : "those rows") + " and press Save.")}">${esc(leg)} without a Σ</span>` : ""}
           <span class="badge${n ? " badge-good" : ""}"
             title="${esc(curSavedAt
               ? "Last saved " + fmtDT(curSavedAt)
@@ -546,12 +600,14 @@ WA.renderInstructor = async function (view, me, opts) {
           ? "<b>Read-only.</b> An instructor's currency is a claim about who flew what, so it can only be entered from his own link &mdash; the server has no path for anybody else to write it. Everything below is what he recorded himself."
           : "Your own flying, for the squadron's currency register &mdash; the bridge into FDMS. " +
             "One row per sortie: the day, whether it was <b>your own flight</b> or one <b>with a student</b>, " +
-            "whether it was flown in the aircraft (<b>ΑΕΡΟΣ</b>) or in the simulator (<b>F/S</b>), " +
-            "and the <b>E-items</b> of the 3-01 it exercised. A flight that exercised no event is still a flight. " +
+            "<b>which Σ category</b> it was &mdash; the printed rows of Πίνακας 9 (ΑΕΡΟΣ) and Πίνακας 6 (F/S) " +
+            "&mdash; and the <b>E-items</b> of the 3-01 it exercised, as many as it exercised. " +
+            "The programme is read off the category, so there is nothing to say twice. " +
+            "A flight that exercised no event is still a flight. " +
             "This names no student and changes no student&rsquo;s record."}</p>
         ${curTableHTML()}
         ${curRO ? "" : `<div class="addrow"><button type="button" class="btn btn-sm btn-add"
-            id="cur-add" title="${esc("Adds one flight of your own. Nothing is filled in for you: a date, a kind and a programme are facts, and the form assumes none of them.")}"
+            id="cur-add" title="${esc("Adds one flight of your own. Nothing is filled in for you: a date, a kind and a Σ category are facts, and the form assumes none of them.")}"
             >+ flight</button></div>`}
       </section>`;
   }
@@ -605,77 +661,192 @@ WA.renderInstructor = async function (view, me, opts) {
       </section>`;
   }
 
+  /* ══════════════════════════════════════════════════════════════════════════
+     ROUND 20 — THE LANDING, AND THE TWO DOORS.
+     ──────────────────────────────────────────────────────────────────────────
+     RULING (2026-08-27): «το landing page να έχει τα στοιχεία αυτού που μπαίνει,
+     ώστε να κάνει και επιβεβαίωση, και να έχουμε μήνυμα καλωσορίσματος. Και μετά
+     δύο επιλογές: My currency, Student Assessment. Τώρα είναι μπερδεμένα.»
+
+     WHAT WAS CONFUSED, AND WHY. Round 19 put the instructor's own currency at
+     the bottom of the assessment form because there was nowhere else to put it,
+     and the page became two different jobs in one scroll: a questionnaire about
+     twelve other people, and a logbook about himself. They share a link and
+     nothing else — different subject, different verb, different Save — and a
+     reader who opens the link is given no moment in which to notice that.
+
+     SO THE LINK OPENS ON NEITHER. It opens on WHO YOU ARE: rank and full name
+     as the roster holds them, the duty line, and the class the squadron is
+     asking about — and it says so as a CONFIRMATION, with the sentence that
+     makes it actionable («if this is not you, close the page»). A personal link
+     that is forwarded, pasted into the wrong chat or opened on a shared machine
+     is the one failure this application cannot detect and the holder can, in
+     one glance, which is what the welcome is for.
+
+     AND THEN TWO DOORS, EACH ITS OWN VIEW. Each carries its own back control,
+     its own Save and its own count of unsaved work; the landing shows both
+     counts, so an instructor who left something half-typed behind one door is
+     told which door. The doors are HASH SUB-ROUTES (app.js → WA.doorHash), so
+     one can be bookmarked and Back returns through them.
+     ══════════════════════════════════════════════════════════════════════════ */
+  const DOOR_META = {
+    assess: {
+      label: "Student Assessment",
+      sub: scope ? "Class " + scope : "the class that is finishing",
+      icon: "&#9733;",
+      what: "The utilization assessment the Wing Commander brief is built from &mdash; " +
+            "one answer per student, about fighters, on the five-level scale.",
+    },
+    currency: {
+      label: WA.secLabel(CUR_SEC),
+      sub: "your own flying",
+      icon: "&#9992;",
+      what: "Your own sorties for the squadron&rsquo;s currency register &mdash; the day, the " +
+            "Σ category and the E-items. It names no student and changes nobody&rsquo;s record.",
+    },
+  };
+  /* WHICH DOOR IS OPEN — "" is the landing. It is read from the hash on every
+     change and never held anywhere else, so the address bar is the truth. */
+  let door = WA.doorFromHash ? WA.doorFromHash() : "";
+  const isDoor = (d) => door === d;
+
   /* NO STUDENTS, NO RAIL — AND THEN NO GRID EITHER. `.pagelay` is a two-column
      grid whose first column is the 224 px rail; with the rail absent the form
      would be placed in THAT column and rendered 224 px wide. So the wrapper is
      only a layout when there is something to lay out, and the empty form falls
-     back to exactly the markup it had before this round: a plain `.wrap`. */
+     back to exactly the markup it had before round 17: a plain `.wrap`. */
   const railed = data.students.length > 0;
+  const coBar = asCO ? `
+    <div class="cobar" role="note">
+      <span class="cotag">${esc(WA.ADMIN_TAG)}</span>
+      <div class="cotxt"><b>Entering as ${esc(WA.adminRankName())}</b>
+        &mdash; you are filling in the assessments of
+        <b>${esc(WA.personName(who, true))}</b> &mdash; everything you save here is tagged
+        <b>&ldquo;entered by ${esc(WA.ADMIN_WORD)}&rdquo;</b> and shown as such everywhere, until
+        ${esc(who.last_name || "the instructor")} saves the same assessment themselves.</div>
+      ${backBtn}
+    </div>` : "";
+  /* the control that returns to the landing — one per door, at the TOP of it,
+     because that is where a reader who wants out is already looking */
+  const homeBar = (d) => `
+    <div class="doorbar">
+      <button type="button" class="btn btn-sm" data-door=""
+        title="${esc("Back to the welcome page, where both doors are. Nothing is saved or discarded by going back — whatever you have typed is still here when you return.")}"
+        >&#8592; ${esc(asCO ? "All of this instructor’s sections" : "My sections")}</button>
+      <span class="doorttl">${DOOR_META[d].icon} <b>${esc(DOOR_META[d].label)}</b>
+        <span class="k">&mdash; ${esc(DOOR_META[d].sub)}</span></span>
+    </div>`;
+  /* one door, as a big clear tile. The unsaved count rides on it: the landing
+     is where an instructor decides where to go, and «3 unsaved» is the fact
+     that decides it. */
+  function doorTile(d, n) {
+    const m = DOOR_META[d];
+    return `
+      <button type="button" class="doortile" data-door="${esc(d)}"
+        title="${esc(m.label + " — " + m.sub + ". " + m.what.replace(/&mdash;/g, "—").replace(/&rsquo;/g, "'"))}">
+        <span class="dt-ic" aria-hidden="true">${m.icon}</span>
+        <span class="dt-t">${esc(m.label)}</span>
+        <span class="dt-s">${esc(m.sub)}</span>
+        <span class="dt-w">${m.what}</span>
+        <span class="dt-b">${n
+          ? `<span class="badge badge-warn">${esc(n)} unsaved</span>`
+          : `<span class="badge">open</span>`}</span>
+      </button>`;
+  }
   view.innerHTML = `
-    <div class="${railed ? "pagelay lay-read" : "lay-none"}" id="ins-lay">
-    ${railed
-      ? WA.navHTML("ins-nav", navItems(), {
-          title: scope ? "Class " + scope : "Students",
-          aria: (asCO ? "This instructor’s students" : "Your students") +
-                (scope ? " — class " + scope : "") })
-      : ""}
-    <div class="wrap lay-main screen-only" id="ins-form">
-      ${asCO ? `
-        <div class="cobar" role="note">
-          <span class="cotag">${esc(WA.ADMIN_TAG)}</span>
-          <div class="cotxt"><b>Entering as ${esc(WA.adminRankName())}</b>
-            &mdash; you are filling in the assessments of
-            <b>${esc(WA.personName(who, true))}</b> &mdash; everything you save here is tagged
-            <b>&ldquo;entered by ${esc(WA.ADMIN_WORD)}&rdquo;</b> and shown as such everywhere, until
-            ${esc(who.last_name || "the instructor")} saves the same assessment themselves.</div>
-          ${backBtn}
-        </div>` : ""}
-      <section class="card">
-        <div class="idhead">
-          <span class="nm">${esc(WA.personName(who, true))}</span>
-          <span class="meta">${esc([who.duty, who.leadership, who.status].filter(Boolean).join(" · "))}</span>
-          ${/* ROUND 18 — WHICH CLASS THIS FORM IS ABOUT, beside the name of the
-               person it belongs to, because those are the two facts that decide
-               what every card below means. */ ""}
-          ${scoped
-            ? `<span class="badge ${scope ? "badge-good" : "badge-warn"}"
-                title="${esc(SCOPE_TIP)}">${esc(scope
-                  ? "Class " + scope + " · " + data.students.length +
-                    " student" + (data.students.length === 1 ? "" : "s")
-                  : "Assessments closed")}</span>` : ""}
-        </div>
-        <p class="hint" style="margin-top:6px">${scopeLine ? `<b>${esc(scopeLine)}</b> ` : ""}
-          Utilization assessments for the Wing Commander brief.
-          For each student, ${asCO ? "record the one assessment this instructor makes" : "give the one assessment you make"}
-          <b>about fighters</b>, on the five-level scale. The number beside each level is its weight
-          &mdash; the brief averages them, so the scale says what it means without a single
-          discouraging word. Each student card also shows the data the student self-reported.
-          ${asCO ? "The instructor can overwrite any of this from their own link." : "You can return and edit any time."}</p>
+    ${/* ── THE WELCOME ────────────────────────────────────────────────── */ ""}
+    <div class="wrap screen-only" id="ins-home">
+      ${coBar}
+      <section class="card welcome">
+        <p class="wl-hi">${esc(asCO ? "Entering on behalf of" : "Welcome,")}</p>
+        <h2 class="wl-nm">${esc(WA.personName(who, true) || "instructor")}</h2>
+        <p class="wl-meta">${esc([who.duty, who.leadership, who.status,
+            WA.callSign(who) ? "call sign " + WA.callSign(who) : ""].filter(Boolean).join(" · ")
+          || "no duty recorded on the roster")}</p>
+        <p class="wl-cf">${asCO
+          ? `You are the admin, filling this in on <b>${esc(WA.personName(who, true))}</b>&rsquo;s behalf.
+             Everything you save is tagged &ldquo;entered by ${esc(WA.ADMIN_WORD)}&rdquo;.`
+          : `You are signed in as <b>${esc(WA.personName(who, true))}</b>${
+              who.mn ? ", MN " + esc(who.mn) : ""}.
+             <b>If this is not you, close this page and tell the squadron administration</b> &mdash;
+             this is a personal link and everything saved through it is recorded in your name.`}</p>
+        ${scoped ? `<p class="wl-scope ${scope ? "is-open" : "is-shut"}"
+          title="${esc(SCOPE_TIP)}">${esc(scopeLine)}${scope
+            ? " " + data.students.length + " student" +
+              (data.students.length === 1 ? " is" : "s are") + " being asked about."
+            : ""}</p>` : ""}
       </section>
-      ${data.students.length
-        ? data.students.map(stuCard).join("")
-        : `<section class="card">${scoped
-              ? `<h3>${esc(scope ? "Class " + scope + " is open — and empty"
-                                 : "Nothing to assess")}</h3>` : ""}
-             <p class="hint">${esc(emptyLine)}</p></section>`}
-      ${/* ROUND 19 — UNDER THE ASSESSMENTS, and under them even when there are
-           none: an instructor whose class is closed still flies, and his
-           currency is not a footnote to a questionnaire that is not being
-           asked. Its own holder, so the section redraws without the cards
-           under the reader's fingers. */ ""}
-      <div id="ins-cur-holder">${curCardHTML()}</div>
+      <div class="doors" role="group" aria-label="What would you like to do?">
+        ${doorTile("assess", 0)}
+        ${doorTile("currency", 0)}
+      </div>
+      <p class="hint" id="ins-home-hint">Both doors keep their own Save. Nothing is written
+        anywhere until you press it, and moving between them never discards what you have typed.</p>
     </div>
+
+    ${/* ── DOOR 1 — STUDENT ASSESSMENT ────────────────────────────────── */ ""}
+    <div class="doorpane" id="ins-pane-assess" hidden>
+      ${homeBar("assess")}
+      <div class="${railed ? "pagelay lay-read" : "lay-none"}" id="ins-lay">
+      ${railed
+        ? WA.navHTML("ins-nav", navItems(), {
+            title: scope ? "Class " + scope : "Students",
+            aria: (asCO ? "This instructor’s students" : "Your students") +
+                  (scope ? " — class " + scope : "") })
+        : ""}
+      <div class="wrap lay-main screen-only" id="ins-form">
+        <section class="card">
+          <div class="idhead">
+            <span class="nm">${esc(WA.personName(who, true))}</span>
+            <span class="meta">${esc([who.duty, who.leadership, who.status].filter(Boolean).join(" · "))}</span>
+            ${/* ROUND 18 — WHICH CLASS THIS FORM IS ABOUT, beside the name of the
+                 person it belongs to, because those are the two facts that decide
+                 what every card below means. */ ""}
+            ${scoped
+              ? `<span class="badge ${scope ? "badge-good" : "badge-warn"}"
+                  title="${esc(SCOPE_TIP)}">${esc(scope
+                    ? "Class " + scope + " · " + data.students.length +
+                      " student" + (data.students.length === 1 ? "" : "s")
+                    : "Assessments closed")}</span>` : ""}
+          </div>
+          <p class="hint" style="margin-top:6px">${scopeLine ? `<b>${esc(scopeLine)}</b> ` : ""}
+            Utilization assessments for the Wing Commander brief.
+            For each student, ${asCO ? "record the one assessment this instructor makes" : "give the one assessment you make"}
+            <b>about fighters</b>, on the five-level scale. The number beside each level is its weight
+            &mdash; the brief averages them, so the scale says what it means without a single
+            discouraging word. Each student card also shows the data the student self-reported.
+            ${asCO ? "The instructor can overwrite any of this from their own link." : "You can return and edit any time."}</p>
+        </section>
+        ${data.students.length
+          ? data.students.map(stuCard).join("")
+          : `<section class="card">${scoped
+                ? `<h3>${esc(scope ? "Class " + scope + " is open — and empty"
+                                   : "Nothing to assess")}</h3>` : ""}
+               <p class="hint">${esc(emptyLine)}</p></section>`}
+      </div>
+      </div>
     </div>
+
+    ${/* ── DOOR 2 — MY CURRENCY ───────────────────────────────────────── */ ""}
+    <div class="doorpane" id="ins-pane-currency" hidden>
+      ${homeBar("currency")}
+      <div class="wrap screen-only" id="ins-cur-holder">${curCardHTML()}</div>
+    </div>
+
     ${/* ROUND 14 — ONE SAVE, and it is the student form's floating pattern:
          this form is one card per student and a dozen screens long, so a
          button at the bottom is a button most of the class never scrolls to.
          It says HOW MANY assessments it is about to write, because that is the
-         number the instructor is deciding about. */ ""}
+         number the instructor is deciding about.
+         ROUND 20 — AND IT BELONGS TO THE OPEN DOOR. The landing has no Save at
+         all: there is nothing on it to save, and a button that offered to write
+         work the reader cannot see from where he is standing is the confusion
+         this round was called to remove. */ ""}
     <div class="savefloat" id="ins-float" hidden>
       <span class="sf-hint" id="ins-float-hint">unsaved</span>
       <button type="button" class="btn btn-primary" id="ins-float-save">Save</button>
     </div>
-    <div class="savebar">
+    <div class="savebar" id="ins-savebar" hidden>
       ${asCO ? backBtn : ""}
       <button type="button" class="btn btn-primary" id="ins-save">Save</button>
       <span class="st" id="ins-status">Assessments are kept only after you press Save.</span>
@@ -683,22 +854,83 @@ WA.renderInstructor = async function (view, me, opts) {
     <div class="print-only" id="print-ins"></div>`;
 
   const root = $("ins-form");
-  /* the rail, mounted once and refreshed from the SAME P the cards are drawn
-     from. WA._nav is the one slot teardownView() destroys — a scroll listener
-     that outlived its cards is the only bug this component can have. The cards
-     carry ids of their own, so the panel is told how to find them instead of
-     assuming the student form's "sec-" prefix (the admin rail's precedent). */
-  const insNavEl = document.getElementById("ins-nav");
-  if (insNavEl) {
-    WA._nav = WA.navMount(insNavEl, {
+  /* ── THE RAIL LIVES AND DIES WITH ITS DOOR ────────────────────────────────
+     It is mounted when the assessment door opens and destroyed when it closes.
+     Not merely hidden: the panel keeps a SCROLL SPY on `window` that measures
+     its cards, and a hidden card measures zero — so a spy left running behind a
+     closed door would keep marking the last row as «you are here» while the
+     reader is somewhere else entirely. WA._nav is the one slot teardownView()
+     destroys, and this uses the same slot. */
+  function mountRail() {
+    if (WA._nav) return;
+    const el = document.getElementById("ins-nav");
+    if (!el) return;
+    WA._nav = WA.navMount(el, {
       items: navItems(),
       summary: navSummary,
-      /* ROUND 19 — two kinds of card, one panel: a student card is found by its
-         student id, and the currency section by its own */
-      anchor: (id) => document.getElementById(id === CUR_NAV_ID ? "ins-cur" : "ins-stu-" + id),
+      /* the cards carry ids of their own, so the panel is told how to find them
+         instead of assuming the student form's "sec-" prefix */
+      anchor: (id) => document.getElementById("ins-stu-" + id),
     });
     WA._nav.summary(navSummary());
   }
+  function unmountRail() {
+    if (!WA._nav) return;
+    WA._nav.destroy();
+    WA._nav = null;
+  }
+
+  /* ── ROUND 20 — SHOWING ONE DOOR ──────────────────────────────────────────
+     Three panes, one visible. The panes are HIDDEN and not rebuilt, because
+     everything the instructor has typed lives in their DOM (the comment boxes,
+     the half-filled currency row) and in the closures around them; rebuilding
+     on every door change would throw both away, which is the one thing the
+     rail's own destroy/mount dance is careful NOT to do.
+     THE SCROLL GOES BACK TO THE TOP, once, on an actual change: arriving in a
+     door at the scroll depth of the one just left is how a reader concludes a
+     page is broken. */
+  function showDoor(next, scroll) {
+    door = WA.DOORS.indexOf(next) >= 0 ? next : "";
+    const home = document.getElementById("ins-home");
+    if (home) home.hidden = !!door;
+    for (const d of WA.DOORS) {
+      const pane = document.getElementById("ins-pane-" + d);
+      if (pane) pane.hidden = door !== d;
+    }
+    if (door === "assess" && railed) mountRail(); else unmountRail();
+    const bar = document.getElementById("ins-savebar");
+    if (bar) bar.hidden = !door;
+    refreshSave();                                   /* which refreshes the tiles */
+    if (scroll) window.scrollTo(0, 0);
+  }
+  /* the two tiles say where the unsaved work is — the whole point of showing
+     both counts on a page that can save neither */
+  function refreshHome() {
+    const holder = document.querySelector("#ins-home .doors");
+    if (!holder) return;
+    holder.innerHTML = doorTile("assess", dirtyIds().length) + doorTile("currency", curCount());
+    const hint = document.getElementById("ins-home-hint");
+    const n = dirtyIds().length + curCount();
+    if (hint) {
+      hint.innerHTML = n
+        ? `<b>${esc(n)} unsaved change${n === 1 ? "" : "s"}</b> &mdash; each door has its own Save,
+           and the badge above says which door is holding what. Nothing is written until you press it.`
+        : `Both doors keep their own Save. Nothing is written anywhere until you press it,
+           and moving between them never discards what you have typed.`;
+    }
+  }
+  /* THE ROUTER'S HOOK. app.js offers every hash change to this before tearing
+     anything down; taking it is what makes a door a sub-route of one page
+     instead of a reload. It answers `true` only for the link it was built for —
+     a different token, or the admin leaving an on-behalf detour, must rebuild. */
+  WA._insKey = (WA.token || "") + "|" + (asCO ? "prop:" + O.targetId : "");
+  WA._insDoor = function (tok, co, next) {
+    const key = (tok || "") + "|" + (co ? co.kind + ":" + co.id : "");
+    if (key !== WA._insKey) return false;
+    if (next === door) return true;         /* already there — nothing to do */
+    showDoor(next, true);
+    return true;
+  };
 
   /* ══════════════════════════════════════════════════════════════════════════
      THE PRINTED ASSESSMENT SHEET (round 8, rewritten for round 10).
@@ -778,11 +1010,13 @@ WA.renderInstructor = async function (view, me, opts) {
             <span class="pr-ins-meta">own flying &mdash; the squadron&rsquo;s currency register</span></h3>
           ${curLive().length
             ? `<table class="pr-t"><thead><tr>
-                 <th>Date</th><th>Flight</th><th>Programme</th><th>#</th><th>E-items</th>
+                 <th>Date</th><th>Flight</th><th>Σ category</th><th>Programme</th>
+                 <th>#</th><th>E-items</th>
                </tr></thead><tbody>${WA.curSort(curLive()).map(({ e }) => `<tr>
                  <td>${esc(e.date ? fmtD(e.date) : "—")}</td>
                  <td>${esc(WA.currencyKindLabel(e.kind))}</td>
-                 <td>${esc(WA.currencyCatLabel(e.category))}</td>
+                 <td>${esc(e.s_category ? WA.sCatText(e.s_category) : "—")}</td>
+                 <td>${esc(e.s_category ? WA.sCatGroupLabel(e.s_category) : "—")}</td>
                  <td>${esc(WA.curSeq(e))}</td>
                  <td>${esc((e.e_items || []).map(WA.eItemCode).join(" · ") || "—")}</td>
                </tr>`).join("")}</tbody></table>`
@@ -858,13 +1092,22 @@ WA.renderInstructor = async function (view, me, opts) {
     refreshNav();
     refreshSave();
   }
-  /* ── ROUND 19 — THE SAVE COUNTS BOTH THINGS THIS FORM HOLDS ───────────────
-     The button has said «Save 3 assessments» since round 14 and that sentence
-     is kept EXACTLY where it is still the whole truth. The moment the currency
-     section is dirty too, it stops being the whole truth — so the word grows a
-     second half rather than being replaced by a vaguer one: «Save 3 assessments
-     + 2 currency changes» says what will be written, in the two units the
-     instructor was working in. */
+  /* ── ROUND 19 SAID BOTH NUMBERS, ROUND 20 SAYS THE OPEN ONE ───────────────
+     Round 19's button read «Save 3 assessments + 2 currency changes», and that
+     was the honest sentence for a page that held both at once. The doors made
+     it dishonest in the only way that matters: from inside «My currency» it
+     offered to write twelve assessments the reader cannot see, cannot check and
+     did not come here to think about — and a confirmation dialog listing them
+     is not consent, it is a surprise with a list attached.
+     SO THE SAVE BELONGS TO THE OPEN DOOR, and the sentence grammar of round 19
+     is kept EXACTLY as it was for the case each door produces: one of the two
+     numbers is simply zero. The other door's unsaved work is not lost and not
+     hidden — it is counted on its tile on the landing, and the leave-the-page
+     guard still asks about both. */
+  const doorCounts = () => ({
+    a: door === "assess" ? dirtyIds().length : 0,
+    c: door === "currency" ? curCount() : 0,
+  });
   function curCount() { return curRO ? 0 : curChanges().length; }
   function saveWords(nA, nC) {
     const a = nA + " assessment" + (nA === 1 ? "" : "s");
@@ -884,8 +1127,7 @@ WA.renderInstructor = async function (view, me, opts) {
     return saveWords(nA, 0) + " changed — press Save.";
   }
   function refreshSave() {
-    const nA = dirtyIds().length;
-    const nC = curCount();
+    const { a: nA, c: nC } = doorCounts();
     const n = nA + nC;
     const word = "Save " + saveWords(nA, nC) + (asCO ? " as admin" : "");
     for (const id of ["ins-save", "ins-float-save"]) {
@@ -895,21 +1137,43 @@ WA.renderInstructor = async function (view, me, opts) {
       b.disabled = !n;
     }
     const f = document.getElementById("ins-float");
-    if (f) f.hidden = !n;
+    if (f) f.hidden = !n || !door;
     const h = document.getElementById("ins-float-hint");
     if (h) h.textContent = n + " unsaved";
     const st = document.getElementById("ins-status");
     if (st && !st.classList.contains("ok") && !st.classList.contains("err")) {
       st.textContent = n
         ? statusWords(nA, nC)
-        : "Assessments are kept only after you press Save.";
+        : (door === "currency"
+            ? "Your flights are kept only after you press Save."
+            : "Assessments are kept only after you press Save.");
     }
     /* the floating bar clears the sticky top bar, whatever height it wrapped
        to on this screen (the round-9 measurement, not a hardcoded offset) */
     if (f) f.style.top = (WA.measureTopbar() + 10) + "px";
+    /* and the landing's two badges follow the same numbers — they are the same
+       question asked from one step further back, so they are answered here */
+    refreshHome();
   }
 
-  root.addEventListener("click", async (ev) => {
+  /* ROUND 20 — ONE DELEGATION HOST FOR THE WHOLE VIEW. Round 19 hung this on
+     `#ins-form`, which was the one element both sections lived inside; the
+     currency now lives in a different pane, so the host moves up to the view
+     itself. Nothing else changes: every branch still tests its own attribute,
+     and the modal is appended to document.body, out of this tree entirely. */
+  view.addEventListener("click", async (ev) => {
+    /* ── THE DOORS ──────────────────────────────────────────────────────────
+       A door click ONLY sets the hash. The hash change comes back through
+       app.js → route() → WA._insDoor → showDoor, so the click, the Back button,
+       a bookmark and a reload are one path with one behaviour — and the address
+       bar is never a step behind what is on screen. */
+    const doorBtn = ev.target.closest("[data-door]");
+    if (doorBtn) {
+      const want = doorBtn.dataset.door || "";
+      if (want === door) { showDoor(want, true); return; }
+      location.hash = WA.doorHash(want);
+      return;
+    }
     /* THE ASSESSMENT — and its one non-native gesture: clicking the level that
        is already chosen CLEARS it, returning the student to "no view formed
        yet". A radio group cannot be emptied by keyboard or mouse on its own,
@@ -925,20 +1189,20 @@ WA.renderInstructor = async function (view, me, opts) {
       markDirty(sid);
       return;
     }
-    /* ── ROUND 19 — THE THREE ACTS OF THE CURRENCY TABLE ────────────────────
-       Add a flight · remove a flight · take an event off a flight. All three
-       are ACTS on the working rows followed by ONE redraw of the section's own
-       holder, so the student cards above never move under the reader. */
+    /* ── ROUND 19 — THE ACTS OF THE CURRENCY TABLE ──────────────────────────
+       Add a flight · remove a flight · take one event off a flight · (round 20)
+       open the event picker. All of them are ACTS on the working rows followed
+       by ONE redraw of the section's own holder. */
     if (curRO) return;
     if (ev.target.closest("#cur-add")) {
       if (C.rows.length >= WA.INS_SECTION_CAP(CUR_SEC)) {
         toast("Your currency is full (" + WA.INS_SECTION_CAP(CUR_SEC) + " flights)", true);
         return;
       }
-      /* NOTHING IS FILLED IN. A date, a kind and a programme are FACTS, and a
+      /* NOTHING IS FILLED IN. A date, a kind and a Σ category are FACTS, and a
          form that guesses one of them for an instructor has put a flight in his
          logbook that he did not fly. The row says what it still needs. */
-      C.rows.push({ date: "", kind: "", category: "", seq: 1, e_items: [] });
+      C.rows.push({ date: "", kind: "", s_category: "", seq: 1, e_items: [] });
       curRedraw(`[data-currow="${C.rows.length - 1}"] input[type="date"]`);
       return;
     }
@@ -961,7 +1225,34 @@ WA.renderInstructor = async function (view, me, opts) {
       const ids = (row.e_items || []).slice();
       ids.splice(Number(k), 1);
       row.e_items = ids;
-      curRedraw(`[data-curadd="${Number(ix)}"]`);
+      curRedraw(`[data-curepick="${Number(ix)}"]`);
+      return;
+    }
+    /* ── ROUND 20 — THE PICKER ──────────────────────────────────────────────
+       «δυνατότητα πολλαπλών Ε». One dialog, every event on screen, a filter
+       over them and a count of what is ticked. It resolves to the whole list,
+       so the row is REPLACED rather than added to — which is what makes
+       unticking work at all, and what a «Clear all» needs to mean something. */
+    const pick = ev.target.closest("[data-curepick]");
+    if (pick) {
+      const i = Number(pick.dataset.curepick);
+      const row = C.rows[i];
+      if (!row) return;
+      const before = (row.e_items || []).slice();
+      const got = await WA.pickEvents({
+        selected: before,
+        what: (WA.rowLabel(CUR_SEC, row) ? WA.rowLabel(CUR_SEC, row) + ". " : ""),
+      });
+      if (got === null) return;                       /* Cancel really cancels */
+      row.e_items = got;
+      curRedraw(`[data-curepick="${i}"]`);
+      const d = got.length - before.length;
+      if (d !== 0) {
+        toast(got.length
+          ? got.length + " event" + (got.length === 1 ? "" : "s") +
+            " on this flight — press Save to keep the change"
+          : "No event on this flight now — a sortie that exercised none is still a sortie");
+      }
       return;
     }
   });
@@ -986,27 +1277,16 @@ WA.renderInstructor = async function (view, me, opts) {
     }
     if (String(row[field] === undefined ? "" : row[field]) === String(v)) return false;
     row[field] = v;
-    /* the row may have just landed on another one's day, kind and programme */
+    /* the row may have just landed on another one's day, kind and Σ category */
     const moved = curFixSeq(i);
     if (moved) {
-      toast("A flight of " + fmtD(row.date) + " (" + WA.currencyCatLabel(row.category) +
+      toast("A flight of " + fmtD(row.date) + " (" + WA.sCatCode(row.s_category) +
         ", " + WA.currencyKindLabel(row.kind) + ") is already recorded — this one is #" + moved);
     }
     curRedraw(`[data-curf="${i}:${field}"]`);
     return true;
   }
-  root.addEventListener("change", (ev) => {
-    const el = ev.target;
-    if (el && el.dataset && el.dataset.curadd !== undefined && el.value) {
-      const i = Number(el.dataset.curadd);
-      const row = C.rows[i];
-      if (!row) return;
-      row.e_items = WA.eItemsOf({ e_items: (row.e_items || []).concat([el.value]) });
-      curRedraw(`[data-curadd="${i}"]`);
-      return;
-    }
-    curField(el);
-  });
+  view.addEventListener("change", (ev) => { curField(ev.target); });
 
   /* ── ROUND 14 — THE ONE GENERAL SAVE ──────────────────────────────────────
      ONE ACT, ONE STUDENT AT A TIME ON THE WIRE. There is deliberately no batch
@@ -1049,16 +1329,20 @@ WA.renderInstructor = async function (view, me, opts) {
     }
   }
 
-  async function saveAll(ids) {
+  /* ROUND 20 — `withCur` is the OPEN DOOR, passed in rather than read here, so
+     the one function that writes cannot disagree with the button that counted.
+     From «Student Assessment» it is false and the currency is not touched at
+     all; from «My currency» `ids` is empty and the loop below does not run. */
+  async function saveAll(ids, withCur) {
     const st = $("ins-status");
     const btns = [$("ins-save"), document.getElementById("ins-float-save")].filter(Boolean);
     btns.forEach((b) => { b.disabled = true; });
     st.className = "st";
-    st.textContent = "Saving " + (ids.length + curCount()) + "…";
+    st.textContent = "Saving " + (ids.length + (withCur ? curCount() : 0)) + "…";
     let ok = 0;
     const failed = [];
-    const curWas = curCount();
-    const curErr = await saveCurrency();
+    const curWas = withCur ? curCount() : 0;
+    const curErr = withCur ? await saveCurrency() : null;
     const curOk = curWas && !curErr ? curWas : 0;
     for (const sid of ids) {
       const cst = root.querySelector(`[data-st="${sid}"]`);
@@ -1132,29 +1416,33 @@ WA.renderInstructor = async function (view, me, opts) {
         : saveWords(ok, curOk) + " saved");
     }
   }
-  /* the change list, then the write — «ποιος εγραψε … και σε σχεση με τι» */
+  /* the change list, then the write — «ποιος εγραψε … και σε σχεση με τι»
+     ROUND 20 — AND THE LIST IS THE OPEN DOOR'S. The diff BUILDERS are unchanged
+     and still shared (WA.proposalChanges for the assessments, WA.recordChanges
+     through curChanges() for the flights): what the door decides is which of
+     them the dialog is asked for, not how either is written. */
   async function confirmedSaveAll() {
-    const ids = dirtyIds();
-    const curCh = curRO ? [] : curChanges();
+    const inCur = door === "currency";
+    const ids = inCur ? [] : dirtyIds();
+    const curCh = (inCur && !curRO) ? curChanges() : [];
     if (!ids.length && !curCh.length) return;
     const before = {}, after = {};
     for (const sid of ids) { before[sid] = savedStateOf(sid); after[sid] = stateOf(sid); }
-    /* ROUND 19 — ONE LIST, TWO KINDS OF LINE. The assessments name a student
-       and what changed about him; the currency rows name themselves through the
-       SAME builder every other record in this application uses (WA.rowLabel →
-       «My currency · own · ΑΕΡΟΣ · 26/08/2026 #2 — added (E-items Ε-1α · Ε-32)»),
-       so nothing about this section had to be described twice. */
+    /* ROUND 19 — the currency rows name themselves through the SAME builder
+       every other record in this application uses (WA.rowLabel → «My currency ·
+       own · Σ-3 — Air-to-Ground missions, day/night · 26/08/2026 #2 — added
+       (E-items Ε-1α · Ε-32)»), so nothing about this section had to be
+       described twice. */
     const changes = WA.proposalChanges(before, after, nameOf).concat(curCh);
     const ans = await WA.confirmSave({
       who: WA.personRankName(WA.me || {}),
       onBehalf: asCO ? WA.personRankName(who) : "",
       title: "Save " + saveWords(ids.length, curCh.length) + "?",
-      what: (asCO
-        ? "These are recorded as this instructor’s assessments and tagged “entered by " + WA.ADMIN_WORD + "”. Every one of them is about FIGHTERS, on the five-level scale."
-        : "These are your assessments for the Wing Commander brief — one answer per student, about FIGHTERS, on the five-level scale.") +
-        (curCh.length
-          ? " The currency rows are your own flying: they name no student, they change no student’s record, and they are what the squadron’s currency register reads."
-          : ""),
+      what: inCur
+        ? "These are your own flights for the squadron’s currency register — the bridge into FDMS. Each row names the day, the Σ category of Πίνακας 9 / Πίνακας 6 and the E-items it exercised. They name no student, and they change no student’s record."
+        : (asCO
+            ? "These are recorded as this instructor’s assessments and tagged “entered by " + WA.ADMIN_WORD + "”. Every one of them is about FIGHTERS, on the five-level scale."
+            : "These are your assessments for the Wing Commander brief — one answer per student, about FIGHTERS, on the five-level scale."),
       savedWord: "last saved",
       changes,
     });
@@ -1173,7 +1461,7 @@ WA.renderInstructor = async function (view, me, opts) {
         markDirty(sid);
       }
       /* the currency goes back to its last saved rows by the same act — the
-         dialog listed both, so «discard» must undo both or the sentence it
+         dialog listed them, so «discard» must undo them or the sentence it
          asked the question with was not true */
       if (curCh.length) {
         C.rows = CUR_SAVED_ROWS.map((e) => ({ ...e, e_items: (e.e_items || []).slice() }));
@@ -1182,15 +1470,18 @@ WA.renderInstructor = async function (view, me, opts) {
       if (WA._insPrint) WA._insPrint();
       toast(changes.length + " change" + (changes.length === 1 ? "" : "s") +
         " discarded — the form is back to the last saved " +
-        (curCh.length && ids.length ? "assessments and currency"
-          : curCh.length ? "currency" : "assessments"));
+        (inCur ? "flights" : "assessments"));
       return;
     }
-    await saveAll(ids);
+    await saveAll(ids, inCur);
   }
   $("ins-save").addEventListener("click", confirmedSaveAll);
   $("ins-float-save").addEventListener("click", confirmedSaveAll);
-  refreshSave();
+  /* ROUND 20 — THE FIRST DRAW IS A DOOR CHANGE LIKE ANY OTHER. The hash decides
+     it, so a bookmarked door opens on it and a bare link opens on the welcome;
+     `false` because a fresh render is already at the top of the page, and a
+     scroll here would fight a browser restoring one. */
+  showDoor(door, false);
   if (!WA._insFloatHooked) {
     WA._insFloatHooked = true;
     window.addEventListener("resize", () => {
@@ -1199,34 +1490,40 @@ WA.renderInstructor = async function (view, me, opts) {
     });
   }
 
-  root.addEventListener("input", (ev) => {
-    const el = ev.target;
-    if (el.dataset.flew) { P[el.dataset.flew].flew_with = el.checked; markDirty(el.dataset.flew); }
-    else if (el.dataset.comment) { P[el.dataset.comment].comment = el.value; markDirty(el.dataset.comment); }
-  });
+  if (root) {
+    root.addEventListener("input", (ev) => {
+      const el = ev.target;
+      if (el.dataset.flew) { P[el.dataset.flew].flew_with = el.checked; markDirty(el.dataset.flew); }
+      else if (el.dataset.comment) { P[el.dataset.comment].comment = el.value; markDirty(el.dataset.comment); }
+    });
 
-  /* ↑/↓/←/→ inside the group select without ever producing a click, so the
-     keyboard path needs its own listener. It only ever SELECTS — clearing is
-     the click-the-chosen-one gesture — and the guard keeps it from running a
-     second time over what the click handler has already applied. */
-  root.addEventListener("change", (ev) => {
-    const input = ev.target.closest && ev.target.closest("input[data-lvl]");
-    if (!input) return;
-    const sid = input.dataset.lvl;
-    if (P[sid].level === input.value) return;
-    P[sid].level = input.value;
-    syncLevels(sid);
-    markDirty(sid);
-  });
+    /* ↑/↓/←/→ inside the group select without ever producing a click, so the
+       keyboard path needs its own listener. It only ever SELECTS — clearing is
+       the click-the-chosen-one gesture — and the guard keeps it from running a
+       second time over what the click handler has already applied. */
+    root.addEventListener("change", (ev) => {
+      const input = ev.target.closest && ev.target.closest("input[data-lvl]");
+      if (!input) return;
+      const sid = input.dataset.lvl;
+      if (P[sid].level === input.value) return;
+      P[sid].level = input.value;
+      syncLevels(sid);
+      markDirty(sid);
+    });
+  }
 
-  /* Back to the dashboard — the admin token stays in the hash */
+  /* Back to the dashboard — the admin token stays in the hash.
+     ROUND 20 — it asks about BOTH doors: leaving the page is leaving both, and
+     a warning that counted only the assessments would let a half-typed flight
+     go without a word. (The currency is read-only on this twin, so in practice
+     the second number is zero — but the sentence is written from the counts,
+     not from an assumption about which of them can be non-zero.) */
   if (asCO) {
     view.addEventListener("click", (ev) => {
       if (!ev.target.closest("[data-coback]")) return;
-      const n = dirtyIds().length;
-      if (n && !window.confirm(
-        n + " assessment" + (n === 1 ? " has" : "s have") +
-        " unsaved changes. Leave without saving?")) return;
+      const nA = dirtyIds().length, nC = curCount();
+      if ((nA + nC) && !window.confirm(
+        saveWords(nA, nC) + " unsaved. Leave without saving?")) return;
       for (const k of Object.keys(P)) { P[k].dirty = false; SAVED[k] = fp(P[k]); }
       location.hash = WA.adminHash();
     });

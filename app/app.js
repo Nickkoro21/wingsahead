@@ -118,6 +118,39 @@ WA.coHash = function (kind, id) {
 };
 WA.adminHash = function () { return "#t=" + WA.token; };
 
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 20 — THE INSTRUCTOR'S TWO DOORS ARE A SUB-ROUTE.
+   ──────────────────────────────────────────────────────────────────────────
+   RULING (2026-08-27): «το landing page να έχει τα στοιχεία αυτού που μπαίνει,
+   ώστε να κάνει και επιβεβαίωση, και να έχουμε μήνυμα καλωσορίσματος. Και μετά
+   δύο επιλογές: My currency, Student Assessment. Τώρα είναι μπερδεμένα.»
+
+   `#t=<token>`             → the welcome page: who you are, and the two doors
+   `#t=<token>&v=assess`    → Student Assessment
+   `#t=<token>&v=currency`  → My currency
+
+   IT IS THE HASH AND NOT A VARIABLE, so a door can be bookmarked, reached by
+   Back and reloaded — the same three properties the `&co=` sub-route was built
+   for, and the same regex shape it uses.
+
+   BUT A DOOR IS NOT A NEW PAGE. route() re-fetches the whole payload and
+   rebuilds the DOM; doing that when only the door changed would throw away
+   whatever is half-typed in the other one. So the instructor view registers
+   WA._insDoor and route() offers it the change FIRST — see route(). */
+WA.DOORS = ["assess", "currency"];
+function getDoor() {
+  const m = /[#&]v=([a-z]+)/.exec(location.hash);
+  return (m && WA.DOORS.indexOf(m[1]) >= 0) ? m[1] : "";
+}
+WA.doorFromHash = getDoor;
+/* the hash for one door of the link that is open — the co target rides along,
+   so the admin's twin keeps its own doors without a second hash shape */
+WA.doorHash = function (door) {
+  const co = getCoTarget();
+  return "#t=" + WA.token + (co ? "&co=" + co.kind + ":" + co.id : "") +
+         (door ? "&v=" + door : "");
+};
+
 function renderLanding(el, invalid) {
   el.innerHTML = `
     <div class="landing">
@@ -149,10 +182,23 @@ function teardownView() {
   /* the instructor print builder is a closure over the view that is going
      away — the once-attached beforeprint hook must not call a dead one */
   WA._insPrint = null;
+  /* ROUND 20 — and the door switcher, which is a closure over the same view */
+  WA._insDoor = null;
+  WA._insKey = null;
 }
 
 async function route() {
   const view = $("view");
+  /* ── ROUND 20 — THE DOOR CHANGES WITHOUT THE PAGE RELOADING ──────────────
+     A door is a sub-route of the SAME view, so the mounted instructor form is
+     offered the change before anything is torn down. It takes it only when the
+     link is the same one it was built for (token + co target); anything else —
+     a different token pasted into the bar, the admin leaving an on-behalf
+     detour — falls through to the full route below and rebuilds.
+     THIS IS ALSO WHAT MAKES BACK WORK: the door buttons only ever set
+     location.hash, so a click, the Back button, a bookmark and a reload all
+     arrive here through the one path. */
+  if (WA._insDoor && WA._insDoor(getToken(), getCoTarget(), getDoor())) return;
   teardownView();
   WA.token = getToken();
   if (!WA.token) { renderLanding(view, false); return; }
@@ -732,7 +778,7 @@ WA.SECTIONS_META = {
      beside the student's because every naming surface — the change list, the
      save dialog, the read-only dashboard view — asks WA.secLabel for a word
      and must get the same word from all of them. */
-  ins_currency: { label: "My currency", tip: "Your own flying, for the squadron's currency register — the bridge into FDMS. One row per sortie: the DAY, whether it was a flight of your own or one with a student, whether it was flown in the aircraft (ΑΕΡΟΣ — the semester air programme, Πίνακας 9 of the 3-01) or in the simulator (F/S — Πίνακας 6), and the 3-01 EVENTS it exercised. A sortie that exercised no event is still a sortie: leave the events empty and the flight still counts. This is YOUR record and nobody else's — it names no student, and the flights your students log are entered by them, on their own form." },
+  ins_currency: { label: "My currency", tip: "Your own flying, for the squadron's currency register — the bridge into FDMS. One row per sortie: the DAY, whether it was a flight of your own or one with a student, WHICH Σ CATEGORY it was — the printed rows of Πίνακας 9 (ΑΕΡΟΣ: Σ-1, Σ-2 day, Σ-2 night, Σ-3, Σ-4, Σ-20) and of Πίνακας 6 (F/S: SIM-1 … SIM-ΔΑ), plus the two columns FDMS keeps for a night sortie with students and for an FCF — and the 3-01 EVENTS it exercised. The programme is read off the category, so there is nothing to say twice. A sortie that exercised no event is still a sortie: leave the events empty and the flight still counts. This is YOUR record and nobody else's — it names no student, and the flights your students log are entered by them, on their own form." },
 };
 WA.secLabel = function (k) { return (WA.SECTIONS_META[k] || {}).label || k; };
 WA.secTip = function (k) { return (WA.SECTIONS_META[k] || {}).tip || ""; };
@@ -1139,7 +1185,11 @@ WA.INS_ENTRY_KEYS = {
      takes both (WA.secLabel, WA.rowLabel, WA.rowIdent). The name the RECORD
      stores is plain `currency`, because inside an instructor's record there is
      nothing else it could be. WA.insSecKey() is the one place the two meet. */
-  ins_currency: ["date", "kind", "category", "e_items", "seq"],
+  /* ROUND 20 — `category` is gone and `s_category` is what replaced it. The
+     programme is DERIVED from the category (WA.sCatGroup), so the two facts
+     that could contradict each other are one fact that cannot.
+     MIRROR: db/schema.sql → wa.ins_entry_keys('currency'). */
+  ins_currency: ["date", "kind", "s_category", "e_items", "seq"],
 };
 /* MIRROR: db/schema.sql → wa.ins_section_cap. Like every other cap in this
    application it is a runaway-client stop, not a squadron rule: 400 rows is
@@ -1190,6 +1240,82 @@ WA.currencyCat = function (id) {
 WA.currencyCatLabel = function (id) {
   const c = WA.currencyCat(id);
   return c ? c.label : (id ? String(id) : "—");
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 20 — THE Σ TAXONOMY: WHICH SORTIE, NOT WHICH TABLE.
+   ──────────────────────────────────────────────────────────────────────────
+   RULING (2026-08-27): «θα έπρεπε να έχουμε ποια S είναι και δυνατότητα
+   πολλαπλών Ε. Αφού θα τροφοδοτούν το ίδιο σχήμα με το FDMS να τα έχουμε
+   σωστά.»
+
+   Round 19 asked «ΑΕΡΟΣ or F/S?» and stopped. That is the TABLE the sortie
+   belongs to, not the sortie: Πίνακας 9 prints six ΑΕΡΟΣ rows and Πίνακας 6 six
+   F/S rows, and a currency register that cannot say which of them was flown
+   cannot feed the register FDMS keeps — which is exactly what this lane exists
+   to do. So the row carries the CATEGORY and the programme is derived from it:
+   one fact where there were two, and no way for them to disagree.
+
+   THE CATALOGUE IS GENERATED, from the same FDMS research file the E-items come
+   from, by the same run of the same script (tools/gen-currency-catalog.py) —
+   so the list this form offers and the list db/schema.sql enforces cannot
+   drift. The two rows the 3-01 does not print are FDMS's own recording columns,
+   carried under its ids and its printed names and asserted against its client
+   at build time.
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.S_CATEGORIES = (typeof WA_S_CATEGORIES === "object" && WA_S_CATEGORIES &&
+                   Array.isArray(WA_S_CATEGORIES.items)) ? WA_S_CATEGORIES.items : [];
+WA._S_BY_ID = (() => {
+  const m = {};
+  for (const it of WA.S_CATEGORIES) m[it.id] = it;
+  return m;
+})();
+WA.sCat = function (id) { return WA._S_BY_ID[String(id || "")] || null; };
+/* THE CATEGORIES A NEW ROW MAY BE GIVEN — everything except the legacy ids,
+   which are STORABLE (a migrated record must round-trip) and never OFFERED. */
+WA.sCatOptions = function () { return WA.S_CATEGORIES.filter((c) => !c.legacy); };
+WA.sCatIsLegacy = function (id) { const c = WA.sCat(id); return !!(c && c.legacy); };
+/* the SHORT name — the printed code, which is what a currency sheet says */
+WA.sCatCode = function (id) {
+  const c = WA.sCat(id);
+  return c ? c.c : String(id || "");
+};
+/* the FULL printed name — «Σ-3 — Air-to-Ground missions, day/night». This is
+   what WA.rowLabel prints, by the ruling: a change list that named a sortie
+   «Σ-3» would be naming it in a code half the squadron reads off paper. */
+WA.sCatText = function (id) {
+  const c = WA.sCat(id);
+  return c ? c.c + " — " + c.n : String(id || "");
+};
+/* WHICH PROGRAMME — derived, never stored. An id nobody knows has no
+   programme, and every surface prints «—» for it rather than guessing one. */
+WA.sCatGroup = function (id) {
+  const c = WA.sCat(id);
+  return c ? c.g : "";
+};
+WA.sCatGroupLabel = function (id) {
+  const g = WA.sCatGroup(id);
+  return g ? WA.currencyCatLabel(g) : (id ? "—" : "—");
+};
+WA.sCatTip = function (id) {
+  const c = WA.sCat(id);
+  if (!c) {
+    return "This category is not in the Πίνακας 9 / Πίνακας 6 list this application carries. " +
+           "It cannot be saved: choose one of the printed categories instead.";
+  }
+  if (c.legacy) {
+    return WA.sCatText(c.id) + " — " + (WA_S_CATEGORIES.legacyWhy || "recorded before the Σ taxonomy") +
+      ". The programme (" + WA.currencyCatLabel(c.g) + ") is what the old row really carried; the Σ is not, " +
+      "and this form will not invent one.";
+  }
+  const quota = c.p === undefined
+    ? "the 3-01 prints a dash for it — no sortie is required, it is recorded when it is flown"
+    : "the 3-01 prints " + c.p + " sortie" + (c.p === 1 ? "" : "s") + " per semester for a POSTED instructor" +
+      (c.a === undefined ? " and a dash for an attached one" : " (" + c.a + " attached)");
+  return WA.sCatText(c.id) + " · " + WA.currencyCatLabel(c.g) +
+    (c.aid ? " · not a row of the 3-01: " + c.why : " · " + quota) +
+    (c.tp ? " · flown by the squadron's Test Pilots" : "") +
+    ". The semester itself is counted in FDMS; this form records that the sortie was flown, and on what day.";
 };
 
 /* ── THE E-ITEMS ──────────────────────────────────────────────────────────
@@ -1247,16 +1373,34 @@ WA.eItemsText = function (e) {
 };
 
 /* THE CLIENT'S READ-TIME REPAIR of an instructor record — the mirror of
-   wa.migrate_instructor_record. It has no legacy shapes to heal, so its whole
-   job is the whitelist: every section the registry does not name disappears,
-   and inside a section every key it does not name is dropped. */
+   wa.migrate_instructor_record.
+   ROUND 20 — AND IT HAS EXACTLY ONE LEGACY SHAPE TO HEAL: a round-19 row that
+   stored the PROGRAMME (`category`) and no Σ category at all. It does not
+   guess. Nobody can reconstruct from «ΑΕΡΟΣ on the 26th» whether the sortie was
+   a Σ-1 or a Σ-3, so the programme the row really carried is mapped onto a
+   category whose printed name SAYS the Σ was never recorded, and the form
+   renders it marked. TWO legacy ids and not one, so the fact the old row DID
+   carry is not thrown away in order to be honest about the one it did not.
+   THE ORDER MATTERS: the legacy pass runs before the whitelist, because the
+   whitelist is what makes `category` stop existing.
+   MIRROR: db/schema.sql → wa.migrate_ins_entry + wa.migrate_instructor_record. */
+WA.INS_LEGACY_CAT = { aeros: "legacy-aeros-unspecified", fs: "legacy-fs-unspecified" };
+WA.migrateInsEntry = function (sec, e) {
+  if (!e || typeof e !== "object") return {};
+  if (sec !== "ins_currency") return e;
+  if (e.s_category) return e;
+  const legacy = WA.INS_LEGACY_CAT[String(e.category || "")];
+  return legacy ? { ...e, s_category: legacy } : e;
+};
 WA.migrateInsRecord = function (rec) {
   const src = (rec && typeof rec === "object") ? rec : {};
   const out = {};
   for (const stored of WA.INS_SECTIONS) {
-    const keep = WA.INS_ENTRY_KEYS[WA.insFormKey(stored)] || [];
+    const form = WA.insFormKey(stored);
+    const keep = WA.INS_ENTRY_KEYS[form] || [];
     const list = Array.isArray(src[stored]) ? src[stored] : [];
-    out[stored] = list.map((e) => {
+    out[stored] = list.map((raw) => {
+      const e = WA.migrateInsEntry(form, raw);
       const o = {};
       if (e && typeof e === "object") {
         for (const f of keep) if (Object.prototype.hasOwnProperty.call(e, f)) o[f] = e[f];
@@ -1291,7 +1435,7 @@ WA.curSort = function (list) {
    server refuses a second copy of (wa.validate_instructor_record) */
 WA.curIdent = function (e) {
   const x = e || {};
-  return [String(x.kind || ""), String(x.category || ""),
+  return [String(x.kind || ""), String(x.s_category || ""),
           String(x.date || ""), WA.curSeq(x)].join("|");
 };
 
@@ -3501,7 +3645,11 @@ WA.rowLabel = function (sec, e, opts) {
        the label helpers, and a title reading «— · — · 23/08/2026» is three
        dashes where a half-finished row should simply be called by its date. */
     if (x.kind) bits.push(WA.currencyKindLabel(x.kind));
-    if (x.category) bits.push(WA.currencyCatLabel(x.category));
+    /* ROUND 20 — THE Σ PRINTED NAME, by the ruling: «να έχουμε ποια S είναι».
+       Not the programme beside it — the programme is DERIVED from the category
+       now, so printing both would be printing one fact twice, and not the bare
+       code either, because half the squadron reads these off paper by name. */
+    if (x.s_category) bits.push(WA.sCatText(x.s_category));
     if (x.date) bits.push(fmtD(x.date));
     const nm0 = bits.filter(Boolean).join(" · ");
     const sq0 = WA.curSeq(x);
@@ -3574,7 +3722,7 @@ WA.fieldText = function (sec, field, v) {
      never do is let one section's word be printed over the other's fact. */
   if (sec === "ins_currency") {
     if (field === "kind") return WA.currencyKindLabel(v);
-    if (field === "category") return WA.currencyCatLabel(v);
+    if (field === "s_category") return WA.sCatText(v);
   }
   if (field === "date" || field === "end_date" || field === "entrance_date" || field === "exit_date") {
     return fmtD(v);
@@ -3623,6 +3771,9 @@ WA.FIELD_WORDS = {
   /* ROUND 19 — the word the FDMS currency card uses for the EVENTS table's
      rows, so a change list and the register it feeds say the same thing */
   e_items: "E-items",
+  /* ROUND 20 — «category» alone would read as the gradesheet's track on a
+     surface that takes both sections; «Σ category» is what Πίνακας 9 calls it */
+  s_category: "Σ category",
 };
 WA.fieldWord = function (f) { return WA.FIELD_WORDS[f] || f; };
 /* THE FIELDS THAT ARE THE ROW'S NAME. WA.rowTitle already prints them, so an
@@ -3641,7 +3792,7 @@ WA.IDENT_FIELDS = {
      «added» line does not repeat them; change one and the row surfaces as a
      removal plus an addition, which is the honest description of a sortie
      re-filed under a different day, kind or programme. */
-  ins_currency: ["date", "kind", "category", "seq"],
+  ins_currency: ["date", "kind", "s_category", "seq"],
 };
 /* the fields a change list ever mentions — the stored keys of the section,
    minus the two the user never typed and cannot act on.
@@ -3807,6 +3958,143 @@ WA.confirmSave = function (opts) {
     document.addEventListener("keydown", onKey, true);
     document.body.appendChild(veil);
     draw(first(), '[data-cfm="save"]');
+  });
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 20 — THE E-ITEM PICKER: A CHECKBOX LIST, A FILTER AND A COUNT.
+   ──────────────────────────────────────────────────────────────────────────
+   RULING (2026-08-27): «δυνατότητα πολλαπλών Ε».
+
+   MULTI-E EXISTED SINCE ROUND 19 AND NOBODY COULD SEE IT. The cell offered a
+   «— add an event —» select: pick one, the select redraws, pick the next. That
+   is a list of one that happens to be repeatable, and a repeatable list of one
+   is what a form looks like when it does NOT take many — so an instructor who
+   flew four events recorded one and moved on. Nothing about the data changed
+   this round; what changed is that the affordance now SAYS «many», in the shape
+   FDMS's own dialog says it: every event on screen at once, a filter over the
+   27, a checkbox per row and a chip counting what is ticked.
+
+   THE BOXES ARE STATE, NOT A WRITE. Nothing reaches the row until «Done», so
+   Cancel really is a cancel and a half-ticked list is never a half-saved
+   sortie. The filter re-renders only the list and re-reads the ticks from the
+   Set, so a box ticked before filtering is still ticked after it — the one bug
+   a filtered checkbox list can have.
+
+   Returns a promise: an ARRAY of ids on Done, or null on Cancel.
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.pickEvents = function (opts) {
+  const o = opts || {};
+  const all = WA.E_ITEMS;
+  const chosen = new Set((o.selected || []).map(String));
+  /* an id the catalogue does not know was KEPT by WA.eItemsOf so the server
+     could refuse it by name; it must survive this dialog too — a picker that
+     silently dropped it would turn a refusal the instructor can act on into a
+     row that quietly changed under him */
+  const unknown = [...chosen].filter((id) => !WA.eItem(id));
+  return new Promise((resolve) => {
+    const veil = document.createElement("div");
+    veil.className = "veil";
+    veil.id = "wa-epick";
+    let q = "";
+    const matches = () => {
+      const f = q.trim().toLowerCase();
+      if (!f) return all;
+      return all.filter((it) =>
+        it.id.indexOf(f) >= 0 ||
+        (it.c + " " + it.n).toLowerCase().indexOf(f) >= 0);
+    };
+    const listHTML = () => {
+      const hit = matches();
+      if (!hit.length) {
+        return `<p class="hint">No event matches &ldquo;${esc(q)}&rdquo; &mdash;
+          the filter reads the code and the name.</p>`;
+      }
+      return hit.map((it) => `<label class="epick-row" title="${esc(WA.eItemTip(it.id))}">
+        <input type="checkbox" data-eid="${esc(it.id)}"${chosen.has(it.id) ? " checked" : ""}>
+        <span class="epick-c">${esc(it.c)}</span>
+        <span class="epick-n">${esc(it.n)}</span></label>`).join("");
+    };
+    const countHTML = () => `${chosen.size} of ${all.length} selected`;
+    function drawList() {
+      const box = veil.querySelector("#wa-epick-list");
+      if (box) box.innerHTML = listHTML();
+      const n = veil.querySelector("#wa-epick-n");
+      if (n) {
+        n.textContent = countHTML();
+        n.classList.toggle("badge-good", chosen.size > 0);
+      }
+    }
+    function done(answer) {
+      document.removeEventListener("keydown", onKey, true);
+      veil.remove();
+      resolve(answer);
+    }
+    function onKey(ev) {
+      if (ev.key === "Escape") { ev.preventDefault(); done(null); }
+    }
+    veil.innerHTML = `
+      <div class="modal epick" role="dialog" aria-modal="true" aria-labelledby="wa-epick-h">
+        <h3 id="wa-epick-h">Which events did this sortie exercise?</h3>
+        <p class="hint">${esc(o.what || "")}<b>Tick every one of them.</b> A sortie exercises as many
+          events as it exercises, and a sortie that exercised none is still a sortie &mdash; leave
+          them all clear. The list is the EVENTS table of the 3-01 (Ch.4 &sect;48), which is the
+          closed list the squadron&rsquo;s register is built on.</p>
+        <div class="epick-bar">
+          <input type="search" id="wa-epick-q" class="epick-q" autocomplete="off"
+            placeholder="filter the ${esc(all.length)} events &mdash; code or words"
+            aria-label="Filter the events by code or by name">
+          <span class="badge${chosen.size ? " badge-good" : ""}" id="wa-epick-n"
+            title="${esc("How many events are ticked. The count is what the row will carry.")}">${esc(countHTML())}</span>
+        </div>
+        <div class="epick-list" id="wa-epick-list" role="group"
+          aria-label="Events of the 3-01 EVENTS table">${listHTML()}</div>
+        ${unknown.length ? `<p class="hint"><b>${esc(unknown.length)}</b> id${
+          unknown.length === 1 ? " on this row is" : "s on this row are"} not in the
+          3-01 list this application carries (${esc(unknown.join(", "))}). ${
+          unknown.length === 1 ? "It is" : "They are"} kept as ${
+          unknown.length === 1 ? "it is" : "they are"} so the server can refuse
+          ${unknown.length === 1 ? "it" : "them"} by name.</p>` : ""}
+        <div class="mfoot">
+          <button type="button" class="btn" data-ep="clear"
+            title="${esc("Unticks everything. The row keeps no event at all — which is a valid sortie, not an unfinished one.")}">Clear all</button>
+          <button type="button" class="btn" data-ep="cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" data-ep="done">Done</button>
+        </div>
+      </div>`;
+    veil.addEventListener("click", (ev) => {
+      const box = ev.target.closest("input[data-eid]");
+      if (box) {
+        if (box.checked) chosen.add(box.dataset.eid); else chosen.delete(box.dataset.eid);
+        const n = veil.querySelector("#wa-epick-n");
+        if (n) {
+          n.textContent = countHTML();
+          n.classList.toggle("badge-good", chosen.size > 0);
+        }
+        return;
+      }
+      const b = ev.target.closest("[data-ep]");
+      if (!b) return;
+      if (b.dataset.ep === "clear") {
+        chosen.clear();
+        for (const id of unknown) chosen.add(id);   /* never silently dropped */
+        drawList();
+        return;
+      }
+      if (b.dataset.ep === "cancel") { done(null); return; }
+      done(WA.eItemsOf({ e_items: [...chosen] }));
+    });
+    /* `input`, so the list narrows as he types — and only the LIST is redrawn,
+       because redrawing the box would take the caret with it */
+    veil.addEventListener("input", (ev) => {
+      if (!ev.target.matches("#wa-epick-q")) return;
+      q = ev.target.value;
+      drawList();
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(veil);
+    const f = veil.querySelector("#wa-epick-q");
+    if (f) f.focus();
   });
 };
 

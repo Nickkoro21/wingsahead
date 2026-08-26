@@ -130,7 +130,7 @@ set search_path = public, extensions, pg_temp as $$
 $$;
 
 create or replace function wa.touch_updated_at() returns trigger
-language plpgsql as $$
+language plpgsql set search_path = public, wa, pg_temp as $$
 begin
   new.updated_at := now();
   return new;
@@ -338,13 +338,13 @@ create trigger trg_touch_settings before update on wa.settings
   for each row execute function wa.touch_updated_at();
 
 create or replace function wa.setting(p_key text) returns text
-language sql stable as $$ select value from wa.settings where key = p_key $$;
+language sql stable set search_path = public, wa, pg_temp as $$ select value from wa.settings where key = p_key $$;
 
 -- THE SCOPE, NORMALISED ONCE. Everything that gates on it reads THIS — the
 -- dataset filter, the write refusal and the admin's own read-back — so an
 -- empty string, a stray space and a missing row cannot mean three things.
 create or replace function wa.assessment_class() returns text
-language sql stable as $$
+language sql stable set search_path = public, wa, pg_temp as $$
   select nullif(btrim(coalesce(wa.setting('assessment_class'), '')), '')
 $$;
 
@@ -356,7 +356,7 @@ $$;
 -- NAME, and a person carrying no name to match cannot match one. Give them
 -- their class under People & links and they join the class they belong to.
 create or replace function wa.student_in_scope(s public.people) returns boolean
-language sql stable as $$
+language sql stable set search_path = public, wa, pg_temp as $$
   select wa.assessment_class() is not null
      and nullif(btrim(coalesce(s.class, '')), '') = wa.assessment_class()
 $$;
@@ -428,7 +428,7 @@ revoke all on all sequences in schema public from anon, authenticated;
 
 -- ── auth / validation helpers (schema wa — unreachable from the API) ───────
 create or replace function wa.auth(p_token text) returns public.people
-language plpgsql stable as $$
+language plpgsql stable set search_path = public, wa, pg_temp as $$
 declare v public.people;
 begin
   if p_token is null or length(p_token) < 24 then
@@ -443,7 +443,7 @@ end $$;
 
 create or replace function wa.auth_role(p_token text, p_role public.wa_role)
 returns public.people
-language plpgsql stable as $$
+language plpgsql stable set search_path = public, wa, pg_temp as $$
 declare v public.people;
 begin
   v := wa.auth(p_token);
@@ -454,7 +454,7 @@ begin
 end $$;
 
 create or replace function wa.is_iso_date(t text) returns boolean
-language plpgsql immutable as $$
+language plpgsql immutable set search_path = public, wa, pg_temp as $$
 begin
   if t is null or t !~ '^\d{4}-\d{2}-\d{2}$' then return false; end if;
   perform t::date;
@@ -485,14 +485,14 @@ end $$;
 --              inner shape — it may legitimately be typed on several lines —
 --              and only loses the whitespace at its ends.
 create or replace function wa.norm_line(t text) returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case when t is null then null else
     btrim(regexp_replace(translate(t, U&'\00a0\200b\feff', '   '), '\s+', ' ', 'g')) end
 $$;
 create or replace function wa.norm_code(t text) returns text
-language sql immutable as $$ select upper(wa.norm_line(t)) $$;
+language sql immutable set search_path = public, wa, pg_temp as $$ select upper(wa.norm_line(t)) $$;
 create or replace function wa.norm_free(t text) returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case when t is null then null else
     regexp_replace(regexp_replace(translate(t, U&'\00a0', ' '), '^\s+', ''), '\s+$', '') end
 $$;
@@ -502,17 +502,17 @@ $$;
 -- cef alike), so this classification also covers the superseded v1 section
 -- names the read-time migration still accepts.
 create or replace function wa.code_fields() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['flight_code','sortie','slot','evaluation']::text[]
 $$;
 create or replace function wa.free_fields() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['note','result','phase','comment']::text[]
 $$;
 
 -- the rule this field's name earns, applied to one string
 create or replace function wa.norm_str(p_key text, t text) returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case when p_key = any(wa.code_fields()) then wa.norm_code(t)
               when p_key = any(wa.free_fields()) then wa.norm_free(t)
               else wa.norm_line(t) end
@@ -522,7 +522,7 @@ $$;
 -- (a grade stays a number, `ng` stays a boolean, json null stays null);
 -- a list of strings — items[] — is normalised element by element.
 create or replace function wa.norm_field(p_key text, v jsonb) returns jsonb
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case
     when v is null then 'null'::jsonb
     when jsonb_typeof(v) = 'string' then to_jsonb(wa.norm_str(p_key, v #>> '{}'))
@@ -535,7 +535,7 @@ $$;
 
 -- one entry, every field normalised
 create or replace function wa.norm_entry(e jsonb) returns jsonb
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case when jsonb_typeof(e) <> 'object' then e else
     coalesce((select jsonb_object_agg(t.k, wa.norm_field(t.k, t.v))
               from jsonb_each(e) t(k, v)), '{}'::jsonb) end
@@ -544,7 +544,7 @@ $$;
 -- a whole record: every entry of every section. Applied at BOTH boundaries,
 -- so the validator, the storage and the read all see the same string.
 create or replace function wa.norm_record(p jsonb) returns jsonb
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case when p is null or jsonb_typeof(p) <> 'object' then p else
     coalesce((select jsonb_object_agg(t.k, case
         when jsonb_typeof(t.v) = 'array' then coalesce((
@@ -556,7 +556,7 @@ $$;
 
 -- one field of one entry: type + format checks
 create or replace function wa.chk(p_ok boolean, p_where text, p_msg text) returns void
-language plpgsql immutable as $$
+language plpgsql immutable set search_path = public, wa, pg_temp as $$
 begin
   if not p_ok then
     raise exception 'WA: invalid payload — % (%)', p_msg, p_where;
@@ -564,7 +564,7 @@ begin
 end $$;
 
 create or replace function wa.chk_text(v jsonb, p_where text, p_required boolean, p_max int)
-returns void language plpgsql immutable as $$
+returns void language plpgsql immutable set search_path = public, wa, pg_temp as $$
 begin
   if v is null or jsonb_typeof(v) = 'null' then
     perform wa.chk(not p_required, p_where, 'required text missing');
@@ -575,7 +575,7 @@ begin
 end $$;
 
 create or replace function wa.chk_date(v jsonb, p_where text, p_required boolean)
-returns void language plpgsql immutable as $$
+returns void language plpgsql immutable set search_path = public, wa, pg_temp as $$
 begin
   if v is null or jsonb_typeof(v) = 'null' then
     perform wa.chk(not p_required, p_where, 'required date missing');
@@ -586,7 +586,7 @@ begin
 end $$;
 
 create or replace function wa.chk_bool(v jsonb, p_where text)
-returns void language plpgsql immutable as $$
+returns void language plpgsql immutable set search_path = public, wa, pg_temp as $$
 begin
   if v is null or jsonb_typeof(v) = 'null' then return; end if;
   perform wa.chk(jsonb_typeof(v) = 'boolean', p_where, 'must be true/false');
@@ -599,7 +599,7 @@ end $$;
 -- behind the owner's back); they are RENDERED rounded with the raw value in
 -- the tooltip, and the form asks for a whole number the next time it is saved.
 create or replace function wa.chk_grade(v jsonb, p_where text, p_required boolean)
-returns void language plpgsql immutable as $$
+returns void language plpgsql immutable set search_path = public, wa, pg_temp as $$
 declare n numeric;
 begin
   if v is null or jsonb_typeof(v) = 'null' then
@@ -620,7 +620,7 @@ end $$;
 -- so the student can save the rest of the form without losing it; the UI asks
 -- for the missing field and drops the flag the moment it is supplied.
 create or replace function wa.is_legacy(e jsonb) returns boolean
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case when jsonb_typeof(e->'legacy') = 'boolean'
               then (e->>'legacy')::boolean else false end
 $$;
@@ -628,7 +628,7 @@ $$;
 -- EVERY entry carries its own date (round-3 rule: no manually typed counts
 -- anywhere) — the only exception is an un-completable legacy row.
 create or replace function wa.chk_entry_date(e jsonb, p_where text)
-returns void language plpgsql immutable as $$
+returns void language plpgsql immutable set search_path = public, wa, pg_temp as $$
 begin
   perform wa.chk_bool(e->'legacy', p_where || '.legacy');
   perform wa.chk_date(e->'date', p_where || '.date', not wa.is_legacy(e));
@@ -636,7 +636,7 @@ end $$;
 
 -- list of short strings (FAIL / ALMOST GOOD items[])
 create or replace function wa.chk_str_list(v jsonb, p_where text, p_min int, p_max int, p_len int)
-returns void language plpgsql immutable as $$
+returns void language plpgsql immutable set search_path = public, wa, pg_temp as $$
 declare i int;
 begin
   if v is null or jsonb_typeof(v) = 'null' then
@@ -674,13 +674,13 @@ end $$;
 -- earlier one has not been flown.
 -- MIRROR: app/app.js → WA.EVALUATIONS (ordered by WA_EVAL_ORDER).
 create or replace function wa.eval_ids() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['C4590','C4790','C5090','C5490','I4490','I4890','F4690','N4690']::text[]
 $$;
 
 -- 1-based position of a checkride in the syllabus order · null when unknown
 create or replace function wa.eval_pos(p_id text) returns int
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select i from generate_subscripts(wa.eval_ids(), 1) i
   where (wa.eval_ids())[i] = p_id
 $$;
@@ -693,7 +693,7 @@ $$;
 -- a row still filed under it must be given a real track first.
 -- MIRROR: app/items-catalog.js → WA_ITEMS.categories[].items[].name
 create or replace function wa.item_names(p_cat text) returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case p_cat
     when 'contact' then array[
       'GROUND PROCEDURES',
@@ -833,7 +833,7 @@ $$;
 -- flights/fs row is fully placed by the pair — no new lookup on the hot path.
 -- MIRROR: app/items-catalog.js → WA_LOG_SORTIES.
 create or replace function wa.sortie_codes(p_band text, p_track text) returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case p_band || '/' || p_track
     when 'flights/contact' then array[
       'C4101',
@@ -991,7 +991,7 @@ $$;
 -- catalogue code). The letter gives the track; only the flow chart gives the
 -- band, which is why this is generated and wa.code_track is not.
 create or replace function wa.sortie_band(p_code text) returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case
     when upper(wa.norm_line(p_code)) = any(array[
       'C4101',
@@ -1139,12 +1139,12 @@ $$;
 -- of four different groups.
 -- MIRROR: app/items-catalog.js → WA_GROUND.
 create or replace function wa.lesson_groups() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['GT-WSGES','GT-INITIAL','GT-FLYPRIN','GT-AERO-CRM','GT-METEO-BA','GT-INSTR','GT-IFRNAV-GPS','GT-CO110','GT-CO109','GT-FORM','GT-VFRNAV','GT-GENBRIEF']::text[]
 $$;
 
 create or replace function wa.lesson_courses(p_group text) returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case p_group
     when 'GT-WSGES' then array[
       'A/C Systems (WSGES)'
@@ -1227,7 +1227,7 @@ $$;
 -- would make the two systems disagree about what a student is owed.
 -- MIRROR: app/items-catalog.js → WA_EXAMS.
 create or replace function wa.exam_ids() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['CO190','JP190','IN190','IN290','FO190','TACFOR590','NA190','LNAV790']::text[]
 $$;
 
@@ -1235,7 +1235,7 @@ $$;
 -- it is NOT OWED by a HAF student. (FDMS's own SchedReady never reads the
 -- flag and leaves JP190 pending for ever; that defect is not mirrored here.)
 create or replace function wa.exam_conditional(p_id text) returns boolean
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case when p_id = any(array['JP190']::text[]) then true else false end
 $$;
 
@@ -1272,13 +1272,13 @@ $$;
 -- THE VISIBLE NAME LIVES IN ONE FUNCTION (wa.series_label), mirroring
 -- WA.EXAM_SERIES[].label — so the next rename is two lines, not thirty.
 create or replace function wa.exam_series() returns text[]
-language sql immutable as $$ select array['EETH']::text[] $$;
+language sql immutable set search_path = public, wa, pg_temp as $$ select array['EETH']::text[] $$;
 create or replace function wa.series_label(p_series text) returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case when p_series = 'EETH' then 'Weekly' else coalesce(p_series, '?') end
 $$;
 create or replace function wa.exam_trials() returns int
-language sql immutable as $$ select 3 $$;
+language sql immutable set search_path = public, wa, pg_temp as $$ select 3 $$;
 
 -- ══ ROUND 15 — THE GROUND-EXAM PASS MARK IS 80 % ══════════════════════════
 -- COMMAND WORDING (2026-08-21): «80% για εξετασεις εδαφους, 60% για πτησεις.
@@ -1307,14 +1307,14 @@ language sql immutable as $$ select 3 $$;
 -- constant: this function is the one LIVE number and has no history.
 -- MIRROR: app/app.js → WA.EXAM_PASS_MIN / WA.passMin / WA.gradePassed(g,sec).
 create or replace function wa.exam_pass_min() returns numeric
-language sql immutable as $$ select 80::numeric $$;
+language sql immutable set search_path = public, wa, pg_temp as $$ select 80::numeric $$;
 
 -- did this ground-exam grade PASS? — the exams' own question, at the exams'
 -- own mark. It is the mirror of WA.gradePassed(g, 'exams') and, like the
 -- constant above, it is declared and not yet called: nothing on the server
 -- judges an exam. wa.grade_passed(g) remains the FLIGHT question at 60.
 create or replace function wa.exam_passed(g numeric) returns boolean
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select g is not null and g >= wa.exam_pass_min()
 $$;
 
@@ -1338,7 +1338,7 @@ $$;
 -- ruling can reach that list at all.
 -- MIRROR: app/app.js → WA.seniorityKey / WA.bySeniority.
 create or replace function wa.natkey(s text) returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select coalesce((
     select string_agg(case when t.m[1] ~ '^[0-9]+$' then lpad(t.m[1], 8, '0') else t.m[1] end,
                       '' order by t.ord)
@@ -1347,7 +1347,7 @@ language sql immutable as $$
 $$;
 create or replace function wa.seniority_key(p_country text, p_call_sign text,
                                             p_last_name text, p_first_name text)
-returns text language sql immutable as $$
+returns text language sql immutable set search_path = public, wa, pg_temp as $$
   with x as (select upper(btrim(coalesce(p_country, ''))) as c,
                     btrim(coalesce(p_call_sign, '')) as cs)
   select (case x.c when 'HAF' then '0' when 'ITAF' then '1'
@@ -1361,7 +1361,7 @@ returns text language sql immutable as $$
 $$;
 -- the same key straight off a people row — the form every ORDER BY uses
 create or replace function wa.seniority_key(p public.people) returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select wa.seniority_key(p.country, p.call_sign, p.last_name, p.first_name)
 $$;
 
@@ -1373,7 +1373,7 @@ $$;
 -- nothing to remove.
 -- MIRROR: app/items-catalog.js → WA_SOLO_SLOTS.
 create or replace function wa.solo_slots() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['C4790-91-S1','C4801-04-S1','C4901-05-S1','C5201-04-S1','C5301-04-S1','F4301-06-S1','F4301-06-S2','F4501-03-S1']::text[]
 $$;
 -- ▲▲ GENERATED BLOCK ▲▲
@@ -1412,15 +1412,34 @@ $$;
 -- never reads. House minimalism decided the rest: this section has no note
 -- field either.
 create or replace function wa.currency_kinds() returns text[]
-language sql immutable as $$ select array['own','student']::text[] $$;
+language sql immutable set search_path = public, wa, pg_temp as $$ select array['own','student']::text[] $$;
 
 -- THE TWO PROGRAMMES, IN THE NAMES THE 3-01 PRINTS FOR THEM. «ΑΕΡΟΣ» is the
 -- semester AIR programme (Πίνακας 9) and «F/S» the semester SIMULATOR one
 -- (Πίνακας 6) — the two sections the FDMS currency card opens with and closes
 -- on. They are STORED as ASCII keys and only ever SHOWN in the printed Greek,
 -- the same terminology bridge the Weekly tip makes for the ΕΕΘ.
+--
+-- ROUND 20 — AND A ROW NO LONGER STORES ONE. RULING (2026-08-27): «θα έπρεπε να
+-- έχουμε ποια S είναι και δυνατότητα πολλαπλών Ε. Αφού θα τροφοδοτούν το ίδιο
+-- σχήμα με το FDMS να τα έχουμε σωστά.» A row now names its Σ CATEGORY and the
+-- programme is DERIVED from it (wa.s_category_group), so the two can never
+-- disagree — no row can claim a Σ-3 flown in the simulator, because nothing
+-- stores the two facts separately any more. This list survives as the
+-- vocabulary of the DERIVED value: it is what the group function returns, what
+-- the export labels its two sections with, and what every surface prints.
 create or replace function wa.currency_categories() returns text[]
-language sql immutable as $$ select array['aeros','fs']::text[] $$;
+language sql immutable set search_path = public, wa, pg_temp as $$ select array['aeros','fs']::text[] $$;
+
+-- the printed name of a programme — one function, so the refusals, the export
+-- and the tooltips cannot disagree about what «fs» is called on paper
+create or replace function wa.currency_category_name(p_id text) returns text
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select case p_id
+    when 'aeros' then 'ΑΕΡΟΣ — the semester air programme (Πίνακας 9)'
+    when 'fs' then 'F/S — the semester simulator programme (Πίνακας 6)'
+    else null end
+$$;
 
 -- ▼▼ CURRENCY GENERATED BLOCK — tools/gen-currency-catalog.py — DO NOT EDIT BY HAND ▼▼
 -- Generated from the FDMS instructor-currency research file:
@@ -1437,7 +1456,7 @@ language sql immutable as $$ select array['aeros','fs']::text[] $$;
 -- 27 of the catalog's 28 e-items are here. The one that is not, by name:
 --   e-1d-demo — Chapter 5 of the 3-01 — the display pilot's own currency, which FDMS shows only to the instructor who holds the post.
 create or replace function wa.e_item_ids() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array[
     'e-1a-aerobatics',
     'e-1b-spin',
@@ -1472,7 +1491,7 @@ $$;
 -- the printed name of one e-item — the refusal says WHICH event it could not
 -- find, in the words the 3-01 prints, not a slug the instructor never typed
 create or replace function wa.e_item_name(p_id text) returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case p_id
     when 'e-1a-aerobatics' then 'Ε-1α — Aerobatics (Ακροβατικά)'
     when 'e-1b-spin' then 'Ε-1β — SPIN'
@@ -1503,13 +1522,107 @@ language sql immutable as $$
     when 'e-67-cas' then 'Ε-67 — CAS (Close Air Support)'
     else null end
 $$;
+
+-- ── THE Σ CATEGORIES (round 20) ─────────────────────────────────────────
+-- WHICH SORTIE it was, not merely which table it belongs to. Πίνακας 9 has
+-- 6 ΑΕΡΟΣ rows in it and Πίνακας 6 6 F/S rows, and «ΑΕΡΟΣ» names one of them
+-- exactly as little as «a flight» names an aircraft. The programme is DERIVED
+-- from the category (wa.s_category_group), so the two can never disagree.
+--
+-- 16 categories. What is in the list and is not a row of the 3-01:
+--   x-night-students — the 3-01 prints no such requirement — FDMS carries it as a column of its own because the squadron flies it, and because a night sortie is what keeps the night-landing currency alive.
+--   x-fcf-flight — a functional check flight is flown by the squadron's Test Pilots and is not a Πίνακας 9 requirement — FDMS carries it as a column of its own, and it is what dates the Ε-1γ row of the EVENTS table.
+--   legacy-aeros-unspecified — a round-19 row that stored only the programme. The Σ was never recorded and cannot be guessed from a date — it is shown marked, everywhere, and needs the developer's hand.
+--   legacy-fs-unspecified — a round-19 row that stored only the programme. The Σ was never recorded and cannot be guessed from a date — it is shown marked, everywhere, and needs the developer's hand.
+-- And what the research file carries that is NOT a kind of sortie, by name:
+--   sim-refresh-after-abstention — §49 prints a THRESHOLD IN DAYS, not a category — the sortie it demands is a SIM-1, which is in the list already.
+--   semiannual-air-total-t6 — the printed ΣΥΝΟΛΟ ΕΞΟΔΩΝ row of Πίνακας 9 — a total is not a sortie anybody flies.
+--   semiannual-fs-total-t6 — the printed ΣΥΝΟΛΑ row of Πίνακας 6 — a total is not a sortie anybody flies.
+create or replace function wa.s_category_ids() returns text[]
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select array[
+    's-1-general-adaptation',
+    's-2-pdo-day',
+    's-2-pdo-night',
+    's-3-air-to-ground',
+    's-4-air-to-air',
+    's-20-no-requirements',
+    'x-night-students',
+    'x-fcf-flight',
+    'legacy-aeros-unspecified',
+    'sim-1',
+    'sim-2',
+    'sim-3',
+    'sim-4',
+    'sim-5',
+    'sim-da',
+    'legacy-fs-unspecified'
+  ]::text[]
+$$;
+
+-- the printed name of one Σ category — the refusal names the category it could
+-- not find in the words Πίνακας 6 / Πίνακας 9 print, never a slug
+create or replace function wa.s_category_name(p_id text) returns text
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select case p_id
+    when 's-1-general-adaptation' then 'Σ-1 — General Adaptation'
+    when 's-2-pdo-day' then 'Σ-2 — Instrument flight (PDO), day'
+    when 's-2-pdo-night' then 'Σ-2 — Instrument flight (PDO), night'
+    when 's-3-air-to-ground' then 'Σ-3 — Air-to-Ground missions, day/night'
+    when 's-4-air-to-air' then 'Σ-4 — Air-to-Air missions, day/night'
+    when 's-20-no-requirements' then 'Σ-20 — No-requirements missions'
+    when 'x-night-students' then 'Νυχτερινή με μαθητές — Night sortie flown with students'
+    when 'x-fcf-flight' then 'Πτήση δοκιμής (FCF) — Aircraft test flight'
+    when 'legacy-aeros-unspecified' then 'ΑΕΡΟΣ — unspecified (recorded before the Σ taxonomy)'
+    when 'sim-1' then 'SIM-1 — Precision handling / ACRO (F/S)'
+    when 'sim-2' then 'SIM-2 — IFR (F/S)'
+    when 'sim-3' then 'SIM-3 — Air-to-Ground missions (F/S)'
+    when 'sim-4' then 'SIM-4 — Air-to-Air missions (F/S)'
+    when 'sim-5' then 'SIM-5 — Emergency procedures (F/S)'
+    when 'sim-da' then 'SIM-ΔΑ — Aircraft test in the simulator (Test Pilots only)'
+    when 'legacy-fs-unspecified' then 'F/S — unspecified (recorded before the Σ taxonomy)'
+    else null end
+$$;
+
+-- WHICH PROGRAMME a category belongs to — 'aeros' (Πίνακας 9) or 'fs'
+-- (Πίνακας 6). Round 19 STORED this; from round 20 it is derived, so a row
+-- cannot claim a Σ-3 flown in the simulator.
+create or replace function wa.s_category_group(p_id text) returns text
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select case p_id
+    when 's-1-general-adaptation' then 'aeros'
+    when 's-2-pdo-day' then 'aeros'
+    when 's-2-pdo-night' then 'aeros'
+    when 's-3-air-to-ground' then 'aeros'
+    when 's-4-air-to-air' then 'aeros'
+    when 's-20-no-requirements' then 'aeros'
+    when 'x-night-students' then 'aeros'
+    when 'x-fcf-flight' then 'aeros'
+    when 'legacy-aeros-unspecified' then 'aeros'
+    when 'sim-1' then 'fs'
+    when 'sim-2' then 'fs'
+    when 'sim-3' then 'fs'
+    when 'sim-4' then 'fs'
+    when 'sim-5' then 'fs'
+    when 'sim-da' then 'fs'
+    when 'legacy-fs-unspecified' then 'fs'
+    else null end
+$$;
+
+-- THE LEGACY IDS — storable, never offered. A round-19 row carried a programme
+-- and no category; the Σ cannot be guessed from a date, so the migration says
+-- so in the id itself and every surface renders it marked.
+create or replace function wa.s_category_legacy_ids() returns text[]
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select array['legacy-aeros-unspecified', 'legacy-fs-unspecified']::text[]
+$$;
 -- ▲▲ CURRENCY GENERATED BLOCK ▲▲
 
 -- HOW MANY EVENTS ONE SORTIE MAY NAME. The ceiling is the catalogue itself:
 -- a sortie cannot exercise an event twice, so more ids than the 3-01 prints is
 -- not a busy sortie, it is a payload nobody typed.
 create or replace function wa.e_item_cap() returns int
-language sql immutable as $$ select array_length(wa.e_item_ids(), 1) $$;
+language sql immutable set search_path = public, wa, pg_temp as $$ select array_length(wa.e_item_ids(), 1) $$;
 
 -- ══ ROUND 11 — THE GRADE SCALE, AND WHAT «SUCCESSFUL» MEANS ════════════════
 -- Nothing in a student record stores an OUTCOME: an evaluation entry carries
@@ -1539,10 +1652,10 @@ language sql immutable as $$ select array_length(wa.e_item_ids(), 1) $$;
 -- MIRROR: app/app.js → WA.GRADE_PASS_MIN / WA.GRADE_BANDS / WA.gradeBand /
 -- WA.gradePassed. Change one, change the other.
 create or replace function wa.grade_pass_min() returns numeric
-language sql immutable as $$ select 60::numeric $$;
+language sql immutable set search_path = public, wa, pg_temp as $$ select 60::numeric $$;
 
 create or replace function wa.grade_band(g numeric) returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case
     when g is null then null
     when g >= 90 then 'excellent'
@@ -1555,7 +1668,7 @@ $$;
 -- a row with NO grade is not a pass: an evaluation whose result has not been
 -- written yet has not been characterised anything
 create or replace function wa.grade_passed(g numeric) returns boolean
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select g is not null and g >= wa.grade_pass_min()
 $$;
 
@@ -1577,7 +1690,7 @@ $$;
 -- has been flown never disappears from a table.
 -- MIRROR: app/app.js → WA.evalOperativeOf / WA.attemptLater.
 create or replace function wa.eval_operative(p_rec jsonb, p_id text) returns jsonb
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   with att as (
     select t.e,
            (t.ord - 1)::int as i,
@@ -1609,7 +1722,7 @@ $$;
 -- admin_get_data ships beside the record so the server's arithmetic and the
 -- dashboard's are demonstrably the same arithmetic. `null` = never flown.
 create or replace function wa.eval_grades(p_rec jsonb) returns jsonb
-language sql stable as $$
+language sql stable set search_path = public, wa, pg_temp as $$
   select coalesce(jsonb_object_agg(k.id, coalesce(wa.eval_operative(p_rec, k.id), 'null'::jsonb)),
                   '{}'::jsonb)
   from unnest(wa.eval_ids()) k(id)
@@ -1618,7 +1731,7 @@ $$;
 -- FAIL / ALMOST GOOD categories — the four syllabus tracks. 'other' is not
 -- offered by the form; it only carries v1 free-text rows through migration.
 create or replace function wa.item_cats() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['contact','instrument','formation','vfr_navigation','other']::text[]
 $$;
 
@@ -1632,7 +1745,7 @@ $$;
 -- Evaluator, and its evaluator list stays open.
 -- MIRROR: app/app.js → WA.FPC_EVALUATORS. Change one, change the other.
 create or replace function wa.fpc_evaluators() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['Squadron CO','DO']::text[]
 $$;
 
@@ -1644,7 +1757,7 @@ $$;
 -- 6. ΑΛΛΗ ΑΙΤΙΑ (a blank line on the form → the free-text note here).
 -- MIRROR: app/app.js → WA.NFS_REASONS. Change one, change the other.
 create or replace function wa.nfs_reasons() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['questionnaire','briefing','flight','fs','illness','other']::text[]
 $$;
 
@@ -1654,7 +1767,7 @@ $$;
 -- verbatim. A row with neither reason nor note is flagged legacy: the form
 -- asks which of the six causes it was and nothing is guessed for it.
 create or replace function wa.nfs_reason_fix(e jsonb) returns jsonb
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case
     when jsonb_typeof(e) <> 'object' then e
     when (e->>'reason') = any(wa.nfs_reasons()) then e
@@ -1695,7 +1808,7 @@ $$;
 -- informs the student of the reasons he was put in ΚΕΠΕ).
 -- MIRROR: app/app.js → WA.SMS_REASONS. Change one, change the other.
 create or replace function wa.sms_reasons() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['sortie59','two63','airsickness','written','oral','instructor',
                'judgement']::text[]
 $$;
@@ -1706,7 +1819,7 @@ $$;
 -- the seven it was before the record can be saved again — the standing
 -- "keep it, ask for it" contract.
 create or replace function wa.sms_reason_fix(e jsonb) returns jsonb
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case
     when jsonb_typeof(e) <> 'object' then e
     when (e->>'reason') = any(wa.sms_reasons()) then e
@@ -1723,7 +1836,7 @@ $$;
 -- sequence beside this one.
 -- MIRROR: proposals_level_chk above · app/app.js → WA.LEVELS.
 create or replace function wa.level_keys() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['strongly_recommended', 'recommended', 'alternate',
                'other_assignments', 'strongly_other_assignments']::text[]
 $$;
@@ -1736,7 +1849,7 @@ $$;
 -- null for anything else — an unassessed row weighs nothing and, crucially,
 -- COUNTS as nothing: it is excluded from the mean rather than scored zero.
 create or replace function wa.level_weight(p_level text) returns int
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case p_level
     when 'strongly_recommended'       then 10
     when 'recommended'                then 8
@@ -1751,7 +1864,7 @@ $$;
 -- own instructors: one spelling, one source, no drift between the form, the
 -- brief, the CSV and the print sheet.
 create or replace function wa.level_label(p_level text) returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case p_level
     when 'strongly_recommended'       then 'Strongly Recommended'
     when 'recommended'                then 'Recommended'
@@ -1776,7 +1889,7 @@ $$;
 -- This is what makes "category Instrument + flight C4302" impossible: the
 -- letter IS the track, so the pair contradicts itself and is refused.
 create or replace function wa.code_track(p_code text) returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case
     when p_code is null or upper(p_code) !~ '^[BCIFN][0-9]{4}$' then null
     when left(upper(p_code), 1) in ('B', 'C') then 'contact'
@@ -1838,7 +1951,7 @@ $$;
 -- which is where the directive puts them («ενα πινακα στο τελος»).
 -- MIRROR: app/app.js → WA.COUNTED.
 create or replace function wa.sections() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['nfs','sms','fail','almost_good','airsickness',
                'evaluations','solo_flights','fpc','cef',
                'flights','fs','lessons','exams']::text[]
@@ -1846,7 +1959,7 @@ $$;
 
 -- the two bands, which are also the two log-flight section names
 create or replace function wa.log_bands() returns text[]
-language sql immutable as $$ select array['flights','fs']::text[] $$;
+language sql immutable set search_path = public, wa, pg_temp as $$ select array['flights','fs']::text[] $$;
 
 -- HOW MANY ENTRIES ONE SECTION MAY HOLD. 200 was a flat literal until round 12
 -- put the whole syllabus in reach of a record: 47 ground courses over several
@@ -1855,7 +1968,7 @@ language sql immutable as $$ select array['flights','fs']::text[] $$;
 -- (a flight row is ~180 bytes against a 400 000-byte ceiling); the cap is only
 -- there to stop a runaway client.
 create or replace function wa.section_cap(p_sec text) returns int
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case when p_sec in ('flights','fs','lessons') then 400 else 200 end
 $$;
 
@@ -1872,7 +1985,7 @@ $$;
 -- them the catalogue was never the right list to look in.
 -- MIRROR: app/app.js → WA.FLIGHT_KINDS.
 create or replace function wa.flight_kinds() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['syllabus','repeat','fcf','cef','other']::text[]
 $$;
 
@@ -1897,7 +2010,7 @@ $$;
 --   · NG → neither. A familiarisation ride nobody was in a position to score is
 --     not a mission verdict either.
 create or replace function wa.missions() returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select array['complete','incomplete']::text[]
 $$;
 
@@ -1906,7 +2019,7 @@ $$;
 -- very_good · good → complete; lagging · failed → incomplete.
 -- MIRROR: app/app.js → WA.gradeMission.
 create or replace function wa.grade_mission(g numeric) returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case wa.grade_band(g)
     when 'excellent' then 'complete' when 'very_good' then 'complete'
     when 'good'      then 'complete'
@@ -1927,7 +2040,7 @@ drop function if exists wa.verdicts();
 -- periods box; round 12b removed that box and the flight log's `seq` is now its
 -- only caller — so it stays, and it is where a small counted integer belongs.
 create or replace function wa.chk_int(v jsonb, p_where text, p_min int, p_max int)
-returns void language plpgsql immutable as $$
+returns void language plpgsql immutable set search_path = public, wa, pg_temp as $$
 declare n numeric;
 begin
   if v is null or jsonb_typeof(v) = 'null' then return; end if;
@@ -1945,7 +2058,7 @@ end $$;
 -- uncommon one a correction. Nullable, because the same debrief lag applies —
 -- a sortie can be dated and flown before the times are in.
 create or replace function wa.chk_duration(v jsonb, p_where text)
-returns void language plpgsql immutable as $$
+returns void language plpgsql immutable set search_path = public, wa, pg_temp as $$
 declare n numeric;
 begin
   if v is null or jsonb_typeof(v) = 'null' then return; end if;
@@ -1980,7 +2093,7 @@ drop function if exists wa.pending_count(jsonb);
 -- retired in round 8) can never enter the record.
 -- MIRROR: app/app.js → WA.ENTRY_KEYS. Change one, change the other.
 create or replace function wa.entry_keys(p_sec text) returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case p_sec
     when 'nfs'          then array['date','reason','note','legacy','entered_by']
     -- ROUND 8: an SMS entrance names the ΚΕΠΕ entry condition it was raised
@@ -2061,7 +2174,7 @@ $$;
 -- PLACEHOLDER, not an entry — it must not be counted, must not be stamped as
 -- "entered by the admin", and must not demand a date it cannot have.
 create or replace function wa.slot_empty(p_sec text, e jsonb) returns boolean
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case
     when jsonb_typeof(e) <> 'object' then false
     when p_sec = 'solo_flights' then
@@ -2079,7 +2192,7 @@ $$;
 
 -- one entry, reduced to the keys its section allows (read-time repair)
 create or replace function wa.strip_entry(e jsonb, p_sec text) returns jsonb
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case when jsonb_typeof(e) <> 'object' then '{}'::jsonb else
     coalesce((select jsonb_object_agg(t.k, t.v) from jsonb_each(e) t(k, v)
               where t.k = any(wa.entry_keys(p_sec))), '{}'::jsonb) end
@@ -2089,7 +2202,7 @@ $$;
 -- v2 shape (round 3): every section is a LIST of dated entries; counts are
 -- derived, never stored. Round 4 adds the per-section key whitelist.
 create or replace function wa.validate_record(p jsonb) returns void
-language plpgsql immutable as $$
+language plpgsql immutable set search_path = public, wa, pg_temp as $$
 declare
   k text;
   f text;
@@ -2744,7 +2857,7 @@ end $$;
 -- never grow — the field is gone from the form, and it cannot come back
 -- through a hand-made payload either.
 create or replace function wa.phase_count(p jsonb) returns int
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select coalesce((
     select count(*)::int
     from jsonb_array_elements(
@@ -2767,7 +2880,7 @@ $$;
 -- Evaluator whose written finding is a different object from a Δοκιμή Προόδου.
 -- MIRROR: app/app.js → WA.fpcResultNote / WA.FPC_RESULT_TIP.
 create or replace function wa.fpc_result_count(p jsonb) returns int
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select coalesce((
     select count(*)::int
     from jsonb_array_elements(
@@ -2781,7 +2894,7 @@ $$;
 -- being quietly REWRITTEN under an equal count. Kept-or-dropped means the
 -- surviving texts must be the stored texts.
 create or replace function wa.fpc_results(p jsonb) returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select coalesce((
     select array_agg(r order by r) from (
       select trim(e->>'result') as r
@@ -2793,7 +2906,7 @@ $$;
 
 -- how many entries of ONE section still carry the legacy escape hatch
 create or replace function wa.legacy_count(p jsonb) returns int
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select coalesce((
     select count(*)::int
     from jsonb_array_elements(
@@ -2809,7 +2922,7 @@ $$;
 -- form asks the student for the missing field. The stored row is untouched —
 -- a v1 cloud instance keeps working the moment this file is re-run.
 create or replace function wa.migrate_record(p jsonb) returns jsonb
-language plpgsql immutable as $$
+language plpgsql immutable set search_path = public, wa, pg_temp as $$
 declare
   o jsonb := '{}'::jsonb;
   arr jsonb;
@@ -3253,36 +3366,44 @@ end $$;
 -- nothing anywhere else.
 -- MIRROR: app/app.js → WA.INS_SECTIONS.
 create or replace function wa.ins_sections() returns text[]
-language sql immutable as $$ select array['currency']::text[] $$;
+language sql immutable set search_path = public, wa, pg_temp as $$ select array['currency']::text[] $$;
 
 -- HOW MANY ROWS ONE SECTION MAY HOLD. An instructor flies most days of the
 -- week; 400 rows is roughly two years of his own sorties, and like every other
 -- cap in this schema it is a runaway-client stop and not a squadron rule.
 create or replace function wa.ins_section_cap(p_sec text) returns int
-language sql immutable as $$ select case when p_sec = 'currency' then 400 else 200 end $$;
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select case when p_sec = 'currency' then 400 else 200 end
+$$;
 
 -- PER-SECTION KEY WHITELIST — the exhaustive list of keys ONE entry of an
 -- instructor's record may carry. Anything else is refused on write and dropped
 -- on read, exactly as wa.entry_keys does for a student's.
 -- MIRROR: app/app.js → WA.INS_ENTRY_KEYS. Change one, change the other.
 create or replace function wa.ins_entry_keys(p_sec text) returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case p_sec
-    -- date      required — a currency claim without a day claims nothing
-    -- kind      'own' (his own sortie) / 'student' (a sortie with a student)
-    -- category  'aeros' (Πίνακας 9, the air programme) / 'fs' (Πίνακας 6, SIM)
-    -- e_items   the 3-01 EVENTS the sortie exercised — ids of wa.e_item_ids(),
-    --           possibly NONE: a plain S flight that exercised no event is
-    --           still a flight, and the ruling asks for it by name
-    -- seq       which sortie of that kind, category and day — 1, and 2 for the
-    --           second. AUTHORED, never an array index (the round-12 doctrine)
-    when 'currency' then array['date','kind','category','e_items','seq']
+    -- date        required — a currency claim without a day claims nothing
+    -- kind        'own' (his own sortie) / 'student' (a sortie with a student)
+    -- s_category  WHICH SORTIE — an id of wa.s_category_ids(): Σ-1 · Σ-2 day ·
+    --             Σ-2 night · Σ-3 · Σ-4 · Σ-20 of Πίνακας 9, SIM-1…SIM-ΔΑ of
+    --             Πίνακας 6, FDMS's two recording columns, and the two legacy
+    --             ids of §4v·1. The PROGRAMME is derived from it
+    --             (wa.s_category_group), which is why round 19's `category` is
+    --             gone from this list: two keys for one fact is two keys that
+    --             can contradict each other.
+    -- e_items     the 3-01 EVENTS the sortie exercised — ids of wa.e_item_ids(),
+    --             possibly NONE: a plain Σ flight that exercised no event is
+    --             still a flight, and the ruling asks for it by name
+    -- seq         which sortie of that kind, category and day — 1, and 2 for the
+    --             second. AUTHORED, never an array index (round-12 doctrine)
+    when 'currency' then array['date','kind','s_category','e_items','seq']
     else array[]::text[] end
 $$;
 
 -- one entry, reduced to the keys its section allows (read-time repair)
 create or replace function wa.ins_strip_entry(e jsonb, p_sec text) returns jsonb
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case when jsonb_typeof(e) <> 'object' then '{}'::jsonb else
     coalesce((select jsonb_object_agg(t.k, t.v) from jsonb_each(e) t(k, v)
               where t.k = any(wa.ins_entry_keys(p_sec))), '{}'::jsonb) end
@@ -3291,7 +3412,7 @@ $$;
 -- the E-items of one row, as a text[] — used by the uniqueness and membership
 -- checks below and by nothing that writes
 create or replace function wa.e_items_of(e jsonb) returns text[]
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case when jsonb_typeof(e->'e_items') = 'array'
     then coalesce((select array_agg(x #>> '{}')
                    from jsonb_array_elements(e->'e_items') x), array[]::text[])
@@ -3303,7 +3424,7 @@ $$;
 -- the whole section in one act and «invalid payload» would send him hunting
 -- through his own year for the row the server meant.
 create or replace function wa.validate_instructor_record(p jsonb) returns void
-language plpgsql immutable as $$
+language plpgsql immutable set search_path = public, wa, pg_temp as $$
 declare
   k text; f text; i int; j int; e jsonb; w text;
   ids text[]; seen text[];
@@ -3331,9 +3452,23 @@ begin
         perform wa.chk((e->>'kind') = any(wa.currency_kinds()), w || '.kind',
           format('a flight is either your own or one with a student — %s',
                  array_to_string(wa.currency_kinds(), ' / ')));
-        perform wa.chk((e->>'category') = any(wa.currency_categories()), w || '.category',
-          format('a flight is flown in the air or in the simulator — %s',
-                 array_to_string(wa.currency_categories(), ' / ')));
+        -- ROUND 20 — WHICH Σ, AND THE REFUSAL SAYS IT BY NAME. The closed list
+        -- is the printed one (Πίνακας 9 + Πίνακας 6 + FDMS's two columns), and
+        -- an id outside it is refused with the PRINTED NAMES of the programme
+        -- it would have belonged to — «s-7» is a slug nobody typed, and
+        -- «invalid category» would send an instructor hunting through a year.
+        -- the COUNT is the count of what the sentence then LISTS: the legacy
+        -- ids are storable and never offered, so naming them in the total and
+        -- omitting them from the list would be a number nobody could verify
+        -- against the words beside it.
+        perform wa.chk((e->>'s_category') = any(wa.s_category_ids()), w || '.s_category',
+          format('«%s» is not a category of Πίνακας 9 (ΑΕΡΟΣ) or Πίνακας 6 (F/S) — choose one of the %s a flight may be recorded under: %s',
+                 coalesce(e->>'s_category', ''),
+                 (select count(*) from unnest(wa.s_category_ids()) t(id)
+                   where not (t.id = any(wa.s_category_legacy_ids()))),
+                 (select string_agg(wa.s_category_name(t.id), ' · ' order by t.ord)
+                    from unnest(wa.s_category_ids()) with ordinality t(id, ord)
+                   where not (t.id = any(wa.s_category_legacy_ids())))));
         perform wa.chk_int(e->'seq', w || '.seq', 1, 9);
         -- THE EVENTS. A closed list, and the refusal names the id it could not
         -- find: a currency claim that cannot be looked up in the 3-01 is a
@@ -3369,25 +3504,59 @@ begin
       seen := array[]::text[];
       for i in 0 .. jsonb_array_length(p->k) - 1 loop
         e := p->k->i;
-        f := (e->>'kind') || '|' || (e->>'category') || '|' || (e->>'date') || '|' ||
+        f := (e->>'kind') || '|' || (e->>'s_category') || '|' || (e->>'date') || '|' ||
              coalesce(e->>'seq', '1');
         perform wa.chk(not (f = any(seen)), format('%s[%s]', k, i),
           format('this flight is already recorded (%s, %s, flight %s of the day) — give the second one its own number',
-                 e->>'date', e->>'category', coalesce(e->>'seq', '1')));
+                 e->>'date', coalesce(wa.s_category_name(e->>'s_category'), e->>'s_category'),
+                 coalesce(e->>'seq', '1')));
         seen := seen || f;
       end loop;
     end if;
   end loop;
 end $$;
 
+-- ROUND 20 — THE ONE LEGACY SHAPE THIS RECORD HAS: a round-19 row that stored
+-- the PROGRAMME (`category` = 'aeros' / 'fs') and no Σ category at all.
+--
+-- IT DOES NOT GUESS, AND THAT IS THE WHOLE DESIGN. Nobody can reconstruct from
+-- «ΑΕΡΟΣ on the 26th» whether the sortie was a Σ-1 or a Σ-3 — the fact was
+-- never recorded, and mapping it to «the usual one» would put a category in an
+-- instructor's logbook that he never claimed. So the migration carries across
+-- the only thing the old row really knew (the programme) onto a category whose
+-- printed name SAYS it is unspecified, and every surface renders it marked:
+-- app/currency-catalog.js `legacy: true`, a red-edged chip in the table, a line
+-- in the FDMS bridge saying which rows still need the developer's hand.
+--
+-- TWO LEGACY IDS AND NOT ONE, for the same reason: 'aeros' and 'fs' are facts
+-- the old row carried, and folding both into a single «unspecified» would throw
+-- away something TRUE in order to say something honest.
+--
+-- THE CLOUD HAS NOTHING TO MIGRATE (`instructor_records` verified EMPTY on
+-- 27/08/2026), so this path exists for the local demo fixtures and for any
+-- instance that ran round 19 before this deploy. It is idempotent: a row that
+-- already carries `s_category` is left exactly as it stands.
+create or replace function wa.migrate_ins_entry(e jsonb, p_sec text) returns jsonb
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select case
+    when jsonb_typeof(e) <> 'object' then '{}'::jsonb
+    when p_sec <> 'currency' then e
+    when e ? 's_category' then e
+    when (e->>'category') = 'aeros' then e || jsonb_build_object('s_category', 'legacy-aeros-unspecified')
+    when (e->>'category') = 'fs' then e || jsonb_build_object('s_category', 'legacy-fs-unspecified')
+    else e end
+$$;
+
 -- READ-TIME REPAIR of an instructor record — the twin of wa.migrate_record.
--- It has no legacy shapes to heal (this section is one round old), so its whole
--- job is the FINAL PASS: every section the registry does not name is dropped,
--- and inside a section every key it does not name is stripped. That is what
--- makes a retired key stop existing the moment the record is read, instead of
--- lingering in storage until somebody notices.
+-- The legacy pass above runs FIRST and the strip runs after it, because the
+-- strip is what makes `category` stop existing: reading it after the key had
+-- been dropped would heal nothing and lose the programme.
+-- The rest is the FINAL PASS: every section the registry does not name is
+-- dropped, and inside a section every key it does not name is stripped. That is
+-- what makes a retired key stop existing the moment the record is read, instead
+-- of lingering in storage until somebody notices.
 create or replace function wa.migrate_instructor_record(p jsonb) returns jsonb
-language plpgsql immutable as $$
+language plpgsql immutable set search_path = public, wa, pg_temp as $$
 declare o jsonb := '{}'::jsonb; k text; arr jsonb; i int;
 begin
   if jsonb_typeof(p) <> 'object' then return '{}'::jsonb; end if;
@@ -3395,7 +3564,8 @@ begin
     arr := '[]'::jsonb;
     if jsonb_typeof(p->k) = 'array' then
       for i in 0 .. jsonb_array_length(p->k) - 1 loop
-        arr := arr || jsonb_build_array(wa.ins_strip_entry(p->k->i, k));
+        arr := arr || jsonb_build_array(
+          wa.ins_strip_entry(wa.migrate_ins_entry(p->k->i, k), k));
       end loop;
     end if;
     o := o || jsonb_build_object(k, arr);
@@ -3403,9 +3573,21 @@ begin
   return o;
 end $$;
 
+-- HOW MANY ROWS OF A RECORD STILL CARRY A LEGACY CATEGORY. The bridge and the
+-- dashboard both need this number, and neither should count it for itself: a
+-- legacy row is not a fault to hide, it is work the developer owes, and a
+-- figure computed twice is a figure that eventually disagrees with itself.
+create or replace function wa.ins_legacy_count(p jsonb) returns int
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select coalesce((
+    select count(*)::int
+    from jsonb_array_elements(coalesce(p->'currency', '[]'::jsonb)) e
+    where (e->>'s_category') = any(wa.s_category_legacy_ids())), 0)
+$$;
+
 -- how many rows an instructor record holds, all sections together
 create or replace function wa.ins_entry_count(p jsonb) returns int
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select coalesce(sum(coalesce(jsonb_array_length(p->k), 0))::int, 0)
   from unnest(wa.ins_sections()) k
 $$;
@@ -3415,7 +3597,7 @@ $$;
 -- can see WHICH row the shared roster owns, call_sign / country / test_pilot
 -- because they are how the squadron actually names and sorts its instructors.
 create or replace function wa.person_json(p public.people) returns jsonb
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select jsonb_build_object(
     'id', p.id, 'role', p.role, 'mn', p.mn, 'rank', p.rank,
     'first_name', p.first_name, 'last_name', p.last_name, 'class', p.class,
@@ -3433,7 +3615,7 @@ $$;
 -- exists to be honest about provenance.
 -- (An unflown fixed slot is a placeholder, not an entry — round 5.)
 create or replace function wa.entry_count_by(p jsonb, p_source text) returns int
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select coalesce((
     select count(*)::int
     from jsonb_each(coalesce(p, '{}'::jsonb)) s(key, val)
@@ -3447,7 +3629,7 @@ $$;
 -- Kept as its own name because a dozen callers say it, and because "the admin's"
 -- is the question every surface actually asks.
 create or replace function wa.co_entry_count(p jsonb) returns int
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select wa.entry_count_by(p, 'admin')
 $$;
 
@@ -3459,7 +3641,7 @@ $$;
 -- otherwise every record would arrive carrying 16 "entries" it does not have,
 -- and "1 of 18 entered by the admin" would stop being true.
 create or replace function wa.entry_count(p jsonb) returns int
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select coalesce((
     select count(*)::int
     from jsonb_each(coalesce(p, '{}'::jsonb)) s(key, val)
@@ -3479,7 +3661,7 @@ $$;
 -- as "the admin filled the whole thing in" is the round-4 defect.
 -- p_rec is the MIGRATED record; p_stored is the column as it stands.
 create or replace function wa.record_stamp(p_rec jsonb, p_stored text) returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case
     when wa.co_entry_count(p_rec) > 0 then 'admin'
     when wa.entry_count(p_rec) = 0 and p_stored = 'admin' then 'admin'
@@ -3519,7 +3701,7 @@ drop function if exists wa.strip_stamps(jsonb);
 -- "empty" both ways. Anything else — a changed date, one more item, a grade
 -- typed over — makes a DIFFERENT entry, which is the point.
 create or replace function wa.entry_core(e jsonb) returns jsonb
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select case when jsonb_typeof(e) <> 'object' then coalesce(e, 'null'::jsonb) else
     coalesce((select jsonb_object_agg(t.k, t.v) from jsonb_each(e) t(k, v)
               where t.k <> 'entered_by' and jsonb_typeof(t.v) <> 'null'), '{}'::jsonb) end
@@ -3533,7 +3715,7 @@ $$;
 -- p_old is the stored record AFTER wa.migrate_record — the same shape the
 -- form was handed, so an untouched row round-trips to an exact match.
 create or replace function wa.stamp_record_diff(p_new jsonb, p_old jsonb) returns jsonb
-language plpgsql immutable as $$
+language plpgsql immutable set search_path = public, wa, pg_temp as $$
 declare
   o jsonb := '{}'::jsonb;
   k text; nw jsonb; od jsonb; arr jsonb; e jsonb; core jsonb;
@@ -3603,7 +3785,7 @@ end $$;
 -- (The stored value stays entered_by='admin' and the internal names keep
 -- theirs — round 17's rule: what the USER SEES stops claiming CO-ness.)
 create or replace function wa.admin_lock_msg() returns text
-language sql immutable as $$
+language sql immutable set search_path = public, wa, pg_temp as $$
   select 'this entry was set by the squadron administration and only the admin can change or remove it — it is shown on your form locked, and your save must leave it exactly as it stands'
 $$;
 
@@ -3616,7 +3798,7 @@ $$;
 -- has no match either; both leave a stored stamp unclaimed, and that is the
 -- refusal — one sentence, naming the rule, for both.
 create or replace function wa.carry_stamps(p_new jsonb, p_old jsonb) returns jsonb
-language plpgsql immutable as $$
+language plpgsql immutable set search_path = public, wa, pg_temp as $$
 declare
   o jsonb := '{}'::jsonb;
   k text; nw jsonb; od jsonb; arr jsonb; e jsonb; core jsonb;
@@ -3691,7 +3873,7 @@ end $$;
 -- same legacy rule, same upsert. An admin typo is still a typo.
 create or replace function wa.write_record(p_student uuid, p_payload jsonb, p_as_admin boolean)
 returns jsonb
-language plpgsql volatile as $$
+language plpgsql volatile set search_path = public, wa, pg_temp as $$
 declare
   t timestamptz;
   pl jsonb;
@@ -3787,7 +3969,7 @@ end $$;
 create or replace function wa.write_proposal(p_instructor uuid, p_student uuid,
                                              p_payload jsonb, p_as_admin boolean)
 returns jsonb
-language plpgsql volatile as $$
+language plpgsql volatile set search_path = public, wa, pg_temp as $$
 declare
   s public.people;
   k text;
@@ -3904,7 +4086,7 @@ end $$;
 -- user ever meets; the absence of the path is what makes it true.
 create or replace function wa.write_instructor_record(p_instructor uuid, p_payload jsonb)
 returns jsonb
-language plpgsql volatile as $$
+language plpgsql volatile set search_path = public, wa, pg_temp as $$
 declare t timestamptz; pl jsonb;
 begin
   -- the SAME normalisation boundary the student record crosses (round 5b):
@@ -3932,7 +4114,7 @@ end $$;
 -- sections rather than nothing, so every reader gets the same shape whether
 -- the instructor has ever saved or not
 create or replace function wa.instructor_record_of(p_instructor uuid) returns jsonb
-language sql stable as $$
+language sql stable set search_path = public, wa, pg_temp as $$
   select wa.migrate_instructor_record(
            coalesce((select ir.data from public.instructor_records ir
                       where ir.instructor_id = p_instructor), '{}'::jsonb))
@@ -3952,7 +4134,7 @@ $$;
 -- empty list with no reason attached is a blank page, and a blank page reads
 -- as a broken link rather than as a decision somebody made.
 create or replace function wa.instructor_dataset(v public.people) returns jsonb
-language sql stable as $$
+language sql stable set search_path = public, wa, pg_temp as $$
   select jsonb_build_object(
     'me', wa.person_json(v),
     'assessment_class', wa.assessment_class(),
@@ -4011,7 +4193,7 @@ $$;
 -- entry — the picker is a list of names — and it takes the SENIOR one's key, so
 -- a shared surname lands where the more senior of the two belongs.
 create or replace function wa.instructor_surnames() returns jsonb
-language sql stable as $$
+language sql stable set search_path = public, wa, pg_temp as $$
   select coalesce((
     select jsonb_agg(t.ln order by t.k, t.ln)
     from (select p.last_name as ln, min(wa.seniority_key(p)) as k
@@ -4643,19 +4825,36 @@ begin
     -- for the same reason the student records keep theirs: the migration is a
     -- READ, and an export that showed only its output could not prove what the
     -- table actually holds.
+    -- ROUND 20 — `legacy_rows` rides along because a bridge must be able to
+    -- ask «which of these still need a hand?» without knowing what a legacy id
+    -- looks like. It counts the rows whose Σ was never recorded (§4v·1).
     'instructor_records', coalesce((select jsonb_agg(jsonb_build_object(
                             'instructor_id', ir.instructor_id,
                             'data', wa.migrate_instructor_record(ir.data),
                             'data_as_stored', ir.data,
                             'entries_total', wa.ins_entry_count(
                                                wa.migrate_instructor_record(ir.data)),
+                            'legacy_rows', wa.ins_legacy_count(
+                                             wa.migrate_instructor_record(ir.data)),
                             'last_update', ir.last_update))
                           from public.instructor_records ir), '[]'::jsonb),
     -- and the closed list the ids above were chosen from, so a reader that has
     -- never seen the 3-01 can still print «Ε-32 — BFM» instead of a slug
     'e_items', coalesce((select jsonb_agg(jsonb_build_object(
                   'id', t.id, 'name', wa.e_item_name(t.id)) order by t.ord)
-                from unnest(wa.e_item_ids()) with ordinality t(id, ord)), '[]'::jsonb));
+                from unnest(wa.e_item_ids()) with ordinality t(id, ord)), '[]'::jsonb),
+    -- ROUND 20 — and the OTHER closed list, for the same reason. A reader gets
+    -- the printed name, the programme the category belongs to and whether the
+    -- id is a legacy placeholder, so «legacy-aeros-unspecified» is never a slug
+    -- the bridge has to recognise by spelling.
+    's_categories', coalesce((select jsonb_agg(jsonb_build_object(
+                      'id', t.id,
+                      'name', wa.s_category_name(t.id),
+                      'programme', wa.s_category_group(t.id),
+                      'programme_name', wa.currency_category_name(
+                                          wa.s_category_group(t.id)),
+                      'legacy', t.id = any(wa.s_category_legacy_ids())) order by t.ord)
+                    from unnest(wa.s_category_ids()) with ordinality t(id, ord)), '[]'::jsonb));
 end $$;
 
 -- weekly keep-alive ping (GitHub Action) — touches nothing, returns 'ok'
@@ -4829,6 +5028,42 @@ end $$;
 insert into public.people (role, rank, first_name, last_name)
 select 'admin', '', '', 'Admin'
 where not exists (select 1 from public.people where role = 'admin');
+
+-- ══ ROUND 20 — THE search_path AUDIT: THE SWEEP PROVES ITSELF ══════════════
+-- The 27/08 advisor triage (spec §4φ) counted `function_search_path_mutable`
+-- ×102 — every helper in the `wa` schema. All 102 now carry
+-- «set search_path = public, wa, pg_temp», WHICH IS THE STRING THE PUBLIC RPCs
+-- ALREADY SET: a wa helper is only ever reached from a public RPC that has
+-- already put exactly those three schemas on the path, so pinning them to it is
+-- behaviour-identical by construction rather than by hope. wa.gen_token keeps
+-- its own (`public, extensions, pg_temp`) because pgcrypto lives in a fourth
+-- schema on Supabase — which is why it was the one function pinned already.
+--
+-- AND THE PIN IS AUDITED, NOT REMEMBERED. `create or replace function` replaces
+-- a function's SET clauses along with its body, so a future round that
+-- re-creates one wa helper without the clause would silently unpin it and the
+-- advisor would grow the lint back one function at a time. This block FAILS THE
+-- DEPLOYMENT instead, naming every function that lost it — the only kind of
+-- reminder that cannot be forgotten. It reads the catalog, so what it asserts
+-- is true of the DATABASE and not merely of this file.
+do $$
+declare bad text[];
+begin
+  select coalesce(array_agg(p.oid::regprocedure::text order by p.proname), '{}')
+    into bad
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'wa'
+    and not exists (select 1 from unnest(coalesce(p.proconfig, '{}')) c
+                    where c like 'search_path=%');
+  if coalesce(array_length(bad, 1), 0) > 0 then
+    raise exception 'search_path is not pinned on % wa function(s): % — every wa function must carry «set search_path = public, wa, pg_temp» (round 20; spec §4φ advisor triage)',
+      array_length(bad, 1), array_to_string(bad, ', ');
+  end if;
+  raise notice 'r20: search_path pinned on all % wa functions',
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'wa');
+end $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- YOUR ADMIN LINK — copy the admin_link value from the result grid below,

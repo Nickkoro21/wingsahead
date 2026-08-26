@@ -126,22 +126,67 @@ WA.renderAdmin = async function (view, me) {
      Overview cannot show. */
   const NO_CLASS = "__noclass__";      /* the sentinel of "no class recorded" */
   function classOf(s) { return String((s.person && s.person.class) || "").trim(); }
-  function classList() {
+  /* the class of a PERSON row (People & links works on people, not on the
+     dashboard's student objects) — one function, so the two populations are
+     read by the same rule and cannot bucket the same person differently */
+  function classOfPerson(p) { return String((p && p.class) || "").trim(); }
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     ROUND 20 — THE CHIPS ARE ONE COMPONENT, AND THEY ARE ON EVERY PAGE.
+     ──────────────────────────────────────────────────────────────────────────
+     RULING (2026-08-27): «όπως στο overview χωρίζεις τους μαθητές ανά τάξη να
+     γίνεται και στις υπόλοιπες σελίδες.»
+
+     ONE CHOICE, FOUR PAGES. `A.cls` was already the Overview's, already
+     persisted in localStorage and already survived a reload; what round 11 did
+     not do was let the other three tabs read it. They do now — the same chip
+     row, the same state, the same key — so picking 98B on Brief mode is picking
+     it on the Overview, and coming back to the Overview does not ask again.
+
+     THE CHIP SET IS ONE SET, DERIVED FROM ONE UNION. The Overview is about the
+     ACTIVE students of the dashboard payload and People & links is about EVERY
+     student row the roster holds, revoked ones included — two populations, and
+     chips derived from whichever page happened to be open would appear and
+     disappear as the admin moved between tabs, silently dropping a filter he
+     had chosen. So the SET is the union of both, and the COUNT is per page:
+     the chips never move, and what each one says is true of the page you are
+     reading. A chip whose count is 0 here stays clickable, and the page it
+     filters says «nobody in this class» in its own words — which is a fact, and
+     better than a control that vanishes.
+
+     THE UNCLASSIFIED KEEP A CHIP OF THEIR OWN. There is no list of classes
+     anywhere in this database — a class exists because a student carries its
+     name in people.class and stops existing when the last one stops carrying it
+     — so students the roster gave no class collect under one honest chip rather
+     than disappearing. A student with no class must never become a student a
+     page cannot show.
+     ══════════════════════════════════════════════════════════════════════════ */
+  /* every class id the admin may filter by, in sorted order, unclassified last */
+  function classIds() {
     const seen = {}, out = [];
-    for (const s of (A.data ? A.data.students : [])) {
-      const c = classOf(s) || NO_CLASS;
-      if (!seen[c]) { seen[c] = 0; out.push(c); }
-      seen[c]++;
-    }
+    const add = (c) => { const k = c || NO_CLASS; if (!seen[k]) { seen[k] = 1; out.push(k); } };
+    for (const s of (A.data ? A.data.students : [])) add(classOf(s));
+    for (const p of (A.people || [])) if (p.role === "student") add(classOfPerson(p));
     out.sort((a, b) => a === NO_CLASS ? 1 : b === NO_CLASS ? -1 : a.localeCompare(b));
-    return out.map((c) => ({ id: c, n: seen[c],
-      label: c === NO_CLASS ? "No class recorded" : c }));
+    return out;
   }
-  /* a filter that matches nobody is not a filter, it is a stale choice —
-     so an id that has left the roster silently reverts to All */
+  function classLabel(id) { return id === NO_CLASS ? "No class recorded" : id; }
+  /* the chips for one page: the shared set, counted over the population that
+     page is actually about */
+  function classList(pop, keyOf) {
+    const of = keyOf || ((s) => classOf(s) || NO_CLASS);
+    const list = pop || (A.data ? A.data.students : []);
+    const n = {};
+    for (const x of list) { const k = of(x); n[k] = (n[k] || 0) + 1; }
+    return classIds().map((c) => ({ id: c, n: n[c] || 0, label: classLabel(c) }));
+  }
+  /* a filter naming a class NOBODY carries any more is not a filter, it is a
+     stale choice — so an id that has left the roster entirely reverts to All.
+     Measured against the UNION, so a class that merely has nobody on the page
+     in front of you keeps its chip and its choice. */
   function activeClass() {
     if (!A.cls) return "";
-    return classList().some((c) => c.id === A.cls) ? A.cls : "";
+    return classIds().indexOf(A.cls) >= 0 ? A.cls : "";
   }
   /* the students the Overview and its three CSV exports are about */
   function visible() {
@@ -149,9 +194,59 @@ WA.renderAdmin = async function (view, me) {
     const all = A.data ? A.data.students : [];
     return c ? all.filter((s) => (classOf(s) || NO_CLASS) === c) : all;
   }
-  function classLabel(id) {
-    const hit = classList().find((c) => c.id === id);
-    return hit ? hit.label : id;
+  /* ── THE FILTERED DECK, AND WHERE WE ARE IN IT (round 20) ─────────────────
+     Student analysis and Brief mode show ONE student at a time out of a deck,
+     so the filter has to narrow the DECK and not merely the page: a «3 / 9»
+     over a filter that says 5 is a pager describing a list nobody can see.
+     A.sel still indexes A.data.students — every other surface depends on that
+     — so these two functions are the whole translation, used by both tabs.
+     A SELECTION THE FILTER JUST EXCLUDED FALLS TO THE FIRST OF WHAT IS LEFT.
+     The alternative is showing a 99A student under a chip reading 98B, which is
+     the page contradicting its own heading. */
+  function anaList() { return visible(); }
+  function anaPos() {
+    const list = anaList();
+    if (!list.length) return -1;
+    const cur = A.data.students[A.sel];
+    const i = list.indexOf(cur);
+    return i >= 0 ? i : 0;
+  }
+  /* the student the two one-at-a-time tabs are about — always one of the deck */
+  function anaStudent() {
+    const list = anaList();
+    if (!list.length) return null;
+    const at = anaPos();
+    const s = list[at];
+    /* keep A.sel honest, so the arrows, the rail and the Overview agree */
+    const ix = A.data.students.indexOf(s);
+    if (ix >= 0) A.sel = ix;
+    return s;
+  }
+  /* THE ONE CHIP ROW, rendered by the one builder. `pop` and `keyOf` say what
+     this page counts; `note` is the page's own sentence about what the filter
+     does here, because «filter by class» means something slightly different to
+     a table of people and to a deck of one student per screen. */
+  function classChipsHTML(opts) {
+    const o = opts || {};
+    const cls = activeClass();
+    const list = classList(o.pop, o.keyOf);
+    const total = (o.pop || (A.data ? A.data.students : [])).length;
+    const chip = (id, label, n, tip) =>
+      `<button type="button" class="chip${(cls === id) ? " is-on" : ""}" data-cls="${esc(id)}"
+        title="${esc(tip)}">${esc(label)} <span class="k">${esc(n)}</span></button>`;
+    return `
+      <div class="chiprow filterrow" role="group" aria-label="Filter by class">
+        <span class="k" style="align-self:center">Class</span>
+        ${chip("", "All classes", total, "Every " + (o.what || "student") +
+          " on this page, whatever class they are in")}
+        ${list.map((c) => chip(c.id, c.label, c.n,
+          (c.id === NO_CLASS
+            ? "Students the roster gave no class — they are still students, so they get their own chip instead of vanishing"
+            : "Only class " + c.label) +
+          (c.n ? "" : " — nobody in it on this page") +
+          ". The choice is shared: pick a class here and every admin page follows.")).join("")}
+        <span class="k" style="align-self:center" title="${esc(CLASS_READONLY_TIP)}">&#9432;</span>
+      </div>`;
   }
   /* ── THE RULING ON EXPORT SCOPE (round 11) ────────────────────────────────
      The three CSVs FOLLOW THE FILTER; the JSON export does NOT, and both are
@@ -177,7 +272,8 @@ WA.renderAdmin = async function (view, me) {
   const JSON_SCOPE_TIP =
     "ALWAYS COMPLETE — the class filter does not apply. This is the raw backup of every person, student record, assessment and instructor currency row, straight from the server; a partial file that looked like a full one would be a trap to restore from. It carries the marker “wa-export-v1”, so the FDMS bridge can tell it apart from any other JSON.";
   const CLASS_READONLY_TIP =
-    "The classes are read-only here — they follow the members. A class appears because a student carries its name, and disappears when the last one stops; there is no list to maintain. Change a student's class under People & links.";
+    "The classes are read-only here — they follow the members. A class appears because a student carries its name, and disappears when the last one stops; there is no list to maintain. Change a student's class under People & links. " +
+    "ROUND 20 — the choice is ONE choice: it is the same on the Overview, on Student analysis, in Brief mode and on People & links, and it is remembered in this browser between visits.";
 
   /* ══════════════════════════════════════════════════════════════════════════
      ROUND 18 — «ASSESSMENTS OPEN FOR: [class ▾]»
@@ -286,7 +382,7 @@ WA.renderAdmin = async function (view, me) {
     { id: "ana-assess", label: "Assessment" },
   ];
   function anaNavItems() {
-    const s = A.data && A.data.students[A.sel];
+    const s = A.data && anaStudent();
     const plain = ANA_CARDS.map((c) => ({ id: c.id, label: c.label }));
     if (!s) return plain;
     const st = s._stats;
@@ -491,17 +587,6 @@ WA.renderAdmin = async function (view, me) {
       return `<span style="margin-right:14px; white-space:nowrap">${esc(WA.personCall(i, true))} ${badge}</span>`;
     }).join(" ");
 
-    const list = classList();
-    const chip = (id, label, n, tip) =>
-      `<button type="button" class="chip${(cls === id) ? " is-on" : ""}" data-cls="${esc(id)}"
-        title="${esc(tip)}">${esc(label)} <span class="k">${n}</span></button>`;
-    const chips = chip("", "All classes", all.length,
-        "Every active student, whatever class they are in") +
-      list.map((c) => chip(c.id, c.label, c.n,
-        c.id === NO_CLASS
-          ? "Students the roster gave no class — they are still students, so they get their own chip instead of vanishing"
-          : "Only class " + c.label)).join("");
-
     return `
       <div class="toolrow">
         <span class="hint">${students.length}${cls ? " of " + all.length : ""} students ·
@@ -519,10 +604,7 @@ WA.renderAdmin = async function (view, me) {
         <button type="button" class="btn btn-sm" data-act="json-export"
           title="${esc(JSON_SCOPE_TIP)}">Export JSON — full</button>
       </div>
-      <div class="chiprow filterrow" role="group" aria-label="Filter by class">
-        <span class="k" style="align-self:center">Class</span>${chips}
-        <span class="k" style="align-self:center" title="${esc(CLASS_READONLY_TIP)}">&#9432;</span>
-      </div>
+      ${classChipsHTML({ what: "active student" })}
       <div class="tblwrap"><table class="tbl">
         <thead><tr>
           <th>Student</th><th>Class</th><th>Solos</th><th>NFS</th><th>SMS</th>
@@ -618,7 +700,8 @@ WA.renderAdmin = async function (view, me) {
   }
 
   /* ════════ STUDENT ANALYSIS ════════ */
-  /* one 4-bar comparison: this student · class best · class worst · class average.
+  /* one 4-bar comparison: this student · best · worst · average of the class
+     he is IN (ruling 2Α, 27/08/2026 — see peers() below).
      opts.unit — "%" appended to every value · opts.max — fixed axis top. */
   /* ── THE AXIS FOLLOWS THE DATA (round 8) ──────────────────────────────────
      A grade chart pinned to 0-100 spends four fifths of its height on a range
@@ -673,33 +756,89 @@ WA.renderAdmin = async function (view, me) {
       ${grid}${rects}${labels}</svg>`;
   }
 
+  /* ══════════════════════════════════════════════════════════════════════════
+     RULING 2Α (2026-08-27) — «CLASS» MEANS THE STUDENT'S OWN CLASS.
+     ──────────────────────────────────────────────────────────────────────────
+     THE OPEN ITEM OF ROUND 11 (spec §7): «Οι τέσσερις μπάρες, η σύγκριση ανά
+     checkride και η διακεκομμένη γραμμή αναφοράς υπολογίζονται πάνω σε όλους
+     τους ενεργούς μαθητές όλων των τμημάτων … το «class best/worst/average»
+     είναι αριθμητική πάνω σε πληθυσμό που η ετικέτα δεν περιγράφει. Ζητείται
+     απόφαση.» Round 11 changed no number and made the tooltips honest; the
+     question — squadron, Overview filter, or own class — was left open.
+
+     THE ANSWER IS THE STUDENT'S OWN CLASS, and it is the one the LABEL always
+     claimed. A 99A cadet three weeks into the stage and a 98B officer at the
+     end of it are not a population: «class average» over both is arithmetic
+     about nobody, and it flatters the one and punishes the other for a
+     difference that is calendar, not ability. The class a student is IN is the
+     cohort he flew the same syllabus with on the same dates, which is what a
+     comparison is for.
+
+     AND NOT THE OVERVIEW FILTER, deliberately. That filter is what the ADMIN is
+     looking at; this chart is about who the STUDENT is measured against. Tying
+     them would make the same student's «best in class» change because somebody
+     clicked a chip — a number that moves without the data moving is a number
+     nobody can quote in a brief. The chips narrow WHICH students the page
+     shows; the population each chart compares against is decided by the
+     student on screen.
+
+     ONE FUNCTION, EVERY CHART. The four bars, the per-checkride comparison and
+     the dashed reference line of the eight-checkride plot all read `peers(s)`,
+     so they cannot disagree — and every label that says «class» now names the
+     class it means.
+     ══════════════════════════════════════════════════════════════════════════ */
+  function peers(s) {
+    const all = A.data ? A.data.students : [];
+    if (!s) return all;
+    const c = classOf(s) || NO_CLASS;
+    return all.filter((x) => (classOf(x) || NO_CLASS) === c);
+  }
+  /* what the charts CALL that population — «class 98B HAF», or the honest name
+     for the students the roster gave no class at all */
+  function peerLabel(s) {
+    const c = classOf(s);
+    return c ? "class " + c : "the students with no class recorded";
+  }
+  function peerTip(s) {
+    const n = peers(s).length;
+    return "Ruling 2Α (27/08/2026): every comparison on this page is against THE STUDENT'S OWN CLASS — " +
+      peerLabel(s) + ", " + n + " active student" + (n === 1 ? "" : "s") + ". " +
+      "A class is the cohort that flew the same syllabus on the same dates, which is the only population a " +
+      "best/worst/average says anything about. It is NOT the chip row above: that decides which students the " +
+      "page shows, and this decides who this student is measured against — so nobody's standing moves because " +
+      "somebody clicked a filter.";
+  }
+
   function fourBarSVG(s) {
     const m = METRICS.find((x) => x.id === A.metric) || METRICS[0];
-    const vals = A.data.students.map((x) => m.fn(x._stats))
+    const vals = peers(s).map((x) => m.fn(x._stats))
       .filter((v) => v !== null && v !== undefined && isFinite(v));
-    return barsSVG(m.label + " — " + DIRWORD[m.dir], m.fn(s._stats), vals, m.dir, {});
+    return barsSVG(m.label + " — " + DIRWORD[m.dir] + " — " + peerLabel(s),
+                   m.fn(s._stats), vals, m.dir, {});
   }
 
   /* ── per-evaluation comparison: the SAME checkride across the class ──
      ROUND 11 — one value per student = their PASS ATTEMPT (WA.evalGrade): the
      attempt the flight was characterised successful on, not merely the latest.
-     Every class statistic on this dashboard now reads through that one rule. */
-  function evalValues(id) {
-    return A.data.students.map((x) => ({
+     Every class statistic on this dashboard now reads through that one rule.
+     RULING 2Α — and «the class» is the subject's own (peers()). */
+  function evalValues(id, s) {
+    return peers(s).map((x) => ({
       name: x.person.last_name, v: WA.evalGrade(x._evals, id),
     }));
   }
 
   function evalCompare(s) {
     const id = A.evalSel;
-    const all = evalValues(id);
+    const all = evalValues(id, s);
     const vals = all.filter((x) => x.v !== null).map((x) => x.v);
     const op = WA.evalOperativeOf(s._evals, id);
     const mine = op.row ? op.row.grade : null;
     /* ROUND 8 — the axis starts just below the lowest grade on the plot, so
        the four bars differ by what the grades differ by (min0), and still ends
        at 100, so nothing is exaggerated. */
-    const chart = barsSVG(WA.evalLabel(id) + " — grade %, higher is better", mine, vals, "high",
+    const chart = barsSVG(WA.evalLabel(id) + " — grade %, higher is better — " + peerLabel(s),
+                          mine, vals, "high",
                           { unit: "%", max: 100, min0: true });
     const listed = all.filter((x) => x.v !== null)
       .sort((a, b) => b.v - a.v)
@@ -710,10 +849,11 @@ WA.renderAdmin = async function (view, me) {
         ? esc(Math.max(0, Math.floor(Math.min(...[mine].concat(vals)
             .filter((v) => v !== null && isFinite(v)))) - 5)) + "–100 %"
         : "0–100 %"} — it starts just below the lowest grade plotted.
-        Class values on <b>${esc(id)}</b>: ${listed || "nobody has flown it yet"}
+        <span title="${esc(peerTip(s))}"><b>${esc(peerLabel(s))}</b></span> on
+        <b>${esc(id)}</b>: ${listed || "nobody has flown it yet"}
         ${vals.length ? ` &mdash; best ${esc(Math.max(...vals))}%, worst ${esc(Math.min(...vals))}%,
         average ${esc(round1(vals.reduce((a, b) => a + b, 0) / vals.length))}%` : ""}
-        (n = ${vals.length} of ${A.data.students.length} students).
+        (n = ${vals.length} of ${peers(s).length} in ${esc(peerLabel(s))}).
         ${mine === null ? "<b>This student has no graded attempt on this evaluation.</b>" : ""}
         ${op.attempts > 1 ? `<br><b>${op.attempts} attempts</b> on this checkride &mdash; the value
           plotted is ${op.passed
@@ -744,7 +884,11 @@ WA.renderAdmin = async function (view, me) {
          flown · FPC #2 not flown" for a student who has never been referred
          puts an absence on the page as though it were a gap in his record. */
       if (s && !s._fpc.length) return { pts: [], none: true };
-      const n = A.data.students.reduce((m, x) => Math.max(m, x._fpc.length), 0);
+      /* RULING 2Α — «the class» here is the student's own, like every other
+         comparison on this page: the x axis is as deep as the deepest FPC count
+         IN HIS CLASS, so «#2» means the same position for the people he is
+         actually being compared with. */
+      const n = peers(s).reduce((m, x) => Math.max(m, x._fpc.length), 0);
       return {
         note: "An FPC has no position in the syllabus — entries are numbered in date order.",
         pts: Array.from({ length: n }, (_, k) => ({ key: k, cat: "fpc",
@@ -771,8 +915,13 @@ WA.renderAdmin = async function (view, me) {
         ? "No FPC on this student's record &mdash; nothing to plot."
         : "Nothing to plot here yet."}</p>`;
     const mine = def.pts.map((p) => def.val(s, p));
+    /* RULING 2Α — THE DASHED REFERENCE LINE IS THE STUDENT'S OWN CLASS. It was
+       every active student of every class until 27/08/2026; see the ruling
+       above peers(). One function, so this line and the four bars beside it can
+       never be averages of two different populations. */
+    const peerList = peers(s);
     const cls = def.pts.map((p) => {
-      const vs = A.data.students.map((x) => def.val(x, p)).filter((v) => v !== null);
+      const vs = peerList.map((x) => def.val(x, p)).filter((v) => v !== null);
       return vs.length ? round1(vs.reduce((a, b) => a + b, 0) / vs.length) : null;
     });
     const seen = mine.concat(cls).filter((v) => v !== null);
@@ -854,15 +1003,19 @@ WA.renderAdmin = async function (view, me) {
   /* the legend of the single evaluation chart: the two lines, then the four
      tracks in syllabus order — which is also the order their labels appear
      along the x axis, so the legend reads left to right like the chart does */
-  function evalLegend() {
+  function evalLegend(s) {
     const cats = WA.EVAL_CATS.filter((c) => c.id !== "fpc").map((c) =>
       `<span title="${esc("the x labels of the " + c.label.toLowerCase() +
         " checkrides are drawn in this colour")}"><i style="background:${esc(c.color)}"></i>${
         esc(c.label)}</span>`).join("");
     return `<div class="legendrow">
         <span><i style="background:var(--accent)"></i>this student</span>
-        <span title="the average of every active student who has flown that checkride — all classes, not only this student's">
-          <i style="background:var(--muted)"></i>class average on the same checkride</span>
+        ${/* RULING 2Α — the legend names the population it is the average of.
+             Until 27/08/2026 this line said «all classes, not only this
+             student's», which was honest about a number that should never have
+             been that number. */ ""}
+        <span title="${esc(peerTip(s))}">
+          <i style="background:var(--muted)"></i>${esc(peerLabel(s))} average on the same checkride</span>
         <span class="lgsep" aria-hidden="true"></span>
         <span class="k">x labels by track:</span>${cats}
       </div>`;
@@ -1417,9 +1570,15 @@ WA.renderAdmin = async function (view, me) {
   }
 
   function htmlAnalysis() {
-    const students = A.data.students;
-    if (!students.length) return `<div class="card"><p class="hint">No active students yet — add them under People &amp; links.</p></div>`;
-    const s = students[A.sel];
+    if (!A.data.students.length) return `<div class="card"><p class="hint">No active students yet — add them under People &amp; links.</p></div>`;
+    const students = anaList();
+    const s = anaStudent();
+    if (!s) {
+      return classChipsHTML({ what: "active student" }) +
+        `<div class="card"><p class="hint">No active student is in
+          <b>${esc(classLabel(activeClass()))}</b>, so there is nothing to analyse here.
+          Pick another class above, or <b>All classes</b>.</p></div>`;
+    }
     const st = s._stats;
     const chips = METRICS.map((m) =>
       `<button type="button" class="chip${m.id === A.metric ? " is-on" : ""}" data-metric="${esc(m.id)}"
@@ -1448,9 +1607,12 @@ WA.renderAdmin = async function (view, me) {
       ${WA.navHTML("ana-nav", anaNavItems(), {
           title: "This student", aria: "Sections of this student's analysis" })}
       <div class="lay-main" id="ana-main">
+      ${classChipsHTML({ what: "active student" })}
       <div class="ana-nav">
         <button type="button" class="btn arrowbtn" data-nav="-1" title="Previous student (←)">&#8592;</button>
-        <span class="pos">${A.sel + 1} / ${students.length}</span>
+        <span class="pos" title="${esc(activeClass()
+          ? "Position in class " + classLabel(activeClass()) + " — the arrows walk the class the chips above have chosen, and never step outside it."
+          : "Position among every active student — no class filter is on.")}">${anaPos() + 1} / ${students.length}</span>
         <span class="nm">${esc(WA.personName(s.person, true))}</span>
         <button type="button" class="btn arrowbtn" data-nav="1" title="Next student (→)">&#8594;</button>
       </div>
@@ -1471,9 +1633,16 @@ WA.renderAdmin = async function (view, me) {
         </div>
       </div>
       <div class="card" id="ana-cmp">
-        <h2>Comparison vs class</h2>
-        <p class="hint">Click a metric — the chart shows this student against the class best, worst and average.
-          Every count is derived from the student's dated entries.</p>
+        <h2>Comparison vs <span title="${esc(peerTip(s))}">${esc(peerLabel(s))}</span></h2>
+        <p class="hint">Click a metric — the chart shows this student against the best, worst and average
+          of <b title="${esc(peerTip(s))}">${esc(peerLabel(s))}</b>
+          (${esc(peers(s).length)} active student${peers(s).length === 1 ? "" : "s"}).
+          Every count is derived from the student's dated entries.
+          ${/* RULING 2Α (27/08/2026) — the population is the student's OWN class,
+               and it is NOT the chip row above: that decides what the page
+               shows, this decides who he is measured against. */ ""}
+          <span class="tipdot" tabindex="0" role="note" title="${esc(peerTip(s))}"
+            aria-label="${esc(peerTip(s))}">&#9432;</span></p>
         <div class="chiprow" style="margin:10px 0">${chips}</div>
         <div class="chartbox">${fourBarSVG(s)}</div>
       </div>
@@ -1495,11 +1664,12 @@ WA.renderAdmin = async function (view, me) {
              the whole stage in one line, and the track now rides in the colour
              of the x label. */ ""}
         <h3 style="margin-top:16px">Grades — the eight checkrides</h3>
-        <p class="hint">Every checkride of the stage on one line, in syllabus order, with the class
-          average as the faint dashed reference. The <b>x label is coloured by track</b>; a
+        <p class="hint">Every checkride of the stage on one line, in syllabus order, with the average of
+          <b title="${esc(peerTip(s))}">${esc(peerLabel(s))}</b> as the faint dashed reference.
+          The <b>x label is coloured by track</b>; a
           checkride nobody has flown yet is a gap. Click a point to find it in the table below.</p>
         <div class="chartbox" id="catplot">${catPlotSVG(s, "eval")}</div>
-        ${evalLegend()}
+        ${evalLegend(s)}
 
         ${/* ── WHY THE FPC IS ITS OWN BLOCK AND NOT A FIFTH COLOUR ──────────
              The eight checkrides share an x axis because the SYLLABUS gives
@@ -1572,15 +1742,27 @@ WA.renderAdmin = async function (view, me) {
 
   /* ════════ BRIEF MODE ════════ */
   function htmlBrief() {
-    const students = A.data.students;
-    if (!students.length) return `<div class="card"><p class="hint">No active students yet.</p></div>`;
-    const s = students[A.sel];
+    if (!A.data.students.length) return `<div class="card"><p class="hint">No active students yet.</p></div>`;
+    const students = anaList();
+    const s = anaStudent();
+    if (!s) {
+      return classChipsHTML({ what: "active student" }) +
+        `<div class="card"><p class="hint">No active student is in
+          <b>${esc(classLabel(activeClass()))}</b>, so there is no deck to brief.
+          Pick another class above, or <b>All classes</b>.</p></div>`;
+    }
     const st = s._stats;
     return `
+      ${/* ROUND 20 — the chips are ABOVE the deck, because in this tab they
+           decide what the deck IS: «όπως στο overview … να γίνεται και στις
+           υπόλοιπες σελίδες». The pager below counts the same list. */ ""}
+      ${classChipsHTML({ what: "active student" })}
       <div class="brief">
         <div class="brief-nav">
           <button type="button" class="btn arrowbtn" data-nav="-1" title="Previous student (←)">&#8592;</button>
-          <span class="pos">${A.sel + 1} / ${students.length}</span>
+          <span class="pos" title="${esc(activeClass()
+            ? "Position in class " + classLabel(activeClass()) + " — the deck is that class and the arrows never step outside it."
+            : "Position among every active student — no class filter is on.")}">${anaPos() + 1} / ${students.length}</span>
           <button type="button" class="btn arrowbtn" data-nav="1" title="Next student (→)">&#8594;</button>
           <span class="spacer"></span>
           <button type="button" class="btn btn-sm" data-act="print">&#128424; Print brief</button>
@@ -1728,7 +1910,16 @@ WA.renderAdmin = async function (view, me) {
   function buildPrint() {
     const holder = $("print-brief");
     if (!holder || !A.data) return;
-    const students = A.data.students;
+    /* ROUND 20 — THE PRINTED BRIEF FOLLOWS THE FILTER, for the round-11 export
+       reason exactly: «a button that sits over 6 visible rows and silently
+       writes 20 is a button that produces the wrong attachment on a Monday
+       morning.» The deck on screen is the class the chips chose; a Print that
+       quietly produced the whole squadron would be that same trap on paper,
+       where it cannot be noticed until it has been handed out. The scope is
+       printed in the meta line of the summary page, so a filed copy says which
+       class it is about — and the matrix's «Class average» row becomes an
+       average of one class, which is the only thing that row ever claimed. */
+    const students = visible();
     const pages = students.map((s) => {
       const st = s._stats;
       /* ROUND 10 — ON PAPER THE LEVEL IS THE SENTENCE, NEVER A COLOUR. The
@@ -2066,7 +2257,8 @@ WA.renderAdmin = async function (view, me) {
         <span class="pr-brand-sub">364 MEA — student utilization</span></div>
       <h2>Class summary</h2>
       <div class="pr-meta">Generated ${esc(fmtDT(A.data.generated_at))}
-        · all classes: ${esc(sourceLine(students))}</div>${summary}${evalMatrix}</div>`;
+        · ${esc(activeClass() ? "class " + classLabel(activeClass()) : "all classes")}:
+        ${esc(sourceLine(students))}</div>${summary}${evalMatrix}</div>`;
   }
 
   /* ════════ PEOPLE & LINKS ════════ */
@@ -2134,7 +2326,15 @@ WA.renderAdmin = async function (view, me) {
 
   function htmlPeople() {
     const ppl = A.people || [];
-    const stu = ppl.filter((p) => p.role === "student");
+    const allStu = ppl.filter((p) => p.role === "student");
+    /* ROUND 20 — the students table follows the shared class choice; the
+       INSTRUCTORS and the admin never do. An instructor has no class — he flies
+       with whoever is on the programme — so a class filter over the instructor
+       table would be a control that either hid everybody or nobody, and either
+       answer would be a lie about what a class means. The chip row therefore
+       sits over the students table and says so in its own heading. */
+    const cls = activeClass();
+    const stu = cls ? allStu.filter((p) => (classOfPerson(p) || NO_CLASS) === cls) : allStu;
     /* ROUND 14 — the instructors block is in SENIORITY order: «HAF πρωτα, ITAF
        μετα», call sign natural within each. admin_list_people already sends it
        that way (wa.seniority_key); the same comparator runs here so the table
@@ -2149,12 +2349,20 @@ WA.renderAdmin = async function (view, me) {
         <button type="button" class="btn btn-sm btn-add" data-act="add-student">+ Add student</button>
         <button type="button" class="btn btn-sm btn-add" data-act="add-instructor">+ Add instructor</button>
       </div>
-      <div class="card"><h3>Students (${stu.length})</h3>
+      ${classChipsHTML({ pop: allStu, keyOf: (p) => classOfPerson(p) || NO_CLASS,
+                         what: "student on the roster" })}
+      <div class="card"><h3>Students (${stu.length}${cls ? " of " + allStu.length : ""})${cls
+        ? ` <span class="k">— class ${esc(classLabel(cls))}</span>` : ""}</h3>
+        ${cls && !stu.length
+          ? `<p class="hint">No student on the roster is in <b>${esc(classLabel(cls))}</b>.
+             The chips above are shared with every other page, so this is the class
+             the whole dashboard is currently filtered to.</p>` : ""}
         <div class="tblwrap"><table class="tbl">
           <thead><tr><th>Name</th><th>Details</th><th>Status</th><th>Token</th><th>Actions</th></tr></thead>
           <tbody>${peopleRows(stu, "student")}</tbody></table></div></div>
       <div class="card"><h3>Instructors (${ins.length})
-        <span class="k" title="${esc(WA.SENIORITY_TIP)}">— seniority order</span></h3>
+        <span class="k" title="${esc(WA.SENIORITY_TIP)}">— seniority order</span>
+        ${cls ? `<span class="k" title="${esc("An instructor carries no class — he flies with whoever is on the programme — so the class filter does not touch this table. It narrows the students above and nothing else.")}">— every instructor, whatever class is filtered</span>` : ""}</h3>
         <div class="tblwrap"><table class="tbl">
           <thead><tr><th>Name</th><th>Duty · Leadership · Status</th><th>Status</th><th>Token</th><th>Actions</th></tr></thead>
           <tbody>${peopleRows(ins, "instructor")}</tbody></table></div></div>
@@ -2573,9 +2781,19 @@ WA.renderAdmin = async function (view, me) {
     if (nav) { navStudent(Number(nav.dataset.nav)); return; }
     const met = t.closest("[data-metric]");
     if (met) { A.metric = met.dataset.metric; render(); return; }
-    /* the class filter — persisted, so tomorrow's session opens on 98B too */
+    /* the class filter — persisted, so tomorrow's session opens on 98B too.
+       ROUND 20 — ONE HANDLER, FOUR PAGES: the chip row is the same component
+       wherever it is drawn, so this one branch already served every tab the
+       moment the other three started drawing it. The printed brief is rebuilt
+       too, because from this round it follows the filter (see buildPrint). */
     const cl = t.closest("[data-cls]");
-    if (cl) { A.cls = cl.dataset.cls; lsSet(CLS_KEY, A.cls); render(); return; }
+    if (cl) {
+      A.cls = cl.dataset.cls;
+      lsSet(CLS_KEY, A.cls);
+      render();
+      buildPrint();
+      return;
+    }
     const pt = t.closest("[data-pt]");
     if (pt) { highlightRow(pt.dataset.pt); return; }
 
@@ -2721,10 +2939,19 @@ WA.renderAdmin = async function (view, me) {
     if (row) row.scrollIntoView({ block: "center", behavior: "smooth" });
   }
 
+  /* ROUND 20 — ←/→ WALK THE FILTER, NOT THE ROSTER. The arrows and the «3 / 9»
+     beside them describe the same deck, so they read the same list: with 98B
+     chosen, «next» is the next 98B student and never a 99A one the page has
+     just said it is not showing. A.sel keeps indexing A.data.students (the
+     Overview's rows, the round-11 return-to-where-you-were and `data-goto` all
+     depend on that), and the walk is done in the filtered list and mapped
+     back — one index, two orders, and the mapping is the only place they meet. */
   function navStudent(step) {
-    const n = A.data && A.data.students.length;
-    if (!n) return;
-    A.sel = (A.sel + step + n) % n;
+    const list = anaList();
+    if (!list.length) return;
+    const at = anaPos();
+    const nxt = list[(at + step + list.length) % list.length];
+    A.sel = A.data.students.indexOf(nxt);
     render();
   }
   WA._admNav = navStudent;   /* the once-attached key handler always calls the live one */
