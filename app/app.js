@@ -1180,7 +1180,17 @@ WA.isSoloOnlyCode = function (code) {
 /* THE REFUSAL SENTENCES, written once — the server raises them and the form
    says them before the server has to. The checkride sentence pattern, one
    section over: WHAT it is · WHERE it lives · WHY two rows are a corruption.
-   MIRROR: db/schema.sql → the two solo refusals of wa.validate_record. */
+   MIRROR: db/schema.sql → the four solo refusals of wa.validate_record. */
+/* ROUND 22b (verify finding 3) — WHAT A REFUSAL CALLS THE ROW THAT ALREADY
+   HOLDS THE SORTIE. It is the SLOT ID AS IT IS STORED, because that is the one
+   name the server can say: wa.solo_holder returns `coalesce(slot, 'an
+   additional solo')` and the two mirrors have to name the same thing in the
+   same words. WA.soloSlotLabel — the form's own heading — ends in "— solo",
+   so interpolating it mid-sentence produced «…the solo of C4801-04 — solo — a
+   solo is recorded…»: a stray clause the server twin never had. */
+WA.soloHolderName = function (slotId) {
+  return WA.normLine(slotId) || "an additional solo";
+};
 WA.soloOnlyRefusal = function (code) {
   const c = WA.normCode(code) || String(code || "");
   return c + " is the stage's 1st SOLO — a solo is recorded in the Solo flights section, " +
@@ -1190,9 +1200,52 @@ WA.soloOnlyRefusal = function (code) {
 WA.soloTakenRefusal = function (code, slotId, date) {
   const c = WA.normCode(code) || String(code || "");
   return c + (date ? " on " + fmtD(date) : "") +
-    " is already recorded as the solo of " + WA.soloSlotLabel(slotId) +
+    " is already recorded as the solo of " + WA.soloHolderName(slotId) +
     " — a solo is recorded in the Solo flights section, where who authorised it and the " +
     "NG rule live. Two rows for one flight would be two records that can disagree.";
+};
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 22b — THE TWO REFUSALS THE SOLO SECTION ITSELF OWES (verify finding 2)
+   ──────────────────────────────────────────────────────────────────────────
+   Round 22 wrote, in WA.derivedSlots, «a record that (wrongly) holds two solos
+   of one sortie shows the last one and the section itself refuses the pair».
+   Nothing refused it — on either side. These are the sentences that make that
+   comment true, and the fence the solo picker's free text left open.
+     · THE PAIR — one flight is one record. Two rows naming one sortie are two
+       books for one solo: they derive one Flights position between them (the
+       later wins) and the earlier is stored, counted and exported as a solo
+       nobody flew. It fires on the SORTIE BEING PRESENT ON BOTH ROWS and on
+       nothing else — an empty slot names no sortie and can neither disarm the
+       check nor be caught by it (the round-20b three-valued-logic rule:
+       presence before membership).
+     · A CHECKRIDE IN A SOLO SLOT — the R12 sentence, one section over. The
+       picker offers the Training Section's candidates and free text beside
+       them (reality outruns the generated chart), so `{sortie: 'C4590'}` used
+       to be stored, counted and exported while appearing NOWHERE in the
+       Flights table: WA.derivedSlots skips a `ck` position on purpose, because
+       that position belongs to Evaluations. A checkride is flown WITH an
+       evaluator; it can never be a solo, whoever typed it.
+   THE JUDGEMENT ON THE REST OF THE FREE TEXT, recorded (spec §4y·10): the
+   candidate set is NOT fenced. A solo of a sortie the generated flow chart did
+   not mark `sc` is still a flight that happened, and refusing it would refuse
+   the truth — the one thing this application must never do. Such a code is
+   already bounded (wa.code_track: /^[BCIFN]\d{4}$/, and its letter must match
+   the slot's Training Section) and, unlike a checkride, it makes no second
+   book: the Flights position it names is DERIVED from this very row.
+   MIRROR: db/schema.sql → wa.validate_record, the solo_flights branch. */
+WA.soloPairRefusal = function (code, slotA, slotB) {
+  const c = WA.normCode(code) || String(code || "");
+  return c + " is recorded as the solo of both " + WA.soloHolderName(slotA) +
+    " and " + WA.soloHolderName(slotB) + " — one flight, one record: a sortie is flown " +
+    "solo ONCE, and two rows for it would be two records that can disagree. Keep the row " +
+    "that holds the flight and clear or remove the other.";
+};
+WA.soloIsCheckrideRefusal = function (code) {
+  const c = WA.normCode(code) || String(code || "");
+  return c + " is one of the eight checkrides — a checkride is recorded in the Evaluations " +
+    "section, where the syllabus order and the pass-attempt rule apply to it, and it is flown " +
+    "WITH an evaluator: it can never be a solo. Choose the sortie this Training Section " +
+    "prescribes as its solo.";
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1732,8 +1785,19 @@ WA.rowStateTip = function (sec, e, st) {
    sorties the chart prescribes goes 77 → 85 and the four Contact / Instrument
    / Formation / Navigation tables each gain their own; the SIMULATOR tables
    gain none, because none of the eight is an F/S sortie.
-   THE DROPDOWN IS UNCHANGED (WA.logPickList still filters `!s.k`): a position
-   nobody may type into needs no option in the picker. */
+   THE DROPDOWN DROPS THEM (WA.logPickList): a position nobody may type into
+   needs no option in the picker.
+
+   ROUND 22b (verify finding 1) — AND THE SOLO POSITION IS THE SAME SHAPE.
+   `so` marks a position whose code is a SOLO BY DEFINITION (WA.soloOnlyCodes,
+   today exactly C4791): the server refuses EVERY flights row naming one, so
+   this table can no more hold that row than it can hold a checkride. It was
+   marked nowhere, and the consequence was a frozen record — a legacy carrier
+   claimed the position, rendered as an ordinary green planned pass with no
+   flag anywhere, and the refusal it caused was met only AFTER the save failed.
+   Both markers now mean one thing everywhere: NOT A POSITION OF THIS TABLE —
+   never seeded, never claimed, DERIVED from the section that owns the fact
+   (WA.derivedSlots) or plainly OWED, and read-only wherever it is drawn. */
 WA.slotDefs = function (sec) {
   WA._slotDefs = WA._slotDefs || {};
   if (WA._slotDefs[sec]) return WA._slotDefs[sec];
@@ -1742,7 +1806,7 @@ WA.slotDefs = function (sec) {
     for (const t of WA.TRACKS) {
       for (const s of WA.logSorties(sec, t)) {
         out.push({ key: t + "|" + s.c, sec, track: t, code: s.c, sortie: s,
-                   ck: !!s.k });
+                   ck: !!s.k, so: WA.isSoloOnlyCode(s.c) });
       }
     }
   } else if (sec === "lessons") {
@@ -1770,6 +1834,15 @@ WA.slotIndex = function (sec) {
 WA.slotCount = function (sec, track) {
   return WA.slotDefs(sec).filter((d) => track == null || d.track === track).length;
 };
+/* ROUND 22b — WHICH SECTION OWNS A POSITION THIS TABLE MAY NOT HOLD, or null
+   for an ordinary slot. One function, so the student's form, the admin's
+   drill-down and the printed brief cannot name three different owners for one
+   position — and so a third source, if the syllabus ever grows one, is added
+   in one line rather than at every surface that draws a row. */
+WA.slotOwner = function (d) {
+  if (!d) return null;
+  return d.ck ? "evaluations" : (d.so ? "solo_flights" : null);
+};
 
 /* WHICH SLOT THIS ROW COULD OCCUPY — null when the row is an EXTRA by nature.
    A flight qualifies only as the syllabus's planned pass: kind `syllabus`,
@@ -1782,9 +1855,20 @@ WA.slotCount = function (sec, track) {
    naming one may not take it: the server refuses such a row by name, and a
    legacy carrier that predates the refusal renders as a marked EXTRA — kept,
    visible, asked for, never destroyed and never mistaken for the planned
-   pass. The solo positions are blocked the same way but per RECORD, which is
-   why they are handled in WA.claims and not here (this function sees one row
-   and not the record it lives in). */
+   pass.
+   ROUND 22b (verify finding 1) — AND NEITHER MAY A SOLO-ONLY POSITION (`so`).
+   Round 22 blocked the solo positions in WA.claims, from the DERIVED map —
+   which is per record and therefore only while a solo is actually recorded.
+   The commonest legacy shape has the solo slot EMPTY, so nothing derived, so
+   the stored C4791 row claimed the position and rendered as an ordinary green
+   planned pass: no flag, no chip, no sentence — while the server refused every
+   save of that record, a duration edit three sections away included. The
+   refusal set is a property of the SYLLABUS, not of the record (a code nobody
+   ever flies dual), so it belongs here, beside `ck`, where one row is enough to
+   answer: the row falls through to a marked EXTRA carrying the tier-1 refusal
+   as its chip, derived row or not, and the position reads OWED until the Solo
+   flights section fills it. The tier-2 refusal stays per RECORD (a candidate
+   flown dual on another day is a real flight) and stays in WA.claims. */
 WA.slotKey = function (sec, e) {
   if (!e || typeof e !== "object") return null;
   if (sec === "flights" || sec === "fs") {
@@ -1794,7 +1878,7 @@ WA.slotKey = function (sec, e) {
     if (!code || !e.track) return null;
     const k = e.track + "|" + code;
     const d = WA.slotIndex(sec)[k];
-    return (d && !d.ck) ? k : null;
+    return (d && !WA.slotOwner(d)) ? k : null;
   }
   if (sec === "lessons") {
     const c = WA.normLine(e.course);
@@ -1922,7 +2006,11 @@ WA.derivedSlots = function (sec, rec) {
      a solo recorded and the double bookkeeping is identical either way. A
      filled slot with no sortie chosen yet names no position and derives
      nothing. Later rows win, so a record that (wrongly) holds two solos of
-     one sortie shows the last one and the section itself refuses the pair. */
+     one sortie shows the last one and the section itself refuses the pair —
+     ROUND 22b: it does now. That last clause described a check that existed on
+     neither side; WA.soloPairRefusal and its twin in wa.validate_record are
+     what make this sentence true, so a record can no longer carry a stored,
+     counted, exported solo that no position of any table ever shows. */
   const solos = (rec && Array.isArray(rec.solo_flights)) ? rec.solo_flights : [];
   solos.forEach((e, i) => {
     if (!e || typeof e !== "object" || WA.slotEmpty("solo_flights", e)) return;
@@ -1932,7 +2020,12 @@ WA.derivedSlots = function (sec, rec) {
     if (!track) return;
     const key = track + "|" + code;
     const d = ix[key];
-    if (!d || d.ck) return;             /* a checkride is never a solo slot */
+    /* A CHECKRIDE POSITION IS NEVER FILLED FROM HERE — it belongs to
+       Evaluations, and round 22b refuses a solo naming one by name, so this
+       skip now guards legacy rows only. A SOLO-ONLY position (`so`) is the
+       opposite case: it is exactly the position this row is the truth about,
+       and it derives as it always did. */
+    if (!d || d.ck) return;
     const ng = !!e.ng;
     const g = (e.grade === null || e.grade === undefined || e.grade === "")
       ? null : Number(e.grade);
@@ -1993,6 +2086,34 @@ WA.derivedGradeText = function (d) {
 WA.derivedJump = function (d) {
   return d ? (d.sec + ":" + d.i) : "";
 };
+/* which fixed solo slot names this code as one of its candidates — the slot a
+   position of the flight log is WAITING FOR when nothing has been recorded
+   against it yet (round 22b) */
+WA.soloSlotOfCode = function (code) {
+  const c = WA.normCode(code);
+  if (!c) return null;
+  return WA.soloSlots().find((s) => (s.codes || []).indexOf(c) >= 0) || null;
+};
+/* ── ROUND 22b — WHAT AN UNFILLED «NOT OURS» POSITION SAYS ─────────────────
+   A position of the flight log that this table may not hold, with nothing
+   recorded against it anywhere yet: an unflown checkride, or a solo the Solo
+   flights section has not recorded. It wears the grey like any owed row and
+   the SENTENCE names the section that will hold it — one vocabulary, on the
+   student's form and in the admin's drill-down alike. */
+WA.slotOwnerTip = function (d) {
+  const src = WA.slotOwner(d);
+  if (!src) return "";
+  const base = (WA.DERIVED_SRC[src] || {}).tip || "";
+  if (src === "evaluations") {
+    const ev = WA.evalById ? WA.evalById(d.code) : null;
+    return base + (ev ? " Not flown yet — " + ev.id + " is checkride " + ev.order +
+                        " of the eight." : "");
+  }
+  const s = WA.soloSlotOfCode(d.code);
+  return base + " Not flown yet — " + d.code +
+    (s ? " is the solo of Training Section " + s.sec + (s.req ? ", and the syllabus REQUIRES it" : "") : "") +
+    ": record it in the Solo flights section and this row fills itself in.";
+};
 
 /* WHO OCCUPIES EACH SLOT — in TWO PASSES, and the order of the passes is the
    whole of the rule.
@@ -2000,7 +2121,12 @@ WA.derivedJump = function (d) {
         fact is stored in another section and no row of THIS one may claim it.
         A stored row that names such a sortie therefore falls through to being
         an EXTRA — which is what a legacy carrier is, and what the server now
-        refuses to create a new one of.
+        refuses to create a new one of. ROUND 22b: the `ck` and `so` positions
+        no longer depend on this pass at all — WA.slotKey refuses them a key,
+        so an UNFILLED one is blocked too, which is the shape that froze a
+        record. What pass 0 still answers alone is the tier-2 case: an ordinary
+        solo CANDIDATE flown solo, whose position is spoken for only while this
+        record actually holds that solo.
      1. A ROW SOMEBODY HAS WRITTEN IN takes the slot, first one in stored
         order. A second written row naming the same sortie is an EXTRA: the
         slot is the syllabus's ONE planned pass and a re-fly is not it.
@@ -3056,9 +3182,15 @@ WA.sortieHours = function (band, track, code) {
    syllabus order and the pass-attempt rule apply to it; two rows for one
    flight would be two grades that can disagree. The server refuses such a row
    by name, so this is the courtesy and not the guard.
-   MIRROR: the wa.eval_ids() refusal in wa.validate_record. */
+   ROUND 22b — AND MINUS THE SOLOS BY DEFINITION, for the identical reason: the
+   server refuses EVERY flights row naming one (tier 1), so offering C4791 in
+   this picker was inviting a choice the save would then refuse. A code that is
+   still typed by hand is answered on the keystroke by the row's own chip
+   (WA.soloOnlyRefusal) and refused by name on save, exactly as a checkride is.
+   MIRROR: the wa.eval_ids() and wa.solo_only_codes() refusals in
+   wa.validate_record. */
 WA.logPickList = function (band, track) {
-  return WA.logSorties(band, track).filter((s) => !s.k);
+  return WA.logSorties(band, track).filter((s) => !s.k && !WA.isSoloOnlyCode(s.c));
 };
 /* is this code one the table's own list knows? (an unknown one is accepted —
    the syllabus data can lag reality — and shown marked) */

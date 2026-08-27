@@ -7212,6 +7212,184 @@ stacks on the unpushed WA-21 commit and the branch is TWO AHEAD of
    already holds — it is one predicate, and it should be a ruling, because it
    refuses records that are true.
 
+### 4y·10. Round 22b (2026-08-28) — THE THREE FINDINGS OF THE WA-22 ADVERSARIAL READ
+
+The verify of round 22 passed the mechanism — derived rows, the two-tier
+refusal, the legacy-carrier fallback — and named three defects in it. This round
+fixes **exactly** those three and redesigns nothing that passed.
+
+**FINDING 1 — THE INVISIBLE FROZEN LEGACY CARRIER.** A record written before
+round 22 that carries a stored **C4791** flights row **with the C4790-91-S1 solo
+slot still EMPTY** — the commonest legacy shape, because the row and the solo
+were two books and only one of them was ever filled — rendered that row as an
+ordinary **green planned-pass slot row**. No flag, no chip, no sentence
+anywhere, while the server refused **every save of that record** with the tier-1
+refusal, a duration edit three sections away included, and the student met the
+sentence only **after** the save had failed. The record was frozen with no
+in-form instruction.
+
+*Why it happened.* Round 22 blocked the solo positions in `WA.claims`, from the
+**derived map** — which is per record, and therefore only while a solo is
+actually recorded. The verify proved the fix path already worked: the moment a
+derived row occupied the position, the same stored row correctly fell to «frow
+st-extra» with its named `.cflag`. What was missing was that a **tier-1 code is
+a property of the SYLLABUS, not of the record** — nobody ever flies C4791 dual —
+so the block belongs where the checkride block already is.
+
+*The fix.* `WA.slotDefs` marks such a position **`so`** (`WA.isSoloOnlyCode`),
+`WA.slotOwner(def)` answers «which section owns this position» in one place for
+all three surfaces, and `WA.slotKey` refuses a key to `ck` **and** `so` alike:
+**a stored row may never claim the position, derived row or not.** Everything
+else follows from the contract the checkride positions have honoured since round
+22 — the position is **never seeded** (`ensureLogSlots`), is drawn **read-only**
+(the generalised `ownedOwedTrHTML`, with the arrow landing on the very solo row
+that fills it), is **dropped from the picker** (`WA.logPickList`), reads **OWED**
+in every head, rail and count, and the carrier is the **marked EXTRA** the schema
+comment always promised. That comment (`db/schema.sql`, the tier-1/tier-2
+paragraph) said «a marked EXTRA **beside the derived row**»; the «beside» was the
+defect, and it now states the true behaviour: marked EXTRA **always**, derived
+row or not. The student's way out — delete the flagged row, save — was verified
+end to end.
+
+*And the form now says it before the server does.* Round 22 left the two solo
+refusals out of `buildPayload`, so the form's own promise («everything the
+server refuses is refused here first, in the same words») was true of the
+checkride refusal and of nothing this round added. Both are there now: the row
+is **named**, scrolled to and marked, instead of a raw server sentence about a
+row the student cannot find.
+
+**FINDING 2 — THE FALSE COMMENT, MADE TRUE BY BUILDING THE CHECK.**
+`app/app.js` said, of two solos of one sortie, «*the section itself refuses the
+pair*». Nothing refused it, on either side. Both refusals are now built, in
+**both mirrors**, in identical words:
+
+- **(a) TWO SOLOS OF ONE SORTIE** — `WA.soloPairRefusal` / `wa.solo_twin`:
+  «*F4302 is recorded as the solo of both F4301-06-S1 and F4301-06-S2 — one
+  flight, one record …*». The pair derives **one** position of the flight log
+  between them (the later wins) while **both** are stored, counted and exported:
+  a solo nobody flew, visible in the record and in no table. F4301-06 makes it
+  reachable with no free text at all — two prescribed solos over one candidate
+  list. The names are printed **in stored order** on both sides, so the sentence
+  reads the same whichever row of the pair the validator is standing on.
+  **NULL-blind discipline (the WA-20b class):** presence before membership — a
+  row joins the comparison only when it **names** a sortie, so eight empty slots
+  are not eight rows of one sortie, and an empty row can neither false-fire nor
+  disarm the check.
+- **(b) A SOLO NAMING A CHECKRIDE CODE** — `WA.soloIsCheckrideRefusal`: the R12
+  sentence, one section over. `{"sortie": "C4590"}` was **accepted** into a solo
+  slot, stored, counted and exported while appearing **NOWHERE** in the Flights
+  table, because `WA.derivedSlots` skips a `ck` position on purpose — that
+  position belongs to Evaluations. A checkride is flown **with** an evaluator; it
+  can never be a solo, whoever typed it.
+
+**THE JUDGEMENT ON THE REST OF THE FREE TEXT, RECORDED.** The question asked was
+whether any **other** non-candidate code needs the same fence — the solo pickers
+offer the Training Section's candidates **and** free text beside them.
+**The candidate set is NOT fenced, deliberately**, for three reasons: (i) a solo
+of a sortie the generated chart did not mark `sc` is still a flight that
+happened, and refusing it would refuse the truth — the one thing this
+application must never do (the same reasoning that made tier 2 date-scoped,
+§4y·3); (ii) unlike a checkride it creates **no second book** — the Flights
+position such a code names is DERIVED from that very solo row; (iii) the opening
+is already **bounded**, not arbitrary: `wa.code_track` admits only
+`^[BCIFN][0-9]{4}$`, and the row's existing check requires the sortie's letter to
+match the slot's Training Section. The **pickers are unchanged**, so the mirrors
+agree exactly: candidates offered, free text open, checkrides refused by name on
+both sides. **Asserted, not merely written down:** the r22 audit block gains a
+third assertion — no `wa.solo_slot_codes()` entry may be one of
+`wa.eval_ids()` — because a generator run that made those two sets overlap would
+offer a code the save refuses, which is the same unanswerable refusal the other
+two assertions exist to prevent.
+**KEEP IT, ASK FOR IT** for any legacy row that breaks either rule: it is stored,
+read and shown exactly as it stands; what is refused is the **save**, with the
+row named, so the owner is in front of the form when the question is asked. The
+way out is the row's own picker (a slot) or its ✕ (an additional solo). Nothing
+is rewritten and nothing is dropped behind its owner's back.
+**Left standing, and named here rather than acted on:** the existing sentence
+«this sortie does not belong to the Training Section of that solo slot» is
+enforced as a **first-letter** test, not a section test. It passed the WA-22
+verify and this round does not redesign what passed — but a reader should know
+the check is looser than its own words, and tightening it to the sortie's printed
+Training Section would be a **ruling**, not an inference.
+
+**FINDING 3 — THE MANGLED TIER-2 SENTENCE.** `WA.soloTakenRefusal` interpolated
+`WA.soloSlotLabel(slotId)`, which is the form's own heading — «C4801-04 — solo» —
+so the rendered `.cflag` read «*… is already recorded as the solo of C4801-04 —
+solo — a solo is recorded …*»: a stray clause the server twin never had. The
+client now names the **slot id as it is stored** (`WA.soloHolderName`, the mirror
+of `wa.solo_row_name`: the slot, or «an additional solo»), which is the one name
+the server can say, so **both mirrors name the same thing in the same words** —
+verified char-by-char against the server's own string. The single remaining
+difference is the DATE: the form prints `25/08/2026` (`fmtD`, the idiom of every
+sentence it says) where the server prints `2026-08-25`. That is a rendering, not
+a word, and it is deliberate.
+
+**DELTA.** *Schema*: +2 functions (`wa.solo_row_name`, `wa.solo_twin`) → the r20
+audit now prints **«search_path pinned on all 119 wa functions»**; +2 refusals in
+the `solo_flights` branch of `wa.validate_record`; +1 assertion in the r22 solo
+audit block; the corrected tier-1/tier-2 comment. The token-echo SELECT is still
+the LAST statement. *Client*: `WA.slotOwner` / `slotOwnerTip` / `soloSlotOfCode`
+/ `soloHolderName` / `soloPairRefusal` / `soloIsCheckrideRefusal`; `so` on the
+log slot defs; `WA.slotKey` and `WA.logPickList` read `ck` and `so` alike;
+`ckOwedTrHTML` → `ownedOwedTrHTML` (both sources, one function); the two solo
+refusals join `buildPayload`'s flights branch and the two new ones its solo
+branch; the admin's unfilled-position row names its owner. *Cache-busters
+(touched-only)*: `app.js`, `student.js`, `admin.js` → `?v=20260828c`;
+`styles.css`, `instructor.js`, `config.js`, `items-catalog.js` and
+`currency-catalog.js` are byte-identical and unbumped. *Gate*: the schema
+changed → **COMMIT, DO NOT PUSH**; this commit stacks on WA-21 and WA-22 and the
+branch is **THREE AHEAD** of `origin/main` — **ONE §4φ MCP gate covers all
+three**, schema first, then the app.
+
+**SELF-VERIFICATION — RUN LIVE ON THE LOCAL STACK (all PASS).**
+1. **The frozen shape, end to end.** A scratch record holding the stored C4791
+   row with the solo slot EMPTY: the row renders **`frow st-extra`** with the
+   `.cflag` «solo» carrying the tier-1 sentence and a ✕ of its own; the C4791
+   position renders read-only «recorded in Solo flights», **owed**, with the ↗
+   landing on `solo_flights:0`; the block reads `owed 36 · extra 1 · 0.3 h` of
+   36 and the rail `Flights 85 owed`. Pressing Save is refused **by the form**,
+   naming the row («Flights (C4791 · Contact · 20/08/2026): …»); removing the row
+   and saving **succeeds**, and the stored record comes back with `flights: []`.
+2. **Raw RPC, through `public.save_student_record`**: two solos of F4302 → the
+   pair refusal by name; a slot row + a slot-less duplicate → «*… of both
+   C4801-04-S1 and an additional solo*»; `{"sortie":"C4590"}` in a solo slot →
+   the checkride refusal; ` c4590 ` padded and lower-case → the same refusal.
+   **It does not over-fire**: eight EMPTY slots save; one filled + one empty save;
+   two solos of the SAME section with DIFFERENT sorties save; a single legal solo
+   saves; a **non-candidate but real** sortie in a slot saves (the recorded
+   judgement). `wa.solo_twin` returns the pair in stored order from either index
+   and null for an absent/empty/`null` sortie.
+3. **The tier-1 and tier-2 refusals of round 22 are unchanged**, verbatim, and
+   the client's four sentences were compared **character by character** with the
+   server's: `PAIR`, `CKSOLO` and `ONLY` **identical**; `TAKEN` differs at
+   character 10 only — the date rendering named above.
+4. **The mechanism that passed still passes**: filling the solo live turned the
+   C4791 position derived **on the keystroke** (`owed 36 → 35`, `started 1`) with
+   the carrier still a marked extra beside it; a record with both carriers shows
+   `done 2 · owed 34 · extra 2 · 1.5 h`; the demo student with 8 checkrides and 8
+   solos still reads **`Flights 69 owed`** of 85; `WA.slotCount` is 85 / 48
+   unchanged; the F/S log has **0** `so` positions.
+5. **Every surface agrees**: the admin drill-down shows the derived row (Source
+   «Solo flights»), the carrier as **extra**, and — with the solo empty — the
+   position as an owed row wearing the same chip and the same sentence; the
+   printed brief prints both; the picker offers **neither** C4790 nor C4791
+   (31 real options + «—» + «Other…»); the block badge now names the solo
+   position beside the four checkrides.
+6. **Schema ×2, `ON_ERROR_STOP=1`, exit 0 both**, zero SQL ERROR/FATAL lines; the
+   audits print «r20: search_path pinned on all 119 wa functions», «r22:
+   withsp_markers … subset of flight_kinds» and «r22: 17 solo candidate code(s),
+   of which 1 refused by name always (C4791)».
+7. **Hygiene**: `node --check` clean on all seven client files; **zero console
+   errors** on the student form, the admin's four tabs and both instructor doors;
+   the local demo left **exactly as found** — all four `student_records` md5 +
+   `last_update` + `created_at` + `updated_at` + `entered_by` restored
+   byte-for-byte, `instructor_records` unchanged, roster 25/16/1 unchanged;
+   privacy grep over all tracked files: **0 real-person hits**.
+8. **One defect of this round's own, caught here**: the first cut of the
+   `WA.derivedSlots` edit dropped `const d = ix[key]`, which threw on every
+   render («d is not defined») — found by the console check, fixed, and every
+   surface re-verified afterwards.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -7498,6 +7676,40 @@ stacks on the unpushed WA-21 commit and the branch is TWO AHEAD of
   admin (το demo roster δεν έχει εκπαιδευτή στην τάξη με δεδομένα)· και η
   ΒΑΘΜΙΔΑ 2 είναι κρίση — αν θέλετε ευρύτερη απαγόρευση, είναι ΑΠΟΦΑΝΣΗ, γιατί
   αρνείται εγγραφές που είναι αληθινές.
+
+- **ΓΥΡΟΣ 22b (2026-08-28, §4y·10) — ΟΙ ΤΡΕΙΣ ΔΙΑΠΙΣΤΩΣΕΙΣ ΤΟΥ WA-22 ΚΛΕΙΝΟΥΝ.**
+  1. **Η ΑΟΡΑΤΗ ΠΑΓΩΜΕΝΗ ΓΡΑΜΜΗ.** Παλιό αρχείο με αποθηκευμένη γραμμή **C4791**
+     στα Flights και **ΑΔΕΙΟ** το solo slot εμφανιζόταν ως κανονική ΠΡΑΣΙΝΗ
+     γραμμή του συλλαβικού πλάνου — καμία σήμανση πουθενά — ενώ ο server
+     αρνιόταν **ΚΑΘΕ save** του αρχείου (ακόμη και αλλαγή duration σε άλλη
+     ενότητα), και ο μαθητής έβλεπε τον λόγο ΜΟΝΟ ΑΦΟΥ αποτύγχανε το save.
+     Πλέον ένας κωδικός που είναι **solo εξ ορισμού** αντιμετωπίζεται όπως μια
+     θέση checkride: **καμία αποθηκευμένη γραμμή δεν παίρνει τη θέση**, με ή
+     χωρίς derived γραμμή — η θέση διαβάζεται **owed** και είναι read-only («↗»
+     στη γραμμή του solo που τη γεμίζει), και η παλιά γραμμή είναι το σημασμένο
+     **EXTRA** που το σχόλιο του schema υποσχόταν (διορθώθηκε και το σχόλιο). Η
+     έξοδος του μαθητή — σβήνω τη γραμμή, save — δουλεύει από άκρη σε άκρη, και
+     **η φόρμα το λέει πριν τον server**, ονομάζοντας τη γραμμή.
+  2. **ΤΟ ΨΕΥΤΙΚΟ ΣΧΟΛΙΟ ΕΓΙΝΕ ΑΛΗΘΙΝΟ.** Χτίστηκαν οι δύο έλεγχοι που το
+     `app.js` περιέγραφε χωρίς να υπάρχουν, **ΚΑΙ ΣΤΟΥΣ ΔΥΟ ΚΑΘΡΕΦΤΕΣ**: **δύο
+     solo της ΙΔΙΑΣ πτήσης** (μία πτήση, ένα αρχείο — ονομάζονται και τα δύο
+     slots, σε σειρά αποθήκευσης) και **solo που ονομάζει checkride** (C4590·
+     αποθηκευόταν, μετριόταν, εξαγόταν και ΔΕΝ φαινόταν πουθενά). NULL-blind:
+     ελέγχεται μόνο γραμμή που **ονομάζει** πτήση (η κλάση του WA-20b).
+     **Η ΚΡΙΣΗ, ΚΑΤΑΓΕΓΡΑΜΜΕΝΗ:** το σύνολο υποψηφίων **ΔΕΝ** φράζεται — ένα solo
+     σε sortie που ο chart δεν σημείωσε `sc` είναι ΠΤΗΣΗ ΠΟΥ ΕΓΙΝΕ, δεν δημιουργεί
+     δεύτερο βιβλίο, και το ελεύθερο κείμενο είναι ήδη φραγμένο σε
+     `^[BCIFN][0-9]{4}$` του γράμματος του slot. Οι pickers μένουν ως έχουν, ώστε
+     οι δύο καθρέφτες να συμφωνούν· και το audit του γύρου 22 αποκτά τρίτο assert
+     (κανένας υποψήφιος solo δεν είναι checkride).
+  3. **Η ΣΠΑΣΜΕΝΗ ΠΡΟΤΑΣΗ (tier 2)** έλεγε «*… της C4801-04 — solo — ένα solo
+     καταγράφεται …*». Ο client ονομάζει πλέον το **slot id όπως αποθηκεύεται**,
+     δηλαδή ΑΚΡΙΒΩΣ ό,τι λέει ο server (επαληθεύτηκε χαρακτήρα-χαρακτήρα· μόνη
+     διαφορά η μορφή ημερομηνίας, που είναι απόδοση και όχι λέξη).
+  **ΑΝΟΙΧΤΟ, ΟΧΙ ΑΛΛΑΓΜΕΝΟ:** ο έλεγχος «this sortie does not belong to the
+  Training Section of that solo slot» συγκρίνει ΜΟΝΟ το πρώτο γράμμα — πέρασε το
+  verify του WA-22 και δεν το πειράζουμε· αν θέλετε πραγματικό έλεγχο Training
+  Section, είναι **ΑΠΟΦΑΝΣΗ**.
 
 - **ΑΠΟΦΑΝΣΗ 2026-08-28 (Γύρος 21, §4x) — CONTINUATION / WITH SP, ΤΟ DEMO,
   ΚΑΙ ΤΟ MY FLIGHT LOGBOOK.** «*Στο flight επιλογές Continuation, With SP …

@@ -1261,13 +1261,18 @@ WA.renderAdmin = async function (view, me) {
       }
       if (!e) {
         const d = r.def, sd = d.sortie || {};
-        return `<tr class="${d.ck ? "is-derived " : ""}st-owed">
+        /* ROUND 22b — a position this log does not own, with nothing recorded
+           against it anywhere yet: an unflown checkride and, now, the stage's
+           1st SOLO. Both name the section that will hold them, in the one
+           vocabulary the student's form uses. */
+        const own = WA.slotOwner(d), meta = WA.DERIVED_SRC[own] || {};
+        return `<tr class="${own ? "is-derived " : ""}st-owed">
           <td><span title="${esc(WA.logSortieLabel(band, track, d.code, "syllabus") +
               (sd.g ? " · Training Section " + sd.g : "") +
               (sd.h ? " · syllabus " + sd.h + " h" : "") + (sd.nt ? " · night" : ""))}"
-            ><b>${esc(d.code)}</b></span>${d.ck
-            ? ` <span class="dchip" title="${esc(WA.DERIVED_SRC.evaluations.tip)}">${
-                esc(WA.DERIVED_SRC.evaluations.tag)}</span>` : ""}</td>
+            ><b>${esc(d.code)}</b></span>${own
+            ? ` <span class="dchip" title="${esc(WA.slotOwnerTip(d))}">${
+                esc(meta.tag || "recorded elsewhere")}</span>` : ""}</td>
           <td class="k">&mdash;</td><td class="k">&mdash;</td>
           <td class="num k">${sd.h ? esc(sd.h) : "&mdash;"}</td>
           <td class="k">&mdash;</td><td class="k">&mdash;</td>
