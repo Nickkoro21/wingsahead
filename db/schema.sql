@@ -3449,6 +3449,29 @@ begin
       end loop;
       if k = 'currency' then
         perform wa.chk_date(e->'date', w || '.date', true);
+        -- ══ ROUND 20b — PRESENCE IS ITS OWN QUESTION ══════════════════════
+        -- A bare «x = any(list)» is NULL when x is absent, and wa.chk raises
+        -- only on FALSE — so a row that named NO kind at all walked straight
+        -- past the closed list that refuses a row naming the WRONG one. The
+        -- form was the only thing asking, which makes a rule a suggestion:
+        -- anything that is not the form (a stale tab, a replayed payload, the
+        -- next client) could file a flight the currency card cannot count.
+        --
+        -- THE FIX IS THE HOUSE'S OWN, NOT A NEW ONE: the SMS entrance has
+        -- asked this way since round 8 (wa.sms_reasons, above) — a
+        -- required-presence chk with ITS OWN curated sentence, THEN the
+        -- membership check. Two questions, two sentences: «you left this
+        -- blank» and «that is not one of the choices» are different things to
+        -- have done, and one message for both would answer neither.
+        --
+        -- THE WORDS ARE THE FORM'S WORDS, deliberately: instructor.js →
+        -- curIncomplete() promises «the server refuses these too, by field»,
+        -- and until this round that promise was false for exactly the two
+        -- fields it names. Now the server refuses in the sentence the client
+        -- would have said, so the instructor meets one wording, not two.
+        perform wa.chk(nullif(trim(coalesce(e->>'kind', '')), '') is not null,
+          w || '.kind',
+          'every flight of the currency card says whether it was your own flight or one with a student — the squadron counts the two differently, so a row that says neither is a sortie that counts nowhere');
         perform wa.chk((e->>'kind') = any(wa.currency_kinds()), w || '.kind',
           format('a flight is either your own or one with a student — %s',
                  array_to_string(wa.currency_kinds(), ' / ')));
@@ -3461,6 +3484,21 @@ begin
         -- ids are storable and never offered, so naming them in the total and
         -- omitting them from the list would be a number nobody could verify
         -- against the words beside it.
+        --
+        -- ROUND 20b — AND IT IS ASKED BEFORE IT IS CHECKED. Same shape, same
+        -- fix as `kind` above: the membership check below is NULL-blind, so a
+        -- row with no Σ category at all — or with a JSON `null` where one
+        -- belongs — was ACCEPTED by the very check written to close the list.
+        -- The programme (ΑΕΡΟΣ / F/S) is DERIVED from this field
+        -- (wa.s_category_group), so a row without one is a sortie in neither
+        -- section of the currency card: stored, exported, and counted towards
+        -- nothing. That is worse than a refusal, because it looks like a
+        -- record. The legacy ids are the ONLY sanctioned way to hold a row
+        -- whose category was never recorded, and they are ids — present,
+        -- storable, and marked everywhere they are rendered.
+        perform wa.chk(nullif(trim(coalesce(e->>'s_category', '')), '') is not null,
+          w || '.s_category',
+          'every flight names which Σ category it was — the programme (ΑΕΡΟΣ / F/S) is read off the category, so a flight without one belongs to no section of the currency card and is counted towards nothing');
         perform wa.chk((e->>'s_category') = any(wa.s_category_ids()), w || '.s_category',
           format('«%s» is not a category of Πίνακας 9 (ΑΕΡΟΣ) or Πίνακας 6 (F/S) — choose one of the %s a flight may be recorded under: %s',
                  coalesce(e->>'s_category', ''),
@@ -3483,6 +3521,21 @@ begin
                      wa.e_item_cap()));
             ids := wa.e_items_of(e);
             for j in 1 .. coalesce(array_length(ids, 1), 0) loop
+              -- ROUND 20b — THE THIRD SITE OF THE SAME SHAPE, found by the
+              -- sweep and NOT by the report that sent it. An element that is
+              -- JSON `null` (or an empty string) reaches here as SQL NULL —
+              -- wa.e_items_of reads each element with `#>> '{}'` — so the
+              -- membership check below was NULL-blind exactly as the two
+              -- above were. This one did not silently accept, which is how it
+              -- stayed hidden: it fell through to the DUPLICATE check, whose
+              -- `x = ids[j]` is NULL for every row, so the count came out 0,
+              -- 0 <> 1 fired, and an empty slot was refused as «« » is named
+              -- twice on the same sortie» — a sentence about a rule the row
+              -- had not broken, naming an event that was not there. Presence
+              -- first, and the refusal says what is actually wrong.
+              perform wa.chk(nullif(trim(coalesce(ids[j], '')), '') is not null,
+                format('%s.e_items[%s]', w, j - 1),
+                'an event slot names the event the sortie exercised — an empty slot claims nothing, and a currency claim that cannot be looked up in the 3-01 is one nobody can audit');
               perform wa.chk(ids[j] = any(wa.e_item_ids()),
                 format('%s.e_items[%s]', w, j - 1),
                 format('«%s» is not an event of the 3-01 EVENTS table — choose one of the %s printed events',

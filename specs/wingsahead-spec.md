@@ -6011,6 +6011,48 @@ ADMIN»*, *«the CO tag on paper» → «the admin tag on paper»*.
 `.is-colock`, `.is-co` are the code's private vocabulary and are **untouched**,
 as round 17 ruled.
 
+> **CORRECTED, 27/08/2026 (§4w·2) — WHAT «ZERO BEHAVIOUR» IS ALLOWED TO MEAN
+> HERE.** This round reused round 19's proof sentence — *«comment-stripped
+> executable text byte-identical»* (§4u·10c) — for the stylesheet. **For
+> `app/styles.css` that sentence is false as written**, and not because the
+> rewrite touched anything: round 20's **feature CSS shipped in the same
+> commit** as the rename, so the file's stripped text **cannot** be identical
+> across `fba495e → b40181b`, and no honest comparison could have returned that
+> it was. What was actually verified — and all that this round is entitled to
+> claim — is the **classification**, which is re-runnable:
+>
+> ```bash
+> # every \bCO\b in the pre-round file, classified into /* */ spans
+> git show fba495e:app/styles.css > /tmp/pre.css
+> python - <<'PY'
+> import re
+> s = open('/tmp/pre.css', encoding='utf-8').read()
+> spans = [(m.start(), m.end()) for m in re.finditer(r'/\*.*?\*/', s, re.S)]
+> hits  = [m.start() for m in re.finditer(r'\bCO\b', s)]
+> ins   = sum(any(a <= i < b for a, b in spans) for i in hits)
+> print('total', len(hits), '· in comment spans', ins, '· in executable text', len(hits) - ins)
+> print('in comment-STRIPPED text', len(re.findall(r'\bCO\b', re.sub(r'/\*.*?\*/', '', s, flags=re.S))))
+> PY
+> #   total 11 · in comment spans 11 · in executable text 0
+> #   in comment-STRIPPED text 0
+> ```
+>
+> **11 of 11 inside comment spans · 0 in the comment-stripped executable text.**
+> That is the whole provable claim, and it is sufficient: the rename cannot have
+> changed behaviour because it never touched a byte the browser reads. The
+> stripped text itself went **49 299 → 52 381** characters (**+73 / −4**
+> executable lines) and every one of those lines is round-20 **feature** CSS —
+> `.savebar[hidden]`, `.curtbl .catbox`, `.curtbl td.prog`, `.ms-pick`,
+> `.modal.epick`, `.epick-bar`, `.epick-q`, `.epick-list`.
+>
+> **THE GENERAL RULE THIS BUYS.** A byte-identity assertion is only available to
+> a commit that ships **nothing but** the rewrite. Round 19's four files earned
+> it (§4u·10c) because the sweep was the whole commit; this one did not, and
+> **a claim a reader can falsify in one command costs more than the sentence it
+> saves.** Where a mixed commit needs the same assurance, the classification
+> above is the proof to reach for — it is stronger, not weaker: it says *why*
+> the rewrite is inert instead of asserting that it happened to be.
+
 #### 4v·5c. THE TWO UNREPRODUCIBLE FIGURES, REPLACED BY GREP-DERIVED ONES
 
 §4u·10c claimed the sweep *«rewrote **138** comment occurrences»* and left
@@ -6134,10 +6176,33 @@ grep -oE '\bCO\b' app/styles.css | wc -l                      #  0  (after)
 
 ### 4v·7. OPEN ITEMS RAISED BY THIS ROUND
 
-1. **THE CLOUD ADVISOR RE-RUN.** §4φ·2 forbids a round from touching the Supabase
-   MCP; the schema must be deployed and the advisor re-run by the **main session,
-   on the user's word**. Expected: `function_search_path_mutable` **102 → 0**,
-   the other 48 lints unchanged and accepted.
+1. **THE CLOUD ADVISOR RE-RUN — STILL PENDING, AND IT IS THE ONLY THING THAT CAN
+   SETTLE THE NUMBER.** §4φ·2 forbids a round from touching the Supabase MCP; the
+   schema must be deployed and the advisor re-run by the **main session, on the
+   user's word**. **Expected — and it is a PREDICTION, not a result:**
+   `function_search_path_mutable` **102 → 0**, the other **48** lints unchanged
+   and accepted by design.
+
+   > **RECORDED 27/08/2026 (§4w·3): «102 → 0» IS UNVERIFIED UNTIL THE GATE
+   > RUNS.** What rounds 20 and 20b actually established is a **local** fact —
+   > `pg_proc.proconfig` over the Docker instance, plus the audit block that
+   > **raises** if one `wa` function loses its clause (*«r20: search_path pinned
+   > on all 110 wa functions»*). Local `pg_proc` is **not** the cloud advisor:
+   > the count of 102 came from a lint run against the **hosted** project, that
+   > run has not happened again, and 110 (what the audit block counts) is not
+   > 102 (what the advisor flagged) — the difference is real and unexamined
+   > until somebody re-runs the lint. **Neither round may run it, and neither
+   > round may write the outcome down as though it had.** The prediction is
+   > therefore carried FORWARD here as an open item, on purpose: it is settled
+   > **only** by `get_advisors` against the deployed cloud schema, in the main
+   > session, with the user's explicit per-execution word, under every term of
+   > §4φ (no final admin-token SELECT; no command returning a `token` column).
+   > **Round 20b changes the prediction's SUBJECT, not its number** — the three
+   > presence checks added here are `perform wa.chk(...)` statements *inside*
+   > `wa.validate_instructor_record`, which already carried `set search_path`.
+   > No function is created, dropped or renamed: the count stays **110 pinned /
+   > 0 unpinned** locally, and the cloud expectation stays **102 → 0 with 48
+   > unchanged**, unmoved by this round.
 2. **THE Σ QUOTAS ARE CARRIED AND NOT COUNTED.** `p` / `a` (posted / attached
    sorties per semester) ride in the catalogue for the tooltip only. Wings Ahead
    records **that** a sortie was flown and **on what day**; FDMS is where the
@@ -6152,6 +6217,241 @@ grep -oE '\bCO\b' app/styles.css | wc -l                      #  0  (after)
 4. **THE LEGACY ROWS NEED THE DEVELOPER'S HAND.** The cloud has none; the local
    demo has 4. `admin_export` surfaces `legacy_rows` per record so the FDMS
    bridge can list them — the bridge lane itself is still unwritten (§4u·15·3).
+
+## 4w. Round 20b (2026-08-27) — THE WA-20 VERIFY: A CHECK THAT DID NOT FIRE, AND THE SWEEP THAT FOUND ITS SIBLINGS
+
+Three items, from the adversarial read of round 20. One is a **server hole** —
+the round's headline check accepted the very rows it was written to refuse. One
+is a **false sentence** in this document (§4v·5b, corrected in place above). One
+is a **prediction being kept honest** until the gate can settle it (§4v·7·1).
+
+### 4w·1. THE DEFECT — `wa.chk` DOES NOT FIRE ON NULL, AND A MEMBERSHIP TEST IS NULL WHEN THE FIELD IS ABSENT
+
+**THE SHAPE.** `wa.chk(p_ok boolean, …)` raises `if not p_ok`. In SQL three-valued
+logic `not NULL` is **NULL**, not TRUE — so `wa.chk` is silent on NULL. And
+`x = any(list)` is **NULL whenever `x` is NULL**. Put together: every check
+written as
+
+```sql
+perform wa.chk((e->>'field') = any(wa.some_list()), w || '.field', '…');
+```
+
+refuses a field that is **present and wrong** and **accepts a field that is
+absent altogether** — the exact opposite of what a closed list is for, and
+invisible from the call site, because the line *reads* like a requirement.
+
+**WHERE IT BIT.** `wa.validate_instructor_record`, the currency section:
+`s_category` (round 20, the headline of §4v·1) and `kind` (round 19, unnoticed
+for a round). Proven on the running database **before** the fix:
+
+| payload | before 20b | after 20b |
+|---|---|---|
+| `{"date":"2026-08-01","kind":"own","seq":1}` — no Σ | **ACCEPTED** | refused, `currency[0].s_category` |
+| `{…,"s_category":null,…}` — JSON null | **ACCEPTED** | refused, `currency[0].s_category` |
+| `{…,"s_category":"",…}` — blank | **ACCEPTED** | refused, `currency[0].s_category` |
+| `{"date":"2026-08-01","seq":1}` — no kind | **ACCEPTED** | refused, `currency[0].kind` |
+| `{…,"kind":null,…}` — JSON null | **ACCEPTED** | refused, `currency[0].kind` |
+| `{…,"kind":"solo",…}` — present, **wrong** | refused | refused *(unchanged)* |
+
+That last row is the whole diagnosis: the list worked perfectly on every value
+except the one that was not there.
+
+**THE SECOND-ORDER CASUALTY, WHICH IS WORSE THAN THE FIRST.** The uniqueness
+rule builds its identity by concatenation —
+`(e->>'kind') || '|' || (e->>'s_category') || '|' || (e->>'date') || '|' || seq`
+— and `||` propagates NULL. A row missing either field produced a **NULL key**,
+so `not (f = any(seen))` was NULL and the *«this flight is already recorded»*
+rule **silently stopped applying too**. Two byte-identical rows with no `kind`
+were accepted as two flights. One NULL-blind check had quietly disarmed a
+second, unrelated one.
+
+**WHY IT MATTERS MORE THAN A BAD VALUE.** A refused row is a row the instructor
+fixes. A row with no Σ category is **stored, exported and counted towards
+nothing** — the programme (ΑΕΡΟΣ / F/S) is *derived* from `s_category`
+(`wa.s_category_group`), so such a row belongs to neither section of the
+currency card. It looks like a record and is not one, which is precisely the
+corruption this application exists to prevent.
+
+**THE FIX IS THE HOUSE'S OWN IDIOM, NOT A NEW ONE.** The SMS entrance has asked
+this way since round 8: a **required-presence `wa.chk` with its own curated
+sentence, BEFORE the membership check.** Two questions, two sentences — *«you
+left this blank»* and *«that is not one of the choices»* are different things to
+have done, and one message for both answers neither.
+
+```sql
+perform wa.chk(nullif(trim(coalesce(e->>'kind', '')), '') is not null, w || '.kind', '…');
+perform wa.chk((e->>'kind') = any(wa.currency_kinds()), w || '.kind', '…');
+```
+
+**AND THE WORDS ARE THE FORM'S WORDS.** `instructor.js → curIncomplete()` carries
+the comment *«The server refuses these too, by field»*. Until this round that
+promise was **false for exactly the two fields it names**. It is now true, and
+the server refuses in the sentence the client would have said, so the instructor
+meets one wording and not two:
+
+- `.kind` — *«every flight of the currency card says whether it was your own
+  flight or one with a student — the squadron counts the two differently, so a
+  row that says neither is a sortie that counts nowhere»*
+- `.s_category` — *«every flight names which Σ category it was — the programme
+  (ΑΕΡΟΣ / F/S) is read off the category, so a flight without one belongs to no
+  section of the currency card and is counted towards nothing»*
+
+### 4w·2. THE SWEEP — EVERY `= any(…)` INSIDE A `wa.chk`, CLASSIFIED
+
+The verifier's recommendation, carried out: **all 24** `wa.chk` call sites whose
+predicate contains `= any(` were extracted by a paren-matching parser (not a
+regex over lines) and classified. Re-runnable — the script is §4w·5.
+
+**13 sites carry the EXPLICIT `is null or` form. They are genuinely-optional
+enums and they KEEP it** — an optional field that is absent is not an error, and
+writing the NULL case out loud is what says so:
+`reason` (NFS, 2249) · `category` (2290) · `items` (2322) · `evaluation` (2382) ·
+`slot` (2394) · `evaluator` (FPC, 2468) · `track` (2489) · `kind` (flights,
+2540) · `mission` (2575) · `group` (2626) · `course` (2650) · `series` (2670) ·
+`exam` (2709).
+
+**11 sites are BARE.** Each was read for whether its left operand can be NULL:
+
+| line | site | verdict |
+|---|---|---|
+| 2225 | `k = any(allowed)` | **safe** — `k` is a `jsonb_object_keys` loop variable; never NULL |
+| 2755 | `f = any(wa.entry_keys(k))` | **safe** — same, loop variable |
+| 3434 | `k = any(wa.ins_sections())` | **safe** — same, loop variable |
+| 3446 | `f = any(wa.ins_entry_keys(k))` | **safe** — same, loop variable |
+| 2276 | `(e->>'reason') = any(wa.sms_reasons())` | **safe — the reference implementation.** The round-8 presence layer fires two lines above it |
+| 2527 | `not ((e->>'sortie') = any(wa.eval_ids()))` | **safe** — a presence layer already guards `sortie` for every non-legacy row. On a *legacy* row it no-ops, which is correct: a row with no sortie is not one of the eight checkrides |
+| 4100 | `lv = any(wa.level_keys())` | **safe** — the enclosing `if p_payload ? 'level' and jsonb_typeof(…) <> 'null'` **is** the presence test |
+| **3475** | `(e->>'kind') = any(wa.currency_kinds())` | **REQUIRED → presence layer added** (§4w·1) |
+| **3502** | `(e->>'s_category') = any(wa.s_category_ids())` | **REQUIRED → presence layer added** (§4w·1) |
+| **3539** | `ids[j] = any(wa.e_item_ids())` | **REQUIRED → presence layer added — FOUND BY THE SWEEP, not by the report** |
+| 3562 | `not (f = any(seen))` | **second-order casualty**, now safe by construction — the loop above raises before this one runs, and `date` is required, so the key cannot be NULL |
+
+**THE THIRD SITE IS WHY THE SWEEP WAS WORTH RUNNING.** `wa.e_items_of` reads each
+element with `x #>> '{}'`, so a JSON `null` inside `e_items` arrives as SQL NULL.
+The membership test was NULL-blind exactly as the other two were — but this one
+**did not silently accept**, which is how it stayed hidden. It fell through to
+the *duplicate* check, whose `x = ids[j]` is NULL for every row, so the count
+came out `0`, `0 <> 1` fired, and an empty slot was refused as:
+
+> *«« » is named twice on the same sortie — one flight exercises an event once»*
+
+— a sentence about a rule the row had not broken, naming an event that was not
+there. A refusal that lies about **why** is worse than one that does not come:
+the instructor is sent to fix the wrong thing. It now reads *«an event slot names
+the event the sortie exercised — an empty slot claims nothing, and a currency
+claim that cannot be looked up in the 3-01 is one nobody can audit»*.
+
+**NOT IN SCOPE, AND WHY.** The `= any(` sites inside `case when` / `if not`
+**read-time repair** functions (`wa.migrate_*`, `wa.nfs_reason_fix`,
+`wa.sms_reason_fix`, and the section repairs) are *not* the swept shape: there
+NULL correctly falls through to the repair branch, which is the whole point of a
+migration. `wa.chk` is the only place where NULL means «this rule did not run».
+
+### 4w·3. THE LEGACY PATH WAS CHECKED BEFORE THE RULE WAS TIGHTENED
+
+A required-presence rule is exactly the kind of change that makes old rows
+unsavable, and `wa.write_instructor_record` **validates BEFORE it migrates**
+(`wa.norm_record` → `validate_instructor_record` → `migrate_instructor_record`),
+so the read-time repair cannot rescue a write. Verified, not assumed:
+
+- A round-19-shaped payload (`category: 'aeros'`, no `s_category`) is **already
+  refused today, before this change**, by the round-20 field whitelist —
+  *«unknown field for section currency — allowed: date, kind, s_category,
+  e_items, seq»*. This round does not make it worse.
+- A legacy row that came **through the read migration** carries
+  `legacy-aeros-unspecified` / `legacy-fs-unspecified`. Both are members of
+  `wa.s_category_ids()`, so both pass the new presence layer **and** the
+  membership check. **The 4-row local fixture still round-trips.**
+- That is the legacy design working as §4v·1b intended: the sanctioned way to
+  hold a row whose category was never recorded is an **id** — present, storable,
+  and marked red on every surface — never an absent field.
+
+### 4w·4. SPEC CORRECTIONS MADE BY THIS ROUND
+
+1. **§4v·5b** — the *«comment-stripped executable text byte-identical»* sentence
+   was **false as written** for `app/styles.css` (round-20 feature CSS shipped in
+   the same commit). Replaced in place with the classification that was actually
+   verified: **11 of 11 occurrences inside `/* */` spans, 0 in executable text**,
+   plus the stripped-text delta (**49 299 → 52 381**, **+73 / −4** lines, all of
+   it feature CSS) and the general rule — a byte-identity assertion belongs only
+   to a commit that ships nothing but the rewrite.
+2. **§4v·7·1** — the advisor prediction (`function_search_path_mutable`
+   **102 → 0**, the other **48** unchanged) is now marked **a prediction, not a
+   result**, settled **only** by `get_advisors` against the deployed cloud
+   schema, from the **main session, on the user's per-execution word**, under
+   every term of §4φ. Local `pg_proc` is not the cloud advisor, and **110**
+   (what the audit block counts) is not **102** (what the advisor flagged).
+
+### 4w·5. VERIFY — WHAT WAS RUN, ON THE RUNNING DATABASE AND THE RUNNING APP
+
+1. **THE DEFECT REPRODUCED FIRST, ON THE LIVE DATABASE** — the six payloads of
+   the §4w·1 table run through `wa.validate_instructor_record` **before** the
+   fix: 5 wrongly ACCEPTED, 1 correctly refused. Then the same six after: **5
+   refused by field name, the sixth unchanged.**
+2. **THE EXACT REPRO RPCs**, end-to-end through
+   `public.save_instructor_currency` with a real instructor token:
+   `{"currency":[{"date":"2026-08-01","kind":"own","seq":1}]}` → **refused,
+   `currency[0].s_category`**; `{"currency":[{"date":"2026-08-01","seq":1}]}` →
+   **refused, `currency[0].kind`**; a valid row → **ACCEPTED, `entries=1`**; a
+   padded id `"  e-1b-spin  "` → **ACCEPTED and stored trimmed**, proving the
+   `wa.norm_record` boundary still runs ahead of the new checks.
+3. **THE REGRESSION FIXTURE — 11 currently-valid payloads, all still ACCEPTED**:
+   own + Σ-1 · student + SIM-2 · `e_items: []` · `e_items: null` · multi-E with 3
+   real events · **legacy aeros** · **legacy fs** · empty section · no `currency`
+   key at all · two rows same day different `seq` · `x-fcf-flight` +
+   `x-night-students`. **Nothing that worked before this round stopped working.**
+4. **THE CONTROLS — 7 pre-existing refusals all still fire, in their own words**:
+   wrong `kind` · unknown `s_category` (still lists all **14** choosable
+   categories by printed name) · unknown event id · duplicate E on one sortie
+   (*«Ε-1β — SPIN»*) · true duplicate row identity · the retired `category` key ·
+   missing date.
+5. **THE SWEEP, MACHINE-RUN** — the paren-matching classifier over
+   `db/schema.sql`: **24** `wa.chk` sites containing `= any(`, **13** explicit,
+   **11** bare, classified in the §4w·2 table. The classifier is the script in
+   §4w·2's paragraph and re-runs in one command.
+6. **SCHEMA APPLIED TWICE**, `ON_ERROR_STOP=1`, exit **0** both times, **0**
+   `ERROR`/`FATAL` lines on the second pass.
+7. **NO FUNCTION CREATED, DROPPED OR RENAMED** — the three additions are
+   `perform wa.chk(…)` statements inside a function that already carried its
+   clause. `pg_proc`: **110 wa functions · 110 pinned · 0 unpinned**, and the
+   audit block still prints *«r20: search_path pinned on all 110 wa functions»*.
+8. **THE REFUSAL AS THE INSTRUCTOR'S OWN BROWSER RECEIVES IT.** The three
+   defective payloads posted from the running page to
+   `/rest/v1/rpc/save_instructor_currency` over the app's own `WA_CONFIG`
+   endpoint: **HTTP 400** on all three, each carrying the field-addressed
+   sentence — `currency[0].s_category`, `currency[0].kind`,
+   `currency[0].e_items[0]`. The contract is true at the wire, not only inside
+   the database.
+9. **AND THE CLIENT IS STILL THE FIRST LINE — BOTH LAYERS, IN ONE VOCABULARY.**
+   On the running app the first row's Σ category was set back to *«— choose —»*
+   and Save pressed through the confirm dialog. The client refused **before any
+   RPC**: *«0 saved · Currency not saved — own · 26/08/2026 — still needs which
+   Σ category it was»*, the offending row red-edged and focused. **`0 saved`** —
+   so the instructor still meets the form's sentence, and the server's
+   matching-vocabulary refusal is the backstop for everything that is *not* the
+   form.
+10. **THE LEGACY FIXTURE SURVIVES THE TIGHTENING** — the 4-row round-19 record
+    migrates on read to `legacy-aeros-unspecified` ×2 / `legacy-fs-unspecified`
+    ×2, the badge reads **«4 without a Σ»**, the legacy option is offered
+    **only** on the row that holds it (ΑΕΡΟΣ rows never offer the F/S legacy id
+    and vice versa), and the migrated record **re-validates** under the new rule
+    — write-back-what-was-read still holds.
+11. **THE LOCAL DEMO IS EXACTLY AS FOUND.** The RPC proof of item 2 wrote a
+    record for a *second* instructor; it was deleted. **1 record · 4 rows ·
+    `last_update` 2026-08-26 19:23:00+00 · `md5(data)` unchanged**, and the
+    fixture stays round-19-shaped **on purpose** — it is what proves the
+    migration on every future run (§4v·6·14).
+12. **HYGIENE.** `node --check` clean on all seven client files; **zero console
+    errors** on a fresh tab through the instructor landing and both doors; no
+    horizontal page scroll. The privacy grep — **186** person-identifying terms
+    (names · call signs · MN · external OID · tokens, taken live from the
+    roster) over all **21** tracked files: **0 real-person hits**, and **0** of
+    those terms appear anywhere in this round's diff.
+13. **NO CLIENT FILE CHANGED, SO NO CACHE BUSTER MOVED.** The round is
+    server-and-spec only (`db/schema.sql`, `specs/wingsahead-spec.md`); the
+    client's promise did not need rewording **because the server came to meet
+    it** — which is the right direction for a contract the client had already
+    written down.
 
 ## 4. Screens
 
@@ -6644,3 +6944,25 @@ select και token.» Το βήμα «ο χρήστης επικολλά το d
 token, και **καμία** εντολή δεν επιστρέφει ποτέ στήλη token. Αναμενόμενο
 αποτέλεσμα: `function_search_path_mutable` **102 → 0**, τα υπόλοιπα **48** lints
 αμετάβλητα και **αποδεκτά by design**.
+
+**ΓΥΡΟΣ 20b (27/08/2026) — Η ΠΥΛΗ ΞΑΝΑΔΙΑΤΥΠΩΝΕΤΑΙ ΑΥΤΟΥΣΙΑ, ΚΑΙ ΤΟ ΣΤΟΙΒΑΓΜΑ
+ΜΕΓΑΛΩΝΕΙ ΚΑΤΑ ΕΝΑ.** Ο γύρος 20b άγγιξε `db/schema.sql` (τρία `wa.chk`
+παρουσίας, §4w·1) και το spec, **και τίποτε άλλο**. Δεν άγγιξε — και δεν
+επιτρέπεται να αγγίξει — το Supabase MCP: ο όρος 2 μένει απαράβατος, **ποτέ από
+subagents/γύρους**. Το repo είναι τώρα **δύο commits μπροστά από το
+`origin/main`** (γύρος 20 → γύρος 20b), **committed και ΟΧΙ pushed**.
+
+Άρα εκκρεμούν, με τη σειρά, **ΜΟΝΟ από την κύρια συνεδρία και με ρητή εντολή του
+χρήστη ανά εκτέλεση**:
+
+1. **Deploy** του `db/schema.sql` (όπως στέκει μετά τον 20b) μέσω Supabase MCP —
+   **χωρίς** την τελική εντολή-ηχώ που τυπώνει το admin token, και **καμία**
+   εντολή να μην επιστρέφει ποτέ στήλη `token` (έλεγχοι με counts/booleans).
+2. **`get_advisors`** αμέσως μετά (όρος 4).
+
+**ΤΟ ΑΝΑΜΕΝΟΜΕΝΟ ΕΙΝΑΙ ΠΡΟΒΛΕΨΗ, ΟΧΙ ΑΠΟΤΕΛΕΣΜΑ** (§4v·7·1, §4w·4·2):
+`function_search_path_mutable` **102 → 0**, τα υπόλοιπα **48** lints αμετάβλητα
+και **αποδεκτά by design**. Ο γύρος 20b **δεν μετακινεί τον αριθμό**: δεν
+δημιούργησε, δεν διέγραψε και δεν μετονόμασε καμία συνάρτηση — οι τρεις έλεγχοι
+είναι `perform wa.chk(...)` **μέσα** στην `wa.validate_instructor_record`, που
+ήδη έφερε τη ρήτρα. Τοπικά: **110 wa functions · 110 pinned · 0 unpinned**.
