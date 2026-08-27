@@ -6462,6 +6462,387 @@ so the read-time repair cannot rescue a write. Verified, not assumed:
     it** — which is the right direction for a contract the client had already
     written down.
 
+## 4x. Round 21 (2026-08-28) — CONTINUATION / WITH SP, THE DEMO FLIGHT, AND MY FLIGHT LOGBOOK
+
+RULING (2026-08-28, record dated; verbatim spirit): «Στο flight επιλογές
+Continuation, With SP. Οι επιλογές στο category ωραίες όταν έχουμε τωρινό own —
+μετά Continuation. Πρόσθεσε και το demo flight. Όταν η επιλογή είναι With SP
+(τωρινό with a student) να ανοίγουν οι πτήσεις των μαθητών, έξτρα repeat, fcf,
+cef. Το PROGRAMME δεν χρειάζεται. Μια χαρά για τα events. Στο My Currency να
+έχουμε έναν πίνακα My Flight Logbook, όπου θα μπαίνει ό,τι βάζει ο κάθε
+εκπαιδευτής. Εδώ είναι που θέλει προσοχή: αν μπει ένας μαθητής και βάλει πτήση
+C4101 με [τον εκπαιδευτή] να το βλέπουμε κι εδώ — ή αν προσθέσει κάποιος πτήση
+στο progress του FDMS (όχι του scheduler — αυτές που έχουν γίνει). Στήστο με
+προσοχή στα πεδία, πίνακες, σχήμα.»
+
+### 4x·1. THE KIND RENAME — THE STORED KEYS MOVE
+
+`wa.currency_kinds()` = **`['continuation','with_sp']`**, with the printed
+labels in a new SQL twin **`wa.currency_kind_label(id)`** («Continuation» /
+«With SP») beside the client's `WA.CURRENCY_KINDS`. **Judgement recorded**: the
+cloud `instructor_records` table is EMPTY (verified 27/08/2026, restated at the
+migration's comment), so a permanent translation layer («stored 'own', shown
+Continuation») would be a tax paid forever to spare a migration that costs two
+CASE arms. The house already owns the mechanism (read-time repair,
+`wa.migrate_ins_entry`), it is idempotent, and stored keys that say what the
+surfaces say is the round-20 doctrine — no two vocabularies for one fact.
+
+The migration table (read-time, both mirrors; the cloud maps nothing):
+
+| old stored | new stored | note |
+|---|---|---|
+| `kind: 'own'` | `kind: 'continuation'` | pure rename |
+| `kind: 'student'` | `kind: 'with_sp'` | pure rename |
+| `category: 'aeros'` (round 19) | `s_category: 'legacy-aeros-unspecified'` | existing round-20 arm, kept, runs unchanged |
+| `category: 'fs'` (round 19) | `s_category: 'legacy-fs-unspecified'` | existing arm, kept |
+| `sortie` = `REPEAT`/`FCF`/`CEF` | the lowercase marker id | **implementation arm the design pass did not list** — see §4x·2 |
+| `s_category` on a (now) `with_sp` row | **KEPT AS-IS** — legacy carrier | the old row claimed a Σ; nobody can reconstruct the student's sortie code from it, and the migration does not guess. Rendered marked: «Σ as claimed: …». Growth blocked at write. |
+
+Ordering inside `migrate_ins_entry`: the kind map first, then the marker fold,
+then the category→legacy arm (all idempotent; the strip runs after, as today).
+**THE GROW-GUARD**: new `wa.ins_withsp_scat_count(p)` counts the currency rows
+where `kind='with_sp'` and the entry carries `s_category`;
+`wa.write_instructor_record` refuses a payload whose count EXCEEDS the stored
+record's (both sides counted in the MIGRATED shape — the exact analog of the
+round-6 `phase` grow-guard), sentence: *«a Σ category on a with-SP flight is a
+leftover of the old form — it may stay on the rows that already carry one, and
+no new row takes one; name the student's sortie instead»*. Replacing the claim
+with a sortie DROPS the count and is accepted — that correction is what the
+guard exists to allow.
+
+### 4x·2. THE WITH-SP SORTIE — §4u·2 SUPERSEDED FOR THIS KIND ONLY
+
+`wa.ins_entry_keys('currency')` becomes
+`['date','kind','s_category','sortie','e_items','seq']`. Round 19's two
+reasons for refusing a sortie code (§4u·2) are QUOTED AND RETIRED for
+`with_sp` only: **(a)** «the box would be empty-by-nature on half the rows»
+dies the moment the field exists only on the kind where it is always
+meaningful — a flight WITH a student always has the student's sortie; **(b)**
+«FDMS's currency cell is dated by DATE and E-ITEM and by nothing else» was
+argued about the instructor's OWN Σ rows, which keep their Σ category and
+refuse a sortie BY NAME: *«a Continuation flight is your own — it is named by
+its Σ category of Πίνακας 9 / Πίνακας 6, not by a syllabus sortie of the
+students»*. One NEW field and not a unified one, with the bridge in mind: the
+two value spaces have different closed lists, different derivations and
+different escape rules, and the bridge join (§4x·6) wants the student row's
+`sortie` VERBATIM under the SAME KEY NAME.
+
+Per-kind rules (server = client wording — the `curIncomplete()` promise):
+
+- **continuation** — `s_category` REQUIRED (*«every Continuation flight names
+  which Σ category it was — Πίνακας 9 and Πίνακας 6 are counted by the
+  category, so a flight without one is counted towards nothing»*); `sortie`
+  refused by name (above).
+- **with_sp** — `sortie` REQUIRED (*«every flight with an SP names what was
+  flown — choose the student's sortie from the syllabus, or repeat / fcf /
+  cef, or type the code if the syllabus data lags reality»*), UNLESS the row is
+  a legacy carrier (a Σ and no sortie — the one sanctioned way to stand
+  without one). A row carrying BOTH is refused: *«one box, one fact — this
+  flight already names the student sortie, and a Σ category beside it would be
+  a second claim that can contradict the first»* — and the FORM keeps the rule
+  true before the server does: flipping the kind clears the field the new kind
+  does not take, and a sortie chosen on a carrier REPLACES the claim (toast,
+  nothing written until Save).
+- `kind` missing / not in list: *«every flight of the logbook says whether it
+  was a Continuation flight of your own or one with a student (SP) — …»* /
+  *«a flight is either a Continuation flight or one with an SP — continuation /
+  with_sp»*.
+
+**The value space of `sortie`**: (a) a syllabus code of the STUDENT catalogue,
+**both bands open** — the students fly aircraft AND simulator with
+instructors; recognised exactly when `wa.sortie_band(code)` is non-null. (b)
+the three MARKERS, which ARE the R12 kind ids — new
+**`wa.withsp_markers()`** = `['repeat','fcf','cef']`, pinned as a subset of
+`wa.flight_kinds()` deliberately without `'syllabus'` (a syllabus flight is
+named by its code) and without `'other'` (the off-catalogue free text IS the
+other). (c) **off-catalogue free text**, accepted (`wa.chk_text` ≤ 40) and
+shown marked — the student form's own escape. **No checkride refusal** here:
+the student-side `wa.eval_ids()` refusal exists to prevent two grades for one
+flight, and this row carries no grade — judgement recorded. **Nothing stores a
+band or a track**: `wa.sortie_band` derives the band where the code is known
+and honestly derives nothing for markers and free text.
+
+**DEVIATIONS RECORDED (implementation, two):**
+1. **The marker fold.** The normalisation boundary upper-cases every field
+   named `sortie` (`wa.code_fields` → `norm_code`), so a stored marker would
+   read `REPEAT` while every reader and the bridge join compare against the
+   lowercase R12 id. `wa.migrate_ins_entry` (and its client twin) therefore
+   folds a sortie whose lowercase form is a marker back to the lowercase id —
+   idempotent, registered in the migration, and the reason the design's
+   «stored value stays as typed/picked» holds in spirit: codes store
+   normalised (upper, as the student's do), markers store as the ids they are.
+2. **The picker control.** The design pass said «input + datalist (the student
+   form's own sortie pattern)»; the student form's sortie control is in fact a
+   `<select>` with an «Other…» free-text escape, and a `<datalist>` cannot
+   render the optgroups the same design asks for. Implemented as the design's
+   optgroups — a leading **«Beyond the syllabus»** (the three markers, each
+   with its label: «repeat — a re-fly of a syllabus flight» · «FCF — aircraft
+   test flight» · «CEF — Εξέταση Καταλληλότητας») followed by the **8 (band,
+   track) groups in flow-chart order** from `WA_LOG_SORTIES` (no new catalogue
+   file) — plus **«Other… (type the code)»**, which swaps the box to free text
+   with a «list» control back. Off-catalogue values render selected and
+   marked, never dropped.
+
+**The uniqueness identity — one formula, both kinds** (the change-dialog
+identity and the duplicate refusal stay one thing):
+`kind | coalesce(s_category, upper(wa.norm_line(sortie)), '') | date |
+coalesce(seq,'1')` — so `c4101` and `C4101` cannot both be stored, markers
+pass through `upper()` harmlessly, and the same identity under DIFFERENT kinds
+is two rows, not a duplicate. The refusal prints `wa.s_category_name` where
+present, else the sortie verbatim. `WA.curIdent` / `curTrip` mirror the
+coalesce.
+
+### 4x·3. THE DEMO FLIGHT — x-demo-flight, GENERATED AND MARKED
+
+New generated Σ category (17th): id `x-demo-flight`, c «Πτήση επίδειξης
+(DEMO)», n «Display flight (demo sortie)», g `aeros`, `aid: true` (not a
+printed row of Πίνακας 9), **`dp: true` — the NEW FLAG, the `tp` mechanism's
+second instance**, no printed quota. Position: after `x-fcf-flight`, before
+`legacy-aeros-unspecified` — §37α counts the demo sortie WITH the FCF inside
+Σ-1 in one sentence («Στην κατηγορία αυτή να συμπεριλαμβάνονται, για τους
+διαθέσιμους, οι πτήσεις Δοκιμής Α/Φ (FCF) και DEMO»), so the two aids of that
+sentence sit together.
+
+**Marked, not hidden — the recorded reasoning**: FDMS gates its six demo
+records on the curated `demo_pilot` flag; Wings Ahead's roster has NO such
+flag at all (deliberately not added this round), so hiding is not even
+possible without inventing one — and an invented, unset flag would stop a man
+recording a flight he really flew, the x-fcf reasoning verbatim. `dp` renders
+«(Demo pilots)» beside the option and «Demo pilots only — the option is
+marked, never hidden» in `WA.sCatTip`; **no server gate** (same as `tp`).
+
+**Generator** (`tools/gen-currency-catalog.py`): new `S_DEMO` declaration; new
+**`assert_demo_against_source(cat)`** — the research file must still carry
+`e-1d-demo` (kind `e-item`) AND `demo-500ft-currency` (kind `recency`, the
+Ch.5 §17 15-day display currency a dated `x-demo-flight` row is what feeds),
+else `SystemExit` («the demo category must be re-argued against the catalog
+that exists») — the exclusion-list assert pattern, third instance. It does NOT
+assert against FDMS's `app/currency.js`: demo is not a SYNTH column there (it
+is the `DEMO_IDS` table), so the `S_AIDS` client assert does not apply —
+recorded in the docstring. `WA_S_CATEGORIES.total` 16 → 17; the refusal's
+offered-count moves 14 → 15 automatically (computed live, minus the legacy
+ids).
+
+**E-items unchanged** («μια χαρά για τα events»): `e-1d-demo` STAYS excluded
+from `WA_E_ITEMS` — the ruling touched the Σ picker (a category), and a dated
+`x-demo-flight` row already carries the fact FDMS's demo currency needs (Ch.5
+§17 is dated by the display sortie itself). Judgement recorded.
+
+### 4x·4. PROGRAMME LEAVES THE UI — THE FACT STAYS, THE DECORATION GOES
+
+«Το PROGRAMME δεν χρειάζεται» is read as: the derived FACT stays (the bridge
+eats it), the derived DECORATION goes. **What died**: the Programme column and
+derived `.prog` cell in the currency table (edit and read-only rows alike),
+the programme column in the print view, and the programme-led optgroup labels.
+**What survived, server-side, untouched**: `wa.s_category_group`,
+`wa.currency_categories`, `wa.currency_category_name` — because (a) the export
+labels every `s_categories` row with `programme` + `programme_name` and the
+FDMS currency card is split ΑΕΡΟΣ/F-S — the bridge needs the mapping; (b) the
+Σ refusal sentence names the two printed tables; (c) the two legacy ids are
+per-programme by construction. The Σ picker KEEPS its two optgroups (a flat
+17-item list would be worse), retitled by the printed tables — **«Πίνακας 9
+(ΑΕΡΟΣ)» / «Πίνακας 6 (F/S)»** — a source citation, not a badge; `WA.sCatTip`
+keeps citing the printed table inside the tooltip for the same reason.
+`WA.CURRENCY_CATS` / `currencyCatLabel` survive client-side only as far as
+tooltips and export-reading need them.
+
+### 4x·5. MY FLIGHT LOGBOOK — THREE SOURCES, ONE ROW SHAPE, SERVER-COMPUTED
+
+New **`wa.instructor_logbook(v)`**, shipped as one new key `'logbook'` of
+`wa.instructor_dataset` — the §4u house rule (one round trip per door), and
+the admin's on-behalf view inherits it read-only for free; no new RPC. Row
+shape: `{src: self|sp|fdms, date, sortie, s_category, band, kind, seq, grade,
+ng, mission, student{last_name,first_name,class}, match: oid|surname,
+ambiguous, legacy}`.
+
+- **(a) SELF** — the caller's own currency rows, PROJECTED (`e_items` are NOT
+  repeated: they live in the editable table above; the logbook is the flying,
+  not the events).
+- **(b) SP-ENTERED** — for every **ACTIVE student** (deliberately NOT
+  `wa.student_in_scope`: the ruling says any student's row naming him, and a
+  graduating class closing its assessment window does not un-fly its flights —
+  recorded), every `flights`/`fs` row (post-`wa.migrate_record`, once per
+  record via the lateral pattern) matching the caller. `solo_flights` are
+  EXCLUDED (the instructor there AUTHORISED, he was not aboard);
+  `evaluations`/`fpc`/`cef` evaluator matches are a NOTED open item (§4x·10).
+- **(c) FDMS-PROGRESS** — the designed, EMPTY slot: a row whose per-entry
+  provenance stamp is `'fdms'` (`entered_by = 'fdms'` — the value
+  `wa.entry_count_by`'s comment already reserves for bridge slice 3) is
+  labelled `src:'fdms'` instead of `'sp'`. Today zero rows carry it, so
+  `counts.fdms` renders 0 and the source column exists — Phase 4's FDMS→WA
+  lane lands into a finished surface with NO further logbook change. (A direct
+  FDMS-training-log feed bypassing student records would be a bridge import
+  lane — out of scope, recorded.)
+
+**Matching — oid-first, surname fallback, shared-surname honesty**: (1) a row
+carrying `instructor_oid` matches iff `v.external_oid` is non-null and equal —
+the oid is the unambiguous identity, surname never overrides it, and an oid
+row that is not his is not listed; (2) no oid → folded surnames
+(`lower(btrim())` both sides); a misspelled surname matches nobody and appears
+in nobody's logbook — the same truth every surname box already lives with,
+recorded, not papered over; (3) `ambiguous: true` on every surname-matched row
+whose folded surname is shared by MORE THAN ONE `role='instructor'` row in
+`people` (active or not — old rows may name departed men): SHOWN, flagged
+«shared surname — may belong to another», counted under `counts.sp_ambiguous`
+as well as `counts.sp` — flagged, never guessed, never silently attributed,
+never dropped; both holders see the row flagged in their own logbooks.
+
+**Envelope**: `{rows, counts: {self, sp, sp_ambiguous, fdms}, truncated,
+omitted}`. Sorting server-side: `date desc`, then src (`self` → `sp` →
+`fdms`), then student surname, then `seq desc`. **Caps, counts stay true**:
+self uncapped (≤400 by `wa.ins_section_cap`); sp+fdms capped at the most
+recent **600** post-sort; `counts` computed BEFORE the cap; `truncated` +
+`omitted` say so and the client says it in words. The in-scope students'
+records are migrated a second time by the students lane — accepted and
+recorded (different populations; sharing would couple two lanes for a
+≤31-record cost).
+
+**Client**: the «My currency» door gains the read-only **«My Flight
+Logbook»** card BELOW the editable table — columns Date · Source (Self / SP /
+FDMS chips) · Flight (Σ printed name, sortie label or marker label) · Band ·
+Student · Result (grade / NG / mission / awaiting-debrief chip) · #; counts
+line above; ambiguous and legacy rows wear marked chips; no control writes.
+Door tile sub becomes «your own flying · your logbook» (only where the payload
+carries the key — a pre-round-21 server draws no card and makes no promise).
+**Implementation note (recorded)**: the client re-projects the SELF lane from
+its own last-saved rows (the same migrated record the server projects — one
+truth, two projections), so a currency save updates the logbook without a
+second round trip; the SP/FDMS lanes are the server's. The logbook is NOT
+printed by the print sheet and NOT exported — a projection recomputable from
+its sources, and a copy that shipped beside them would eventually disagree
+(§4x·7).
+
+### 4x·6. THE BRIDGE JOIN CONTRACT — DECLARED, NOT YET EXERCISED (slice 6 / Phase 4)
+
+- **Code row**: instructor `(date, upper(norm(sortie)))` ↔ student
+  `flights|fs` row with equal `date` and equal `upper(wa.norm_line(sortie))`,
+  the student row matching the instructor by the §4x·5 rule (oid-first,
+  surname fallback). `seq` is NOT part of the join key — the instructor's seq
+  counts HIS sorties of that identity that day, the student's counts the
+  student's re-flies; multiple candidates on one day pair by seq ascending on
+  both sides and the cross-check REPORTS the remainder, never forces 1:1.
+  Result classes mirror the bridge's: `agree` / `claim_only` / `student_only`.
+- **Marker row**: instructor `(date, marker)` ↔ student rows of that date with
+  `kind = marker` naming him (for `repeat` the generic marker matches any of
+  his repeats that day — the ruling asked for the generic options by name, and
+  a repeat picked as its code joins tighter anyway; recorded).
+- Nothing on the instructor row names the student — the round-19 unlinking
+  doctrine stands; the join always goes THROUGH the student row's instructor
+  fields.
+
+### 4x·7. EXPORT DELTA — AND WHY THE STAMP STAYS wa-export-v1
+
+- `instructor_records[]` rows already ship migrated `data` (so exports carry
+  the NEW kind keys automatically) + `legacy_rows`; ADD **`withsp_legacy_rows`**
+  (`wa.ins_withsp_scat_count` of the migrated data) — the second «work the
+  developer owes» number beside the first.
+- ADD top-level **`currency_kinds`**: `[{id, label}]` from `wa.currency_kinds()`
+  + `wa.currency_kind_label(id)`, so no reader ever hardcodes the ids the way
+  it never hardcodes a Σ slug.
+- `s_categories` gains `x-demo-flight` automatically (generated;
+  `legacy:false`, programme fields unchanged in shape).
+- **Schema stamp stays `wa-export-v1`** — justified so the next round does not
+  re-litigate it: §4u·9's promotion rule triggers on a change that BREAKS an
+  existing reader; the only prospective reader of `kind` values is the
+  bridge's currency lane (slice 6, unshipped), no shipped reader switch-cases
+  on `'own'`/`'student'`, and every change here is additive.
+- The logbook is NOT exported — it is a projection recomputable from
+  `student_records` + `instructor_records` + `people`, and an export that
+  shipped both sources and projection would eventually disagree with itself.
+
+### 4x·8. AUDIT-TABLE DELTA · CACHE-BUSTER · DEPLOYMENT GATE
+
+**Dropdowns (§4h)**: the `kind` box keeps its closed two (new words); the Σ
+box is unchanged in mechanics (retitled optgroups, +1 marked option); the NEW
+with-SP sortie box is a closed list (3 markers + 133 catalogue codes in 9
+optgroups) **with the student form's own «Other…» free-text escape** — closed
+where the catalogue knows, open where reality outruns it, exactly the R12
+sortie box's contract. No other box changed.
+
+**Cache-busters (touched-only)**: `currency-catalog.js`, `app.js`,
+`instructor.js`, `styles.css` (the dead `.curtbl td.prog` rule removed with
+its cell) → `?v=20260828a` (`student.js`, `admin.js`, `config.js`,
+`items-catalog.js` untouched and unbumped). `app/config.js` itself needed no
+change — the round adds no endpoint.
+
+**Deployment gate — THE SCHEMA GOES FIRST**, through the §4φ Supabase MCP gate
+(the main session runs `db/schema.sql` on the cloud in batches; the token-echo
+SELECT stays the LAST statement for the batch splitter). Then the app
+(`?v=20260828a`). In that order because an app that sends `sortie` (or the new
+kind keys) to a schema that does not know them is refused by the key whitelist
+— by design. The LOCAL stack got the schema this round (applied twice,
+`ON_ERROR_STOP=1`, exit 0 both, 0 ERROR/FATAL lines; the r20 audit now prints
+**«search_path pinned on all 114 wa functions»** — the four new functions all
+carry the clause). Schema changed → **COMMIT, DO NOT PUSH**.
+
+### 4x·9. SELF-VERIFICATION — RUN LIVE ON THE LOCAL STACK (all PASS)
+
+1. **The kind rename round-trips the round-19 fixture** (4 rows, `own`×3 +
+   `student`×1 + `category` keys): migrates on read to
+   `continuation`×3/`with_sp`×1 + the two legacy ids, **re-validates**
+   (write-back-what-was-read holds), and `migrate(migrate(x)) = migrate(x)`.
+2. **A with_sp+s_category payload that GROWS the count is refused** in the
+   grow-guard's own sentence; a planted round-20-shaped carrier **round-trips
+   unchanged** and **replacing the claim with a sortie is accepted**.
+3. **A both-fields row is refused by name** («one box, one fact»); a
+   continuation row with a sortie, a Σ-less continuation row, a sortie-less
+   with_sp row and a kind-less row are each refused in their §4x·2 sentences;
+   the retired `own` kind is refused by the closed list («continuation /
+   with_sp»).
+4. **Marker and code rows save** end-to-end through
+   `wa.write_instructor_record`: `c4101` stores `C4101`, `REPEAT` folds to
+   `repeat`, off-catalogue text stores normalised and renders marked.
+5. **The demo option is present, marked «(Demo pilots)», and storable**
+   (`x-demo-flight` accepted with events; in the export's `s_categories`).
+6. **The duplicate identity fires across the coalesce** (`C4101` vs `c4101`,
+   one day, one kind) — and the SAME identity under DIFFERENT kinds is two
+   rows, not a duplicate.
+7. **Logbook**: oid-match unambiguous with grade+band; the oid row is
+   INVISIBLE to the other holder of the surname; surname rows flagged
+   `ambiguous` for BOTH holders; the fs `repeat` row keeps band+kind+flag;
+   **cap bites at 600 with counts computed before it** (650 planted → sp=650,
+   listed=600, omitted=50, truncated=true); the fixture instructor's real
+   logbook reads `{self:4, sp:0, sp_ambiguous:0, fdms:0}` — **fdms is 0**.
+8. **The ruling's own scenario, end-to-end through the running app**: a
+   student saved a `C4101` row naming the instructor through
+   `public.save_student_record`; the instructor's reloaded page showed it in
+   My Flight Logbook — `SP` chip, «C4101 — Contact – Familiarization», band
+   Flights, the student named, «awaiting debrief» — and the counts line read
+   «4 of your own · 1 entered by students · 0 from FDMS Progress». The student
+   record was then restored byte-exactly (md5 + last_update verified).
+9. **Export carries `currency_kinds`** (`continuation`/«Continuation»,
+   `with_sp`/«With SP») **and `withsp_legacy_rows`** (fixture: 1, beside
+   `legacy_rows` 4); stamp still `wa-export-v1`.
+10. **Client**: the with-SP picker renders «Beyond the syllabus» + the 8
+    (band, track) optgroups (138 options); kind flips clear the other kind's
+    field; the carrier chip «Σ as claimed» renders and a chosen sortie
+    replaces it; the admin on-behalf twin renders the same two cards with **0
+    editable controls**; **zero console errors** on the landing, both doors
+    and the on-behalf twin; `node --check` clean on all seven client files.
+11. **Hygiene**: schema applied twice (exit 0, 0 ERROR lines); the local demo
+    left exactly as found (fixture `instructor_records` md5 + `last_update`
+    unchanged; all temp roster/record rows deleted; people counts restored);
+    privacy grep — 190 live roster terms over all tracked files: 0
+    real-person hits (the only matches are the deliberate NATO-alphabet demo
+    fixtures of §4s and single-letter initials). The cloud advisor re-run
+    belongs to the §4φ gate of the main session, where the accepted lint
+    number is re-checked.
+
+### 4x·10. OPEN ITEMS THE ROUND LEAVES, BY NAME
+
+1. **`x-night-students` is now reachable only under Continuation** while its
+   name describes a with-students sortie — flagged for the user, not decided:
+   FDMS carries it as a column of the instructor's OWN ΑΕΡΟΣ table, so
+   Continuation may well be the right shelf, but the words sit oddly and the
+   call is the user's.
+2. **Evaluator matches** (`evaluations`/`fpc`/`cef` rows naming him as
+   evaluator) as a fourth logbook source — noted, not built.
+3. **A `demo_pilot` roster flag**, if the squadron ever wants the demo option
+   GATED instead of marked — until then FDMS's flag stays the curated one.
+4. **The FDMS-side one-line note in bridge-spec.md** — D:\FDMS is read-only to
+   this round; the note that slice 3's landing surface (the logbook's fdms
+   lane) now exists belongs to the next FDMS lane.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -6497,18 +6878,29 @@ so the read-time repair cannot rescue a write. Verified, not assumed:
    or rebuild, so nothing typed is lost. The R17 rail lives inside the
    assessment door (mounted and destroyed with it) and no longer carries a
    currency row.
-   **MY CURRENCY** (round 19 §4u, **round 20 §4v·1**): a plain table —
-   **Date · Flight `own`/`with a student` · Σ CATEGORY · Programme · # ·
-   E-items · ✕** — rows added by «+ flight», sorted newest first. The **Σ
-   category** is the printed row of **Πίνακας 9** (Σ-1 · Σ-2 day · Σ-2 night ·
-   Σ-3 · Σ-4 · Σ-20) or **Πίνακας 6** (SIM-1 … SIM-ΔΑ) plus the **two columns
-   FDMS keeps** (night-with-students, FCF), grouped in the box by table; the
-   **programme is derived from it** and rendered as text. Rows recorded before
-   the taxonomy wear a **legacy** value, are **red-edged**, and the card counts
-   them («N without a Σ»). **E-items are a picker** — all 27 on screen, a filter,
-   a count chip, checkboxes, Clear all / Cancel / Done. It names no student and
-   changes no student's record. On the admin's on-behalf twin it is
+   **MY CURRENCY** (round 19 §4u, round 20 §4v·1, **round 21 §4x**): a plain
+   table — **Date · Flight `Continuation`/`With SP` · Sortie / Σ category · # ·
+   E-items · ✕** (the Programme column died with the §4x ruling) — rows added
+   by «+ flight», sorted newest first. A **Continuation** flight names its **Σ
+   category**: the printed rows of **Πίνακας 9** (Σ-1 · Σ-2 day · Σ-2 night ·
+   Σ-3 · Σ-4 · Σ-20) or **Πίνακας 6** (SIM-1 … SIM-ΔΑ), the **two columns FDMS
+   keeps** (night-with-students, FCF) and the **Chapter-5 demo flight** (marked
+   «Demo pilots», never hidden), grouped in the box by printed table. A
+   **With-SP** flight names **what was flown**: the student's syllabus sortie
+   (both bands, 8 optgroups), or **repeat / fcf / cef**, or off-catalogue text
+   via «Other…» — shown marked. Rows recorded before the taxonomies wear their
+   **legacy** marks, are **red-edged**, and the card counts them («N without a
+   Σ», «N with an old Σ claim»). **E-items are a picker** — all 27 on screen, a
+   filter, a count chip, checkboxes, Clear all / Cancel / Done. It names no
+   student and changes no student's record. On the admin's on-behalf twin it is
    **read-only** — the server has no admin write path for it at all.
+   **MY FLIGHT LOGBOOK** (round 21 §4x·5) sits below it, read-only: every
+   flight the application knows about the instructor — his own rows (Self),
+   every student `flights`/`fs` row naming him (SP — oid first, surname
+   fallback, shared surnames flagged never guessed), and the FDMS-Progress lane
+   the Phase-4 bridge will fill (source column ready, counts 0 today) — date
+   desc, counts per source, capped at the most recent 600 student-entered rows
+   with the true totals said above the cap.
    The assessments themselves: student list — **round 18 (§4t·1): the students
    of the ONE class the admin has opened for assessment, and nobody else**, filtered
    server-side (`wa.student_in_scope`) so the cards, the nav rail and the
@@ -6675,6 +7067,26 @@ so the read-time repair cannot rescue a write. Verified, not assumed:
    button. That rename lives in the database and **only** there.
 
 ## 7. Open items
+
+- **ΑΠΟΦΑΝΣΗ 2026-08-28 (Γύρος 21, §4x) — CONTINUATION / WITH SP, ΤΟ DEMO,
+  ΚΑΙ ΤΟ MY FLIGHT LOGBOOK.** «*Στο flight επιλογές Continuation, With SP …
+  Πρόσθεσε και το demo flight … να ανοίγουν οι πτήσεις των μαθητών, έξτρα
+  repeat, fcf, cef. Το PROGRAMME δεν χρειάζεται … έναν πίνακα My Flight
+  Logbook.*» Τα ΑΠΟΘΗΚΕΥΜΕΝΑ kinds μετακινούνται (`continuation`/`with_sp`,
+  cloud κενό — κρίση καταγεγραμμένη §4x·1), το `sortie` μπαίνει ΜΟΝΟ στο
+  with_sp (κατάλογος μαθητών + 3 markers + off-catalogue escape· το §4u·2
+  υπερισχύεται ΜΟΝΟ για αυτό το kind), το `x-demo-flight` γεννιέται από την
+  πηγή με flag `dp` (marked, never hidden), το PROGRAMME φεύγει από το UI και
+  μένει server-side για τη γέφυρα, και το logbook ενώνει ΤΡΕΙΣ πηγές (self ·
+  sp-entered με oid-first/surname-fallback/shared-flagged · fdms-provenance,
+  άδεια θέση για το Phase 4) με cap 600 και αληθινά counts. Export: +
+  `currency_kinds`, + `withsp_legacy_rows`· stamp ΜΕΝΕΙ `wa-export-v1`
+  (αιτιολόγηση §4x·7).
+  **ΤΕΣΣΕΡΑ ΑΝΟΙΧΤΑ ΠΟΥ ΓΕΝΝΗΣΕ Ο ΓΥΡΟΣ** (§4x·10): το `x-night-students`
+  προσβάσιμο μόνο υπό Continuation ενώ περιγράφει πτήση με μαθητές (θέλει
+  απόφανση)· οι evaluator-matches ως τέταρτη πηγή του logbook· ένα
+  `demo_pilot` flag στο roster αν ζητηθεί gate αντί για mark· η μονόγραμμη
+  σημείωση στο bridge-spec.md του FDMS (read-only σε αυτόν τον γύρο).
 
 - **ΑΠΟΦΑΝΣΕΙΣ 2026-08-27 (Γύρος 20, §4v) — ΠΕΝΤΕ, ΚΑΙ ΚΛΕΙΝΕΙ ΤΟ ΑΝΟΙΧΤΟ
   ΣΗΜΕΙΟ ΤΟΥ ΓΥΡΟΥ 11.**

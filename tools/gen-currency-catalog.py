@@ -85,6 +85,35 @@ programme is a fact the old row really did carry, and folding both into a single
 They are STORABLE (a migrated record must round-trip without the server refusing
 rows the instructor never touched) and never OFFERED (no new row can claim one).
 
+────────────────────────────────────────────────────────────────────────────────
+ROUND 21 — THE DEMO FLIGHT (x-demo-flight)
+────────────────────────────────────────────────────────────────────────────────
+RULING (2026-08-28): «Πρόσθεσε και το demo flight.»
+
+One more generated category — the display pilot's own sortie. The 3-01 prints
+it in CHAPTER 5, not in Πίνακας 9: FDMS carries demo as a table of its own
+(app/currency.js → DEMO_IDS, six records, gated on the roster's `demo_pilot`
+flag), and §37α counts the demo sortie — with the FCF, in one sentence — inside
+Σ-1 for those available. It sits AFTER x-fcf-flight and before the aeros legacy
+id, because §37α couples FCF and DEMO in one sentence and the two aids of that
+sentence should sit together.
+
+MARKED, NOT HIDDEN — the x-fcf reasoning, verbatim: Wings Ahead's roster has NO
+`demo_pilot` flag at all (FDMS's is the curated one, deliberately not imported
+this round), so hiding the option is not even possible without inventing a flag
+— and an invented, unset flag would stop a man recording a flight he really
+flew. `dp: true` (the `tp` mechanism, second instance) renders «Demo pilots
+only» beside the option and in the tooltip; the server accepts any catalogue id
+regardless, exactly as it does for `tp`.
+
+GENERATED-FROM-SOURCE ASSERT (assert_demo_against_source): the research file
+must still carry `e-1d-demo` (kind e-item) AND `demo-500ft-currency` (kind
+recency) — the two records the category is generated to be consistent with; if
+either vanishes, the build FAILS («the demo category must be re-argued against
+the catalog that exists») — the exclusion-list assert pattern, third instance.
+It does NOT assert against FDMS's app/currency.js: demo is not a SYNTH column
+there (it is the DEMO_IDS table), so the S_AIDS client assert does not apply.
+
 Usage (from the repo root):
     python tools/gen-currency-catalog.py [instructor_currency.json]
 """
@@ -149,6 +178,19 @@ S_AIDS = [
 # really flew. FDMS, whose flag is curated, hides its FCF column; this form
 # says «Test Pilots only» beside the option and lets the squadron read it.
 S_TP_ONLY = {"sim-da"}
+
+# ── THE DEMO FLIGHT, DECLARED (round 21) — see the docstring. Chapter-5
+# doctrine, not a Πίνακας 9 row: `aid` because the 3-01 prints no semester row
+# for it, `dp` because it belongs to the ΙΠΤΑΜΕΝΟΣ ΕΠΙΔΕΙΞΗΣ — MARKED, never
+# hidden, because Wings Ahead's roster has no demo_pilot flag to hide it by.
+S_DEMO = [
+    {"id": "x-demo-flight", "g": "aeros", "after": "x-fcf-flight", "dp": True,
+     "name": "Πτήση επίδειξης (DEMO) — Display flight (demo sortie)",
+     "why": "the 3-01 prints it in Chapter 5 — the display pilot's own sortie. FDMS carries "
+            "demo as a table of its own, gated on the demo_pilot flag, and §37α counts it "
+            "(with the FCF) inside Σ-1 for those available. Wings Ahead has no demo-pilot "
+            "flag, so the option is MARKED, never hidden — the x-fcf reasoning, verbatim"},
+]
 
 # ── THE TWO LEGACY IDS — see the docstring. Declared, never derived: they exist
 # because round 19 stored a programme and no category, and they are what a
@@ -353,16 +395,43 @@ def assert_aids_against_fdms(src_path):
           % (len(S_AIDS), client))
 
 
+def assert_demo_against_source(cat):
+    """ROUND 21 — the demo category is generated to be CONSISTENT WITH two
+    records of the research file: the excluded EVENTS row `e-1d-demo` (Ε-1δ —
+    DEMO) and the Ch.5 §17 recency `demo-500ft-currency` (the 15-day display
+    currency the dated x-demo-flight row is what feeds). If either vanishes
+    from the source, the category can no longer claim to be generated from
+    anything and the build FAILS — the exclusion-list assert pattern, third
+    instance.
+
+    It does NOT assert against FDMS's app/currency.js: demo is not a SYNTH
+    column over there (it is the DEMO_IDS table, gated on demo_pilot), so the
+    S_AIDS client assert does not apply to it."""
+    want = {"e-1d-demo": "e-item", "demo-500ft-currency": "recency"}
+    have = {it.get("id"): it.get("kind") for it in cat.get("items", [])}
+    for iid, kind in want.items():
+        if have.get(iid) != kind:
+            raise SystemExit(
+                "the demo category is argued against %r (kind %r) and the source no "
+                "longer carries it — the demo category must be re-argued against the "
+                "catalog that exists" % (iid, kind))
+    print("the demo category still matches its two source records "
+          "(e-1d-demo e-item + demo-500ft-currency recency)")
+
+
 def build_s_categories(cat, src_path):
     """The Σ taxonomy: the printed rows of Πίνακας 9 and Πίνακας 6, plus the two
-    aids FDMS carries as columns of its own, plus the two legacy ids.
+    aids FDMS carries as columns of its own, plus the demo flight of Chapter 5
+    (round 21), plus the two legacy ids.
 
     THE ORDER IS THE PRINTED ONE, ΑΕΡΟΣ FIRST. Inside each programme the rows
     keep the order of the research file (which is the order of the table); the
-    aids sit where FDMS puts them — after Σ-20, before nothing — and each
+    aids sit where FDMS puts them — after Σ-20, before nothing — the demo
+    flight follows the FCF (§37α couples the two in one sentence), and each
     programme's legacy id closes it, because a value nothing may be recorded
     under does not belong among the values that may."""
     assert_aids_against_fdms(src_path)
+    assert_demo_against_source(cat)
     found, dropped = {}, []
     for item in cat.get("items", []):
         kind = item.get("kind")
@@ -404,6 +473,13 @@ def build_s_categories(cat, src_path):
             out.append({"id": aid["id"], "c": code, "n": name, "g": g,
                         "p": None, "a": None, "aid": True,
                         "why": aid["why"], "tp": bool(aid.get("tp"))})
+        for dm in S_DEMO:
+            if dm["g"] != g:
+                continue
+            code, name = split_name(dm["name"], "demo category")
+            out.append({"id": dm["id"], "c": code, "n": name, "g": g,
+                        "p": None, "a": None, "aid": True,
+                        "why": dm["why"], "dp": True})
         for leg in S_LEGACY:
             if leg["g"] != g:
                 continue
@@ -486,10 +562,12 @@ def main():
     L.append("                merely which table it belongs to. The %d printed rows of \u03a0\u03af\u03bd\u03b1\u03ba\u03b1\u03c2 9"
              % sum(1 for r in srows if r["g"] == "aeros" and not r.get("aid") and not r.get("legacy")))
     L.append("                (\u0391\u0395\u03a1\u039f\u03a3) and \u03a0\u03af\u03bd\u03b1\u03ba\u03b1\u03c2 6 (F/S), the %d recording aids FDMS carries as"
-             % sum(1 for r in srows if r.get("aid")))
-    L.append("                columns of its own, and %d legacy ids for the rows round 19 stored"
+             % sum(1 for r in srows if r.get("aid") and not r.get("dp")))
+    L.append("                columns of its own, the %d demo flight of Chapter 5 (round 21,"
+             % sum(1 for r in srows if r.get("dp")))
+    L.append("                Demo pilots only \u2014 marked, never hidden), and %d legacy ids for the"
              % sum(1 for r in srows if r.get("legacy")))
-    L.append("                before this taxonomy existed.")
+    L.append("                rows round 19 stored before this taxonomy existed.")
     L.append("")
     L.append("   WA_S_CATEGORIES.items[]")
     L.append("     id     \u2014 THE STORED VALUE, pure ASCII, asserted like the e-item ids")
@@ -508,6 +586,11 @@ def main():
     L.append("     tp     \u2014 true where only Test Pilots fly it. The option is MARKED, never")
     L.append("              hidden: this application's test_pilot flag comes from the shared")
     L.append("              roster, and an unset one must not stop a man recording a flight.")
+    L.append("     dp     \u2014 true where only the DEMO PILOT flies it (round 21 \u2014 the tp")
+    L.append("              mechanism, second instance). Marked, never hidden: this roster has")
+    L.append("              no demo_pilot flag at all \u2014 FDMS's is the curated one \u2014 so hiding")
+    L.append("              would need an invented flag, and an unset invented flag would stop")
+    L.append("              a man recording a flight he really flew.")
     L.append("     legacy \u2014 true for a value that may be STORED and must never be OFFERED.")
     L.append("")
     L.append("   MIRROR: db/schema.sql \u2192 wa.e_item_ids() / wa.e_item_name() /")
@@ -553,6 +636,8 @@ def main():
             bits.append("why: %s" % js_esc(r["why"]))
         if r.get("tp"):
             bits.append("tp: true")
+        if r.get("dp"):
+            bits.append("dp: true")
         if r.get("legacy"):
             bits.append("legacy: true")
         L.append("    { %s }," % ", ".join(bits))
@@ -577,11 +662,12 @@ def main():
           % (os.path.normpath(OUT), len(rows),
              ", ".join(d for d, _w in dropped) or "none", generated))
     print("             \u2014 %d \u03a3 categories: %d \u0391\u0395\u03a1\u039f\u03a3 + %d F/S printed rows, %d recording "
-          "aids, %d legacy (%s excluded)"
+          "aids, %d demo (dp), %d legacy (%s excluded)"
           % (len(srows),
              sum(1 for r in srows if r["g"] == "aeros" and not r.get("aid") and not r.get("legacy")),
              sum(1 for r in srows if r["g"] == "fs" and not r.get("legacy")),
-             sum(1 for r in srows if r.get("aid")),
+             sum(1 for r in srows if r.get("aid") and not r.get("dp")),
+             sum(1 for r in srows if r.get("dp")),
              sum(1 for r in srows if r.get("legacy")),
              ", ".join(d for d, _w in sdropped) or "none"))
     print("wrote %s \u2014 CURRENCY GENERATED BLOCK: wa.e_item_ids() (%d) + wa.e_item_name() + "

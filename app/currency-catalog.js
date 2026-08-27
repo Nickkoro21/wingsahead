@@ -25,8 +25,9 @@
    WA_S_CATEGORIES — the Σ TAXONOMY (round 20): WHICH sortie was flown, not
                 merely which table it belongs to. The 6 printed rows of Πίνακας 9
                 (ΑΕΡΟΣ) and Πίνακας 6 (F/S), the 2 recording aids FDMS carries as
-                columns of its own, and 2 legacy ids for the rows round 19 stored
-                before this taxonomy existed.
+                columns of its own, the 1 demo flight of Chapter 5 (round 21,
+                Demo pilots only — marked, never hidden), and 2 legacy ids for the
+                rows round 19 stored before this taxonomy existed.
 
    WA_S_CATEGORIES.items[]
      id     — THE STORED VALUE, pure ASCII, asserted like the e-item ids
@@ -45,6 +46,11 @@
      tp     — true where only Test Pilots fly it. The option is MARKED, never
               hidden: this application's test_pilot flag comes from the shared
               roster, and an unset one must not stop a man recording a flight.
+     dp     — true where only the DEMO PILOT flies it (round 21 — the tp
+              mechanism, second instance). Marked, never hidden: this roster has
+              no demo_pilot flag at all — FDMS's is the curated one — so hiding
+              would need an invented flag, and an unset invented flag would stop
+              a man recording a flight he really flew.
      legacy — true for a value that may be STORED and must never be OFFERED.
 
    MIRROR: db/schema.sql → wa.e_item_ids() / wa.e_item_name() /
@@ -90,7 +96,7 @@ var WA_E_ITEMS = {
 
 var WA_S_CATEGORIES = {
   source: "FDMS instructor currency catalogue (instructor_currency.json, 2026-08-14) — 3-01/2025 ΔΑΕ Ch.4, Πίνακας 9 (ΑΕΡΟΣ) and Πίνακας 6 (F/S), plus the two recording aids FDMS carries as columns of its own",
-  total: 16,
+  total: 17,
   excluded: [{ id: "sim-refresh-after-abstention", why: "§49 prints a THRESHOLD IN DAYS, not a category — the sortie it demands is a SIM-1, which is in the list already" }, { id: "semiannual-air-total-t6", why: "the printed ΣΥΝΟΛΟ ΕΞΟΔΩΝ row of Πίνακας 9 — a total is not a sortie anybody flies" }, { id: "semiannual-fs-total-t6", why: "the printed ΣΥΝΟΛΑ row of Πίνακας 6 — a total is not a sortie anybody flies" }],
   legacyWhy: "a round-19 row that stored only the programme. The Σ was never recorded and cannot be guessed from a date — it is shown marked, everywhere, and needs the developer's hand",
   items: [
@@ -102,6 +108,7 @@ var WA_S_CATEGORIES = {
     { id: "s-20-no-requirements", c: "Σ-20", n: "No-requirements missions", g: "aeros" },
     { id: "x-night-students", c: "Νυχτερινή με μαθητές", n: "Night sortie flown with students", g: "aeros", aid: true, why: "the 3-01 prints no such requirement — FDMS carries it as a column of its own because the squadron flies it, and because a night sortie is what keeps the night-landing currency alive" },
     { id: "x-fcf-flight", c: "Πτήση δοκιμής (FCF)", n: "Aircraft test flight", g: "aeros", aid: true, why: "a functional check flight is flown by the squadron's Test Pilots and is not a Πίνακας 9 requirement — FDMS carries it as a column of its own, and it is what dates the Ε-1γ row of the EVENTS table", tp: true },
+    { id: "x-demo-flight", c: "Πτήση επίδειξης (DEMO)", n: "Display flight (demo sortie)", g: "aeros", aid: true, why: "the 3-01 prints it in Chapter 5 — the display pilot's own sortie. FDMS carries demo as a table of its own, gated on the demo_pilot flag, and §37α counts it (with the FCF) inside Σ-1 for those available. Wings Ahead has no demo-pilot flag, so the option is MARKED, never hidden — the x-fcf reasoning, verbatim", dp: true },
     { id: "legacy-aeros-unspecified", c: "ΑΕΡΟΣ", n: "unspecified (recorded before the Σ taxonomy)", g: "aeros", legacy: true },
     { id: "sim-1", c: "SIM-1", n: "Precision handling / ACRO (F/S)", g: "fs", p: 1, a: 1 },
     { id: "sim-2", c: "SIM-2", n: "IFR (F/S)", g: "fs", p: 1, a: 1 },

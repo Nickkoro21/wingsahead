@@ -778,7 +778,7 @@ WA.SECTIONS_META = {
      beside the student's because every naming surface — the change list, the
      save dialog, the read-only dashboard view — asks WA.secLabel for a word
      and must get the same word from all of them. */
-  ins_currency: { label: "My currency", tip: "Your own flying, for the squadron's currency register — the bridge into FDMS. One row per sortie: the DAY, whether it was a flight of your own or one with a student, WHICH Σ CATEGORY it was — the printed rows of Πίνακας 9 (ΑΕΡΟΣ: Σ-1, Σ-2 day, Σ-2 night, Σ-3, Σ-4, Σ-20) and of Πίνακας 6 (F/S: SIM-1 … SIM-ΔΑ), plus the two columns FDMS keeps for a night sortie with students and for an FCF — and the 3-01 EVENTS it exercised. The programme is read off the category, so there is nothing to say twice. A sortie that exercised no event is still a sortie: leave the events empty and the flight still counts. This is YOUR record and nobody else's — it names no student, and the flights your students log are entered by them, on their own form." },
+  ins_currency: { label: "My currency", tip: "Your own flying, for the squadron's currency register — the bridge into FDMS. One row per sortie: the DAY, whether it was a CONTINUATION flight of your own or one WITH AN SP, WHAT WAS FLOWN — a Continuation flight names its Σ category (the printed rows of Πίνακας 9: Σ-1, Σ-2 day, Σ-2 night, Σ-3, Σ-4, Σ-20, and of Πίνακας 6: SIM-1 … SIM-ΔΑ, plus FDMS's columns for a night sortie with students and for an FCF, and the Chapter-5 demo flight); a With-SP flight names the STUDENT'S SORTIE from the syllabus, or repeat / fcf / cef, or the code as typed — and the 3-01 EVENTS it exercised. A sortie that exercised no event is still a sortie: leave the events empty and the flight still counts. This is YOUR record and nobody else's — it names no student, and the flights your students log are entered by them, on their own form." },
 };
 WA.secLabel = function (k) { return (WA.SECTIONS_META[k] || {}).label || k; };
 WA.secTip = function (k) { return (WA.SECTIONS_META[k] || {}).tip || ""; };
@@ -1188,8 +1188,13 @@ WA.INS_ENTRY_KEYS = {
   /* ROUND 20 — `category` is gone and `s_category` is what replaced it. The
      programme is DERIVED from the category (WA.sCatGroup), so the two facts
      that could contradict each other are one fact that cannot.
+     ROUND 21 — `sortie` joins for the with-SP kind: a flight with a student is
+     named by WHAT WAS FLOWN (the student's syllabus code, a marker of
+     WA.WITHSP_MARKERS, or off-catalogue text), and `s_category` becomes a
+     CONTINUATION-only fact (surviving on old with-SP rows as the read-only
+     legacy carrier).
      MIRROR: db/schema.sql → wa.ins_entry_keys('currency'). */
-  ins_currency: ["date", "kind", "s_category", "e_items", "seq"],
+  ins_currency: ["date", "kind", "s_category", "sortie", "e_items", "seq"],
 };
 /* MIRROR: db/schema.sql → wa.ins_section_cap. Like every other cap in this
    application it is a runaway-client stop, not a squadron rule: 400 rows is
@@ -1199,17 +1204,19 @@ WA.INS_SECTION_CAP = function (sec) { return sec === "ins_currency" ? 400 : 200;
 WA.insSecKey = function (formKey) { return String(formKey || "").replace(/^ins_/, ""); };
 WA.insFormKey = function (storedKey) { return "ins_" + String(storedKey || ""); };
 
-/* THE TWO KINDS. «κάποια δική του πτήση S» and «μια πτήση με μαθητή»: the
-   ruling names exactly two, and they are two because the squadron counts them
-   differently — a sortie flown with a student is instruction as well as
-   currency. Neither references the student: the flight itself lives on the
-   student's own form, and this row is the instructor's claim about his own
-   logbook (db/schema.sql → wa.currency_kinds). */
+/* THE TWO KINDS — ROUND 21: «Στο flight επιλογές Continuation, With SP» — the
+   ruling's own words, as the STORED keys as well as the labels (the cloud
+   table was empty, so the keys moved with the surfaces; wa.migrate_ins_entry
+   maps the round-19/20 'own'/'student' on read). They are two because the
+   squadron counts them differently — a sortie flown with a student is
+   instruction as well as currency. Neither references the student: the flight
+   itself lives on the student's own form, and this row is the instructor's
+   claim about his own logbook (db/schema.sql → wa.currency_kinds). */
 WA.CURRENCY_KINDS = [
-  { id: "own", label: "own",
-    tip: "A sortie of your own — no student aboard. This is the «δική του πτήση» of the ruling: your own S flight, flown for your own programme." },
-  { id: "student", label: "with a student",
-    tip: "A sortie flown with a student. The FLIGHT is the student's and they log it on their own form; this row is your currency claim about the same hour — the events it let you exercise. Nothing here names the student, and nothing here changes their record." },
+  { id: "continuation", label: "Continuation",
+    tip: "A Continuation flight of your own — no student aboard («τωρινό own — μετά Continuation»). It is named by its Σ category of Πίνακας 9 / Πίνακας 6, never by a syllabus sortie of the students." },
+  { id: "with_sp", label: "With SP",
+    tip: "A flight with a student («τωρινό with a student»). It is named by WHAT WAS FLOWN — the student's syllabus sortie, or repeat / fcf / cef. The FLIGHT is the student's and they log it on their own form; this row is your currency claim about the same hour. Nothing here names the student, and nothing here changes their record." },
 ];
 WA.currencyKind = function (id) {
   return WA.CURRENCY_KINDS.find((k) => k.id === String(id || "")) || null;
@@ -1217,6 +1224,54 @@ WA.currencyKind = function (id) {
 WA.currencyKindLabel = function (id) {
   const k = WA.currencyKind(id);
   return k ? k.label : (id ? String(id) : "—");
+};
+
+/* ROUND 21 — THE THREE MARKERS a with-SP row may carry in its sortie box
+   beside the student syllabus codes. They ARE the R12 flight-kind ids, stored
+   in the SAME field (lowercase words cannot collide with the C4101 code
+   shapes), deliberately without 'syllabus' (a syllabus flight is named by its
+   code) and without 'other' (the off-catalogue free text IS the other).
+   MIRROR: db/schema.sql → wa.withsp_markers(). */
+WA.WITHSP_MARKERS = [
+  { id: "repeat", short: "repeat", label: "repeat — a re-fly of a syllabus flight",
+    tip: "The student re-flew a syllabus sortie. Their own row says which; if you know the code, picking it from the syllabus list joins the two rows tighter." },
+  { id: "fcf", short: "FCF", label: "FCF — aircraft test flight",
+    tip: "Functional Check Flight — not a syllabus sortie of the students, so it is named by the marker." },
+  { id: "cef", short: "CEF", label: "CEF — Εξέταση Καταλληλότητας",
+    tip: "Εξέταση Καταλληλότητας — recorded on the student's side as an evaluation; here it is your flight of that day." },
+];
+WA.withspMarker = function (id) {
+  const k = String(id === null || id === undefined ? "" : id).trim().toLowerCase();
+  return WA.WITHSP_MARKERS.find((m) => m.id === k) || null;
+};
+/* the FULL printed name of a with-SP sortie value — the marker's label, the
+   catalogue code with its printed name, or the off-catalogue text as typed */
+WA.curSortieText = function (v) {
+  const m = WA.withspMarker(v);
+  if (m) return m.label;
+  const c = WA.normCode(v);
+  const band = WA.sortieBand(c);
+  if (band) {
+    for (const t of WA.TRACKS) {
+      const s = WA.logSortie(band, t, c);
+      if (s) return s.c + " — " + s.n;
+    }
+    return c;
+  }
+  return String(v === null || v === undefined ? "" : v);
+};
+/* the SHORT form — what a chip or a narrow cell prints */
+WA.curSortieCode = function (v) {
+  const m = WA.withspMarker(v);
+  if (m) return m.short;
+  const s = WA.normCode(v);
+  return s || String(v === null || v === undefined ? "" : v);
+};
+/* is this value one the catalogue or the marker list knows? (an unknown one is
+   accepted — the syllabus data can lag reality — and shown marked) */
+WA.curSortieKnown = function (v) {
+  if (!String(v === null || v === undefined ? "" : v).trim()) return true;
+  return !!WA.withspMarker(v) || !!WA.sortieBand(v);
 };
 
 /* THE TWO PROGRAMMES, IN THE NAMES THE 3-01 PRINTS. «ΑΕΡΟΣ» is the semester
@@ -1313,8 +1368,11 @@ WA.sCatTip = function (id) {
     : "the 3-01 prints " + c.p + " sortie" + (c.p === 1 ? "" : "s") + " per semester for a POSTED instructor" +
       (c.a === undefined ? " and a dash for an attached one" : " (" + c.a + " attached)");
   return WA.sCatText(c.id) + " · " + WA.currencyCatLabel(c.g) +
-    (c.aid ? " · not a row of the 3-01: " + c.why : " · " + quota) +
+    (c.aid ? " · not a printed row of Πίνακας 9: " + c.why : " · " + quota) +
     (c.tp ? " · flown by the squadron's Test Pilots" : "") +
+    /* ROUND 21 — the dp mark, exactly as tp renders: MARKED, never hidden,
+       because this roster has no demo_pilot flag to hide it by */
+    (c.dp ? " · Demo pilots only — the option is marked, never hidden" : "") +
     ". The semester itself is counted in FDMS; this form records that the sortie was flown, and on what day.";
 };
 
@@ -1385,12 +1443,24 @@ WA.eItemsText = function (e) {
    whitelist is what makes `category` stop existing.
    MIRROR: db/schema.sql → wa.migrate_ins_entry + wa.migrate_instructor_record. */
 WA.INS_LEGACY_CAT = { aeros: "legacy-aeros-unspecified", fs: "legacy-fs-unspecified" };
+/* ROUND 21 — TWO MORE ARMS, IN ORDER (the mirror of wa.migrate_ins_entry):
+   the kind map first ('own' → 'continuation', 'student' → 'with_sp' — the
+   stored keys moved with the surfaces, §4x·1), then the marker fold (a sortie
+   whose lowercase form is repeat/fcf/cef becomes that lowercase id — the
+   normalisation boundary upper-cases every `sortie`, and the markers ARE the
+   lowercase R12 kind ids), then the round-20 category→legacy arm. An
+   s_category on a (now) with_sp row is KEPT AS-IS — the legacy carrier. */
 WA.migrateInsEntry = function (sec, e) {
   if (!e || typeof e !== "object") return {};
   if (sec !== "ins_currency") return e;
-  if (e.s_category) return e;
-  const legacy = WA.INS_LEGACY_CAT[String(e.category || "")];
-  return legacy ? { ...e, s_category: legacy } : e;
+  let x = e;
+  const kmap = { own: "continuation", student: "with_sp" };
+  if (kmap[String(x.kind || "")]) x = { ...x, kind: kmap[String(x.kind)] };
+  const m = WA.withspMarker(x.sortie);
+  if (m && String(x.sortie) !== m.id) x = { ...x, sortie: m.id };
+  if (x.s_category) return x;
+  const legacy = WA.INS_LEGACY_CAT[String(x.category || "")];
+  return legacy ? { ...x, s_category: legacy } : x;
 };
 WA.migrateInsRecord = function (rec) {
   const src = (rec && typeof rec === "object") ? rec : {};
@@ -1432,11 +1502,14 @@ WA.curSort = function (list) {
     });
 };
 /* the identity two versions of one currency row share — and the identity the
-   server refuses a second copy of (wa.validate_instructor_record) */
+   server refuses a second copy of (wa.validate_instructor_record).
+   ROUND 21 — one formula, both kinds: the what-was-flown slot is the Σ
+   category where the row carries one, else the sortie folded to upper case
+   (the server's coalesce + upper(wa.norm_line(…)), mirrored). */
 WA.curIdent = function (e) {
   const x = e || {};
-  return [String(x.kind || ""), String(x.s_category || ""),
-          String(x.date || ""), WA.curSeq(x)].join("|");
+  const what = String(x.s_category || "") || WA.normCode(x.sortie || "");
+  return [String(x.kind || ""), what, String(x.date || ""), WA.curSeq(x)].join("|");
 };
 
 /* ── AN EMPTY FIXED SLOT (round 5) ─────────────────────────────────────────
@@ -3648,8 +3721,12 @@ WA.rowLabel = function (sec, e, opts) {
     /* ROUND 20 — THE Σ PRINTED NAME, by the ruling: «να έχουμε ποια S είναι».
        Not the programme beside it — the programme is DERIVED from the category
        now, so printing both would be printing one fact twice, and not the bare
-       code either, because half the squadron reads these off paper by name. */
+       code either, because half the squadron reads these off paper by name.
+       ROUND 21 — a with-SP row is named by WHAT WAS FLOWN instead: the
+       student's sortie, a marker's label, or the off-catalogue text as typed
+       (the WA.curIdent coalesce, in words). */
     if (x.s_category) bits.push(WA.sCatText(x.s_category));
+    else if (x.sortie) bits.push(WA.curSortieText(x.sortie));
     if (x.date) bits.push(fmtD(x.date));
     const nm0 = bits.filter(Boolean).join(" · ");
     const sq0 = WA.curSeq(x);
@@ -3723,6 +3800,7 @@ WA.fieldText = function (sec, field, v) {
   if (sec === "ins_currency") {
     if (field === "kind") return WA.currencyKindLabel(v);
     if (field === "s_category") return WA.sCatText(v);
+    if (field === "sortie") return WA.curSortieText(v);
   }
   if (field === "date" || field === "end_date" || field === "entrance_date" || field === "exit_date") {
     return fmtD(v);
@@ -3788,11 +3866,12 @@ WA.IDENT_FIELDS = {
   exams: ["exam", "trial", "series", "series_no"],
   solo_flights: ["slot"],
   evaluations: ["evaluation"],
-  /* ROUND 19 — all four facts of WA.curIdent. They ARE the row's name, so the
+  /* ROUND 19 — all the facts of WA.curIdent. They ARE the row's name, so the
      «added» line does not repeat them; change one and the row surfaces as a
      removal plus an addition, which is the honest description of a sortie
-     re-filed under a different day, kind or programme. */
-  ins_currency: ["date", "kind", "s_category", "seq"],
+     re-filed under a different day, kind or identity. ROUND 21 adds `sortie` —
+     the with-SP half of the identity's coalesce. */
+  ins_currency: ["date", "kind", "s_category", "sortie", "seq"],
 };
 /* the fields a change list ever mentions — the stored keys of the section,
    minus the two the user never typed and cannot act on.

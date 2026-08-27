@@ -1470,9 +1470,8 @@ tr.is-problem, .rrow.is-problem {
   border-radius: 6px; background: var(--surface);
   min-width: 210px; max-width: 300px;
 }
-/* the PROGRAMME cell is derived, never typed — so it is rendered as text and
-   wears the muted colour every other read-only fact on this page wears */
-.curtbl td.prog { color: var(--muted); font-weight: 600; white-space: nowrap; }
+/* ROUND 21 — the PROGRAMME cell is GONE («Το PROGRAMME δεν χρειάζεται»), and
+   its rule went with it: a selector for a cell no table draws is dead code. */
 /* the button that opens the picker. It carries the count, so it is a control
    and a reading at once — «✎ 3 events» says what is there and what to press. */
 .ms-pick { min-height: 28px; padding: 3px 9px; font-size: 11.5px; }

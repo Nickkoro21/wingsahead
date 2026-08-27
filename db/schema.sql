@@ -1411,8 +1411,52 @@ $$;
 -- στηλών»), so a code would be a field this bridge carries and its destination
 -- never reads. House minimalism decided the rest: this section has no note
 -- field either.
+--
+-- ══ ROUND 21 (§4x) — CONTINUATION / WITH SP, AND THE SORTIE RETURNS FOR ONE
+-- KIND. RULING (2026-08-28): «Στο flight επιλογές Continuation, With SP. …
+-- Όταν η επιλογή είναι With SP να ανοίγουν οι πτήσεις των μαθητών, έξτρα
+-- repeat, fcf, cef.»
+--
+-- THE STORED KEYS MOVE — 'own' → 'continuation', 'student' → 'with_sp' — and
+-- the judgement is recorded: the cloud instructor_records table is EMPTY
+-- (verified 27/08/2026, restated below at the migration), so a permanent
+-- translation layer («stored 'own', shown Continuation») would be a tax paid
+-- forever to spare a migration that costs two CASE arms. The house owns the
+-- mechanism (wa.migrate_ins_entry, read-time, idempotent), and stored keys
+-- that say what the surfaces say is the round-20 doctrine — no two
+-- vocabularies for one fact.
+--
+-- AND §4u·2 IS SUPERSEDED FOR with_sp ONLY: reason (a) above dies the moment
+-- the sortie field exists only on the kind where it is always meaningful (a
+-- flight WITH a student always has the student's sortie), and reason (b) was
+-- argued about the instructor's OWN Σ rows, which keep their Σ category and
+-- take no sortie. A Continuation row still refuses a sortie BY NAME.
 create or replace function wa.currency_kinds() returns text[]
-language sql immutable set search_path = public, wa, pg_temp as $$ select array['own','student']::text[] $$;
+language sql immutable set search_path = public, wa, pg_temp as $$ select array['continuation','with_sp']::text[] $$;
+
+-- the printed name of a kind — the SQL twin of the client's labels
+-- (app/app.js → WA.CURRENCY_KINDS), written once so the export and any reader
+-- of it never hardcodes the ids the way it never hardcodes a Σ slug.
+create or replace function wa.currency_kind_label(p_id text) returns text
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select case p_id
+    when 'continuation' then 'Continuation'
+    when 'with_sp' then 'With SP'
+    else null end
+$$;
+
+-- ROUND 21 — THE THREE MARKERS a with-SP row may carry in its `sortie` box
+-- beside the student syllabus codes: they ARE the R12 flight-kind ids, stored
+-- in the SAME field as the codes (lowercase words cannot collide with the
+-- ^[A-Z]\d{4}$ code shapes), so they need no new vocabulary and line up 1:1
+-- with the student row's `kind` values for the bridge join (§4x·6). A SUBSET
+-- of wa.flight_kinds(), deliberately: without 'syllabus' (a syllabus flight is
+-- named by its code) and without 'other' (the off-catalogue free text IS the
+-- other).
+create or replace function wa.withsp_markers() returns text[]
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select array['repeat','fcf','cef']::text[]
+$$;
 
 -- THE TWO PROGRAMMES, IN THE NAMES THE 3-01 PRINTS FOR THEM. «ΑΕΡΟΣ» is the
 -- semester AIR programme (Πίνακας 9) and «F/S» the semester SIMULATOR one
@@ -1529,9 +1573,10 @@ $$;
 -- exactly as little as «a flight» names an aircraft. The programme is DERIVED
 -- from the category (wa.s_category_group), so the two can never disagree.
 --
--- 16 categories. What is in the list and is not a row of the 3-01:
+-- 17 categories. What is in the list and is not a row of the 3-01:
 --   x-night-students — the 3-01 prints no such requirement — FDMS carries it as a column of its own because the squadron flies it, and because a night sortie is what keeps the night-landing currency alive.
 --   x-fcf-flight — a functional check flight is flown by the squadron's Test Pilots and is not a Πίνακας 9 requirement — FDMS carries it as a column of its own, and it is what dates the Ε-1γ row of the EVENTS table.
+--   x-demo-flight — the 3-01 prints it in Chapter 5 — the display pilot's own sortie. FDMS carries demo as a table of its own, gated on the demo_pilot flag, and §37α counts it (with the FCF) inside Σ-1 for those available. Wings Ahead has no demo-pilot flag, so the option is MARKED, never hidden — the x-fcf reasoning, verbatim.
 --   legacy-aeros-unspecified — a round-19 row that stored only the programme. The Σ was never recorded and cannot be guessed from a date — it is shown marked, everywhere, and needs the developer's hand.
 --   legacy-fs-unspecified — a round-19 row that stored only the programme. The Σ was never recorded and cannot be guessed from a date — it is shown marked, everywhere, and needs the developer's hand.
 -- And what the research file carries that is NOT a kind of sortie, by name:
@@ -1549,6 +1594,7 @@ language sql immutable set search_path = public, wa, pg_temp as $$
     's-20-no-requirements',
     'x-night-students',
     'x-fcf-flight',
+    'x-demo-flight',
     'legacy-aeros-unspecified',
     'sim-1',
     'sim-2',
@@ -1573,6 +1619,7 @@ language sql immutable set search_path = public, wa, pg_temp as $$
     when 's-20-no-requirements' then 'Σ-20 — No-requirements missions'
     when 'x-night-students' then 'Νυχτερινή με μαθητές — Night sortie flown with students'
     when 'x-fcf-flight' then 'Πτήση δοκιμής (FCF) — Aircraft test flight'
+    when 'x-demo-flight' then 'Πτήση επίδειξης (DEMO) — Display flight (demo sortie)'
     when 'legacy-aeros-unspecified' then 'ΑΕΡΟΣ — unspecified (recorded before the Σ taxonomy)'
     when 'sim-1' then 'SIM-1 — Precision handling / ACRO (F/S)'
     when 'sim-2' then 'SIM-2 — IFR (F/S)'
@@ -1598,6 +1645,7 @@ language sql immutable set search_path = public, wa, pg_temp as $$
     when 's-20-no-requirements' then 'aeros'
     when 'x-night-students' then 'aeros'
     when 'x-fcf-flight' then 'aeros'
+    when 'x-demo-flight' then 'aeros'
     when 'legacy-aeros-unspecified' then 'aeros'
     when 'sim-1' then 'fs'
     when 'sim-2' then 'fs'
@@ -3384,20 +3432,36 @@ create or replace function wa.ins_entry_keys(p_sec text) returns text[]
 language sql immutable set search_path = public, wa, pg_temp as $$
   select case p_sec
     -- date        required — a currency claim without a day claims nothing
-    -- kind        'own' (his own sortie) / 'student' (a sortie with a student)
-    -- s_category  WHICH SORTIE — an id of wa.s_category_ids(): Σ-1 · Σ-2 day ·
-    --             Σ-2 night · Σ-3 · Σ-4 · Σ-20 of Πίνακας 9, SIM-1…SIM-ΔΑ of
-    --             Πίνακας 6, FDMS's two recording columns, and the two legacy
-    --             ids of §4v·1. The PROGRAMME is derived from it
+    -- kind        'continuation' (his own flight) / 'with_sp' (a flight with a
+    --             student) — round 21; the round-19/20 'own'/'student' keys
+    --             are mapped on read (wa.migrate_ins_entry)
+    -- s_category  WHICH Σ IT WAS — CONTINUATION ONLY, required there: an id of
+    --             wa.s_category_ids(): Σ-1 · Σ-2 day · Σ-2 night · Σ-3 · Σ-4 ·
+    --             Σ-20 of Πίνακας 9, SIM-1…SIM-ΔΑ of Πίνακας 6, FDMS's two
+    --             recording columns, the demo flight of Chapter 5, and the two
+    --             legacy ids of §4v·1. The PROGRAMME is derived from it
     --             (wa.s_category_group), which is why round 19's `category` is
     --             gone from this list: two keys for one fact is two keys that
-    --             can contradict each other.
+    --             can contradict each other. On a with_sp row it survives ONLY
+    --             as a READ-ONLY LEGACY CARRIER (a round-19/20 'student' row
+    --             claimed a Σ and no sortie): storable, marked, and the write
+    --             path refuses to let the count of such rows GROW
+    --             (wa.ins_withsp_scat_count — the round-6 `phase` doctrine).
+    -- sortie      WHAT WAS FLOWN — WITH-SP ONLY, required there (round 21): a
+    --             syllabus code of the STUDENT catalogue, either band
+    --             (wa.sortie_band decides which); or one of the three markers
+    --             of wa.withsp_markers() (repeat / fcf / cef); or off-catalogue
+    --             free text, accepted and shown marked — the student form's
+    --             own escape, because the syllabus data may lag reality and a
+    --             record must never become unstorable. REFUSED BY NAME on a
+    --             Continuation row. No band and no track is stored: the code
+    --             carries both wherever anyone needs them.
     -- e_items     the 3-01 EVENTS the sortie exercised — ids of wa.e_item_ids(),
     --             possibly NONE: a plain Σ flight that exercised no event is
     --             still a flight, and the ruling asks for it by name
-    -- seq         which sortie of that kind, category and day — 1, and 2 for the
+    -- seq         which sortie of that kind, identity and day — 1, and 2 for the
     --             second. AUTHORED, never an array index (round-12 doctrine)
-    when 'currency' then array['date','kind','s_category','e_items','seq']
+    when 'currency' then array['date','kind','s_category','sortie','e_items','seq']
     else array[]::text[] end
 $$;
 
@@ -3469,11 +3533,14 @@ begin
         -- and until this round that promise was false for exactly the two
         -- fields it names. Now the server refuses in the sentence the client
         -- would have said, so the instructor meets one wording, not two.
+        -- ROUND 21 — the two kinds are CONTINUATION and WITH SP, in the
+        -- ruling's own words, and the required-presence sentences moved with
+        -- them (server = client wording, the curIncomplete() promise).
         perform wa.chk(nullif(trim(coalesce(e->>'kind', '')), '') is not null,
           w || '.kind',
-          'every flight of the currency card says whether it was your own flight or one with a student — the squadron counts the two differently, so a row that says neither is a sortie that counts nowhere');
+          'every flight of the logbook says whether it was a Continuation flight of your own or one with a student (SP) — the squadron counts the two differently, so a row that says neither is a sortie that counts nowhere');
         perform wa.chk((e->>'kind') = any(wa.currency_kinds()), w || '.kind',
-          format('a flight is either your own or one with a student — %s',
+          format('a flight is either a Continuation flight or one with an SP — %s',
                  array_to_string(wa.currency_kinds(), ' / ')));
         -- ROUND 20 — WHICH Σ, AND THE REFUSAL SAYS IT BY NAME. The closed list
         -- is the printed one (Πίνακας 9 + Πίνακας 6 + FDMS's two columns), and
@@ -3489,17 +3556,41 @@ begin
         -- fix as `kind` above: the membership check below is NULL-blind, so a
         -- row with no Σ category at all — or with a JSON `null` where one
         -- belongs — was ACCEPTED by the very check written to close the list.
-        -- The programme (ΑΕΡΟΣ / F/S) is DERIVED from this field
-        -- (wa.s_category_group), so a row without one is a sortie in neither
-        -- section of the currency card: stored, exported, and counted towards
-        -- nothing. That is worse than a refusal, because it looks like a
-        -- record. The legacy ids are the ONLY sanctioned way to hold a row
-        -- whose category was never recorded, and they are ids — present,
-        -- storable, and marked everywhere they are rendered.
-        perform wa.chk(nullif(trim(coalesce(e->>'s_category', '')), '') is not null,
-          w || '.s_category',
-          'every flight names which Σ category it was — the programme (ΑΕΡΟΣ / F/S) is read off the category, so a flight without one belongs to no section of the currency card and is counted towards nothing');
-        perform wa.chk((e->>'s_category') = any(wa.s_category_ids()), w || '.s_category',
+        -- ROUND 21 — AND IT IS ASKED PER KIND. A Continuation flight is named
+        -- by its Σ category and refuses a sortie BY NAME; a with-SP flight is
+        -- named by the student's sortie and takes a Σ only as the read-only
+        -- legacy carrier of a round-19/20 'student' row (whose growth the
+        -- write path blocks — wa.ins_withsp_scat_count). One box, one fact.
+        if (e->>'kind') = 'continuation' then
+          perform wa.chk(nullif(trim(coalesce(e->>'sortie', '')), '') is null,
+            w || '.sortie',
+            'a Continuation flight is your own — it is named by its Σ category of Πίνακας 9 / Πίνακας 6, not by a syllabus sortie of the students');
+          perform wa.chk(nullif(trim(coalesce(e->>'s_category', '')), '') is not null,
+            w || '.s_category',
+            'every Continuation flight names which Σ category it was — Πίνακας 9 and Πίνακας 6 are counted by the category, so a flight without one is counted towards nothing');
+        elsif (e->>'kind') = 'with_sp' then
+          perform wa.chk(nullif(trim(coalesce(e->>'sortie', '')), '') is null
+                         or nullif(trim(coalesce(e->>'s_category', '')), '') is null,
+            w || '.s_category',
+            'one box, one fact — this flight already names the student sortie, and a Σ category beside it would be a second claim that can contradict the first');
+          -- the presence question: the legacy carrier (a Σ and no sortie) is
+          -- the ONE sanctioned way a with-SP row stands without one
+          perform wa.chk(nullif(trim(coalesce(e->>'sortie', '')), '') is not null
+                         or nullif(trim(coalesce(e->>'s_category', '')), '') is not null,
+            w || '.sortie',
+            'every flight with an SP names what was flown — choose the student''s sortie from the syllabus, or repeat / fcf / cef, or type the code if the syllabus data lags reality');
+          -- the value space is the student form's own: catalogue codes and the
+          -- three markers are recognised, anything else is accepted as
+          -- off-catalogue free text and SHOWN MARKED — no membership refusal,
+          -- and no checkride refusal either (the student-side wa.eval_ids()
+          -- refusal exists to prevent two grades for one flight; this row
+          -- carries no grade).
+          perform wa.chk_text(e->'sortie', w || '.sortie', false, 40);
+        end if;
+        -- the Σ membership check runs WHEREVER a Σ is present, either kind:
+        -- a claim nobody can look up in the printed tables cannot be audited
+        perform wa.chk((e->>'s_category') is null
+                       or (e->>'s_category') = any(wa.s_category_ids()), w || '.s_category',
           format('«%s» is not a category of Πίνακας 9 (ΑΕΡΟΣ) or Πίνακας 6 (F/S) — choose one of the %s a flight may be recorded under: %s',
                  coalesce(e->>'s_category', ''),
                  (select count(*) from unnest(wa.s_category_ids()) t(id)
@@ -3549,19 +3640,28 @@ begin
         end if;
       end if;
     end loop;
-    -- ONE ROW PER (kind, category, date, seq) — the same identity the change
-    -- list names a row by, so two rows the dialog would print identically
-    -- cannot both be stored. `seq` is what makes a second sortie of the same
-    -- day sayable; without this check it would also make it forgeable twice.
+    -- ONE ROW PER (kind, what-was-flown, date, seq) — the same identity the
+    -- change list names a row by, so two rows the dialog would print
+    -- identically cannot both be stored. `seq` is what makes a second sortie
+    -- of the same day sayable; without this check it would also make it
+    -- forgeable twice.
+    -- ROUND 21 — ONE FORMULA, BOTH KINDS: the what-was-flown slot is the Σ
+    -- category where the row carries one, else the sortie folded through
+    -- upper(wa.norm_line(…)) so `c4101` and `C4101` cannot both be stored
+    -- (identity only — the stored value is what the normalisation boundary
+    -- made of it; the markers pass through upper() harmlessly).
     if k = 'currency' then
       seen := array[]::text[];
       for i in 0 .. jsonb_array_length(p->k) - 1 loop
         e := p->k->i;
-        f := (e->>'kind') || '|' || (e->>'s_category') || '|' || (e->>'date') || '|' ||
-             coalesce(e->>'seq', '1');
+        f := (e->>'kind') || '|' ||
+             coalesce(e->>'s_category', upper(wa.norm_line(e->>'sortie')), '') || '|' ||
+             (e->>'date') || '|' || coalesce(e->>'seq', '1');
         perform wa.chk(not (f = any(seen)), format('%s[%s]', k, i),
           format('this flight is already recorded (%s, %s, flight %s of the day) — give the second one its own number',
-                 e->>'date', coalesce(wa.s_category_name(e->>'s_category'), e->>'s_category'),
+                 e->>'date',
+                 coalesce(wa.s_category_name(e->>'s_category'), e->>'s_category',
+                          e->>'sortie', '—'),
                  coalesce(e->>'seq', '1')));
         seen := seen || f;
       end loop;
@@ -3587,17 +3687,42 @@ end $$;
 --
 -- THE CLOUD HAS NOTHING TO MIGRATE (`instructor_records` verified EMPTY on
 -- 27/08/2026), so this path exists for the local demo fixtures and for any
--- instance that ran round 19 before this deploy. It is idempotent: a row that
--- already carries `s_category` is left exactly as it stands.
+-- instance that ran round 19 or 20 before this deploy. It is idempotent: a row
+-- that already carries the round-21 keys is left exactly as it stands.
+--
+-- ROUND 21 — TWO MORE ARMS, IN ORDER (kind map first, then the category→legacy
+-- arm; both idempotent; the strip runs after, as today):
+--   'own' → 'continuation' · 'student' → 'with_sp'  — the pure rename of §4x·1
+--     (the cloud maps nothing; local fixtures and any round-19/20 instance do).
+--   a `sortie` whose lowercase form is one of wa.withsp_markers() is folded to
+--     that lowercase id — the normalisation boundary upper-cases every field
+--     named `sortie` (wa.code_fields), and the markers ARE the R12 kind ids,
+--     which are lowercase words; this arm is what keeps the stored value equal
+--     to the id every reader (and the bridge join) compares against.
+--   an `s_category` on a (now) with_sp row is KEPT AS-IS — the legacy carrier
+--     of §4x·2: the old row claimed a Σ, nobody can reconstruct the student's
+--     sortie code from it, and the migration does not guess. Rendered marked;
+--     growth blocked at write (wa.ins_withsp_scat_count).
 create or replace function wa.migrate_ins_entry(e jsonb, p_sec text) returns jsonb
 language sql immutable set search_path = public, wa, pg_temp as $$
   select case
     when jsonb_typeof(e) <> 'object' then '{}'::jsonb
     when p_sec <> 'currency' then e
-    when e ? 's_category' then e
-    when (e->>'category') = 'aeros' then e || jsonb_build_object('s_category', 'legacy-aeros-unspecified')
-    when (e->>'category') = 'fs' then e || jsonb_build_object('s_category', 'legacy-fs-unspecified')
-    else e end
+    else (
+      select case
+        when x ? 's_category' then x
+        when (x->>'category') = 'aeros' then x || jsonb_build_object('s_category', 'legacy-aeros-unspecified')
+        when (x->>'category') = 'fs' then x || jsonb_build_object('s_category', 'legacy-fs-unspecified')
+        else x end
+      from (select e
+              || case when (e->>'kind') = 'own' then jsonb_build_object('kind', 'continuation')
+                      when (e->>'kind') = 'student' then jsonb_build_object('kind', 'with_sp')
+                      else '{}'::jsonb end
+              || case when lower(coalesce(e->>'sortie', '')) = any(wa.withsp_markers())
+                       and (e->>'sortie') is distinct from lower(e->>'sortie')
+                      then jsonb_build_object('sortie', lower(e->>'sortie'))
+                      else '{}'::jsonb end as x) s)
+    end
 $$;
 
 -- READ-TIME REPAIR of an instructor record — the twin of wa.migrate_record.
@@ -3636,6 +3761,22 @@ language sql immutable set search_path = public, wa, pg_temp as $$
     select count(*)::int
     from jsonb_array_elements(coalesce(p->'currency', '[]'::jsonb)) e
     where (e->>'s_category') = any(wa.s_category_legacy_ids())), 0)
+$$;
+
+-- ROUND 21 — HOW MANY with-SP ROWS STILL CARRY A Σ CATEGORY. The second «work
+-- the developer owes» number, beside wa.ins_legacy_count: a round-19/20
+-- 'student' row named a Σ and no student sortie, and the migration keeps the
+-- claim rather than guess a code from it. The write path refuses a payload
+-- whose count EXCEEDS the stored record's (the exact analog of the round-6
+-- `phase` grow-guard), so the number can only ever be used up.
+create or replace function wa.ins_withsp_scat_count(p jsonb) returns int
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select coalesce((
+    select count(*)::int
+    from jsonb_array_elements(coalesce(p->'currency', '[]'::jsonb)) e
+    where jsonb_typeof(e) = 'object'
+      and (e->>'kind') = 'with_sp'
+      and nullif(trim(coalesce(e->>'s_category', '')), '') is not null), 0)
 $$;
 
 -- how many rows an instructor record holds, all sections together
@@ -4153,6 +4294,15 @@ begin
   -- the migration would have made of it.
   pl := wa.migrate_instructor_record(pl);
 
+  -- ROUND 21 — THE with-SP Σ CARRIER MAY ONLY EVER BE USED UP (the round-6
+  -- `phase` grow-guard, exact analog): both sides of the comparison are in the
+  -- MIGRATED shape, so a stale round-19/20 payload and the stored record are
+  -- counted in one vocabulary.
+  perform wa.chk(wa.ins_withsp_scat_count(pl)
+                   <= wa.ins_withsp_scat_count(wa.instructor_record_of(p_instructor)),
+                 'currency',
+                 'a Σ category on a with-SP flight is a leftover of the old form — it may stay on the rows that already carry one, and no new row takes one; name the student''s sortie instead');
+
   insert into public.instructor_records as ir (instructor_id, data, last_update)
   values (p_instructor, pl, now())
   on conflict (instructor_id)
@@ -4171,6 +4321,165 @@ language sql stable set search_path = public, wa, pg_temp as $$
   select wa.migrate_instructor_record(
            coalesce((select ir.data from public.instructor_records ir
                       where ir.instructor_id = p_instructor), '{}'::jsonb))
+$$;
+
+-- ══ ROUND 21 (§4x·5) — MY FLIGHT LOGBOOK: THREE SOURCES, ONE ROW SHAPE ═════
+-- RULING (2026-08-28): «Στο My Currency να έχουμε έναν πίνακα My Flight
+-- Logbook, όπου θα μπαίνει ό,τι βάζει ο κάθε εκπαιδευτής. … αν μπει ένας
+-- μαθητής και βάλει πτήση C4101 με [τον εκπαιδευτή] να το βλέπουμε κι εδώ — ή
+-- αν προσθέσει κάποιος πτήση στο progress του FDMS.»
+--
+-- (a) SELF — the caller's own currency rows, PROJECTED (e_items are NOT
+--     repeated here: they live in the editable table above; the logbook is the
+--     flying, not the events).
+-- (b) SP-ENTERED — every flights/fs row of every ACTIVE student's record that
+--     names the caller. Deliberately NOT wa.student_in_scope: the ruling says
+--     any student's row naming him, and a graduating class closing its
+--     assessment window does not un-fly its flights. solo_flights are EXCLUDED
+--     (the instructor there AUTHORISED, he was not aboard); the
+--     evaluations/fpc/cef evaluator matches are a noted open item (§4x·10).
+--     Read-only here — the student's row belongs to the student.
+-- (c) FDMS-PROGRESS — the designed, empty slot: a student-record row whose
+--     provenance stamp is 'fdms' (`entered_by = 'fdms'`, the value
+--     wa.entry_count_by already reserves for bridge slice 3) is labelled
+--     src:'fdms' instead of 'sp'. Today zero rows carry it, so counts.fdms is
+--     0 and the source column exists — Phase 4's FDMS→WA lane lands into a
+--     finished surface with NO further logbook change.
+--
+-- THE MATCHING RULE — oid-first, surname fallback, shared-surname honesty:
+--   1. a row carrying instructor_oid matches iff v.external_oid is non-null
+--      and equal — the oid is the unambiguous identity, and surname never
+--      overrides it; an oid row that is not his is not listed.
+--   2. a row with no oid falls back to folded surnames. A misspelled surname
+--      matches nobody and appears in nobody's logbook — the same truth every
+--      surname box in the app already lives with; recorded, not papered over.
+--   3. `ambiguous: true` on every surname-matched row whose folded surname is
+--      shared by MORE THAN ONE role='instructor' row in people (active or not
+--      — old rows may name departed men). The row is SHOWN, flagged, counted
+--      under counts.sp_ambiguous as well as counts.sp — flagged, never
+--      guessed, never silently attributed, never dropped. Both holders of the
+--      surname see the row flagged in their own logbooks.
+--
+-- CAPS, AND THE COUNTS STAY TRUE: self is uncapped (≤400 by
+-- wa.ins_section_cap); sp+fdms are capped at the most recent 600 rows
+-- POST-SORT, `counts` are computed BEFORE the cap, and truncated/omitted say
+-- so in numbers the client turns into words. The scan is one pass over the
+-- active students' records, wa.migrate_record ONCE per record (the lateral
+-- pattern); the in-scope students are migrated a second time by the students
+-- lane of the dataset — accepted and recorded (§4x·5): different populations,
+-- and restructuring the students lane to share would couple two lanes for a
+-- ≤31-record cost.
+create or replace function wa.instructor_logbook(v public.people) returns jsonb
+language sql stable set search_path = public, wa, pg_temp as $$
+  with cap as (select 600 as n),
+  self_rows as (
+    select jsonb_build_object(
+             'src', 'self',
+             'date', e->>'date',
+             'sortie', e->>'sortie',
+             's_category', e->>'s_category',
+             'band', case when nullif(e->>'sortie', '') is not null
+                          then wa.sortie_band(e->>'sortie') else null end,
+             'kind', e->>'kind',
+             'seq', coalesce(nullif(e->>'seq', '')::int, 1),
+             'grade', null, 'ng', null, 'mission', null,
+             'student', null, 'match', null, 'ambiguous', false,
+             'legacy', ((e->>'s_category') = any(wa.s_category_legacy_ids()))
+                       or ((e->>'kind') = 'with_sp'
+                           and nullif(trim(coalesce(e->>'s_category', '')), '') is not null)
+           ) as row,
+           coalesce(e->>'date', '') as d, 0 as srcord, '' as stu,
+           coalesce(nullif(e->>'seq', '')::int, 1) as sq
+    from jsonb_array_elements(
+           coalesce(wa.instructor_record_of(v.id)->'currency', '[]'::jsonb)) e
+    where jsonb_typeof(e) = 'object'
+  ),
+  -- the folded surnames held by MORE THAN ONE instructor row (active or not)
+  shared as (
+    select lower(btrim(p.last_name)) as ln
+    from public.people p
+    where p.role = 'instructor'
+      and p.last_name is not null and btrim(p.last_name) <> ''
+    group by lower(btrim(p.last_name))
+    having count(*) > 1
+  ),
+  sp_hits as (
+    select s, b.k as band, x.e,
+           case when nullif(x.e->>'instructor_oid', '') is not null
+                then 'oid' else 'surname' end as match,
+           case when (x.e->>'entered_by') = 'fdms' then 'fdms' else 'sp' end as src,
+           coalesce(nullif(x.e->>'seq', '')::int, 1) as sq
+    from public.people s
+    join public.student_records r on r.student_id = s.id
+    -- the read-time migration runs ONCE per record, not once per question
+    cross join lateral (select wa.migrate_record(coalesce(r.data, '{}'::jsonb)) as rec) m
+    cross join lateral unnest(array['flights', 'fs']) b(k)
+    cross join lateral jsonb_array_elements(coalesce(m.rec->b.k, '[]'::jsonb)) x(e)
+    where s.role = 'student' and s.active
+      and jsonb_typeof(x.e) = 'object'
+      and case
+            when nullif(x.e->>'instructor_oid', '') is not null
+              then v.external_oid is not null
+               and x.e->>'instructor_oid' = v.external_oid
+            else nullif(lower(btrim(coalesce(x.e->>'instructor', ''))), '') is not null
+             and lower(btrim(coalesce(x.e->>'instructor', ''))) =
+                 lower(btrim(coalesce(v.last_name, '')))
+          end
+  ),
+  sp_built as (
+    select jsonb_build_object(
+             'src', src,
+             'date', e->>'date',
+             'sortie', e->>'sortie',
+             's_category', null,
+             'band', band,
+             'kind', e->>'kind',
+             'seq', sq,
+             'grade', e->'grade',
+             'ng', coalesce((case when jsonb_typeof(e->'ng') = 'boolean'
+                                  then (e->>'ng')::boolean end), false),
+             'mission', e->>'mission',
+             'student', jsonb_build_object('last_name', (s).last_name,
+                                           'first_name', (s).first_name,
+                                           'class', (s).class),
+             'match', match,
+             'ambiguous', match = 'surname'
+               and lower(btrim(coalesce(e->>'instructor', ''))) in (select ln from shared),
+             'legacy', coalesce((case when jsonb_typeof(e->'legacy') = 'boolean'
+                                      then (e->>'legacy')::boolean end), false)
+           ) as row,
+           coalesce(e->>'date', '') as d,
+           case when src = 'fdms' then 2 else 1 end as srcord,
+           coalesce((s).last_name, '') as stu, sq, src,
+           (match = 'surname'
+            and lower(btrim(coalesce(e->>'instructor', ''))) in (select ln from shared)) as amb
+    from sp_hits
+  ),
+  ncounts as (
+    select (select count(*) from self_rows) as n_self,
+           (select count(*) from sp_built where src = 'sp') as n_sp,
+           (select count(*) from sp_built where src = 'sp' and amb) as n_amb,
+           (select count(*) from sp_built where src = 'fdms') as n_fdms
+  ),
+  sp_capped as (
+    select row, d, srcord, stu, sq
+    from sp_built
+    order by d desc, srcord, stu, sq desc
+    limit (select n from cap)
+  ),
+  merged as (
+    select row, d, srcord, stu, sq from self_rows
+    union all
+    select row, d, srcord, stu, sq from sp_capped
+  )
+  select jsonb_build_object(
+    'rows', coalesce((select jsonb_agg(row order by d desc, srcord, stu, sq desc)
+                      from merged), '[]'::jsonb),
+    'counts', (select jsonb_build_object('self', n_self, 'sp', n_sp,
+                                         'sp_ambiguous', n_amb, 'fdms', n_fdms)
+               from ncounts),
+    'truncated', (select n_sp + n_fdms > (select n from cap) from ncounts),
+    'omitted', (select greatest(n_sp + n_fdms - (select n from cap), 0) from ncounts))
 $$;
 
 -- ── the ONE instructor dataset ────────────────────────────────────────────
@@ -4199,6 +4508,14 @@ language sql stable set search_path = public, wa, pg_temp as $$
     'currency', wa.instructor_record_of(v.id) -> 'currency',
     'currency_last_update', (select ir.last_update from public.instructor_records ir
                               where ir.instructor_id = v.id),
+    -- ROUND 21 — THE LOGBOOK RIDES WITH THE SAME DOOR, in the same round trip
+    -- (the §4u house rule: one round trip per door — a second call would be a
+    -- second chance for the page to render half of itself). The admin's
+    -- on-behalf view inherits it read-only for free. NOT exported: it is a
+    -- projection recomputable from student_records + instructor_records +
+    -- people, and an export that shipped both sources and projection would
+    -- eventually disagree with itself (§4x·7).
+    'logbook', wa.instructor_logbook(v),
     'students', coalesce((
       select jsonb_agg(jsonb_build_object(
                'person', wa.person_json(s),
@@ -4881,6 +5198,10 @@ begin
     -- ROUND 20 — `legacy_rows` rides along because a bridge must be able to
     -- ask «which of these still need a hand?» without knowing what a legacy id
     -- looks like. It counts the rows whose Σ was never recorded (§4v·1).
+    -- ROUND 21 — `withsp_legacy_rows` is the second such number: the with-SP
+    -- rows still carrying the old form's Σ claim (§4x·2). And the migrated
+    -- `data` already carries the NEW kind keys (continuation / with_sp), so
+    -- exports say what the surfaces say without a reader translating.
     'instructor_records', coalesce((select jsonb_agg(jsonb_build_object(
                             'instructor_id', ir.instructor_id,
                             'data', wa.migrate_instructor_record(ir.data),
@@ -4889,8 +5210,20 @@ begin
                                                wa.migrate_instructor_record(ir.data)),
                             'legacy_rows', wa.ins_legacy_count(
                                              wa.migrate_instructor_record(ir.data)),
+                            'withsp_legacy_rows', wa.ins_withsp_scat_count(
+                                                    wa.migrate_instructor_record(ir.data)),
                             'last_update', ir.last_update))
                           from public.instructor_records ir), '[]'::jsonb),
+    -- ROUND 21 — the closed kind list, with its printed labels, so no reader
+    -- ever hardcodes 'continuation'/'with_sp' the way it never hardcodes a Σ
+    -- slug. ADDITIVE, so the stamp stays `wa-export-v1` (§4x·7): §4u·9's
+    -- promotion rule triggers on a change that BREAKS an existing reader, the
+    -- only prospective reader of `kind` values is the bridge's currency lane
+    -- (slice 6, unshipped), and no shipped reader switch-cases on
+    -- 'own'/'student'.
+    'currency_kinds', coalesce((select jsonb_agg(jsonb_build_object(
+                        'id', t.id, 'label', wa.currency_kind_label(t.id)) order by t.ord)
+                      from unnest(wa.currency_kinds()) with ordinality t(id, ord)), '[]'::jsonb),
     -- and the closed list the ids above were chosen from, so a reader that has
     -- never seen the 3-01 can still print «Ε-32 — BFM» instead of a slug
     'e_items', coalesce((select jsonb_agg(jsonb_build_object(

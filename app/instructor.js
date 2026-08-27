@@ -375,7 +375,8 @@ WA.renderInstructor = async function (view, me, opts) {
   /* A ROW WITH NOTHING IN IT IS NOT AN ENTRY — the wa.slot_empty rule, said for
      a section that has no slots: «+ flight» pressed and then ignored must not
      become a refusal, a change line or a stored row. */
-  const curBlank = (e) => !e.date && !e.kind && !e.s_category && !(e.e_items || []).length;
+  const curBlank = (e) => !e.date && !e.kind && !e.s_category && !e.sortie &&
+                          !(e.e_items || []).length;
   const curLive = () => C.rows.filter((e) => !curBlank(e));
   const curFp = (rows) => JSON.stringify(rows.map(WA.fpEntry));
   let CUR_SAVED = curFp(curLive());
@@ -383,19 +384,24 @@ WA.renderInstructor = async function (view, me, opts) {
   const curIsDirty = () => curFp(curLive()) !== CUR_SAVED;
   const curChanges = () => WA.recordChanges(
     { [CUR_SEC]: CUR_SAVED_ROWS }, { [CUR_SEC]: curLive() }, [CUR_SEC]);
-  /* what actually goes on the wire: the two keys that say nothing are dropped,
-     so a record never stores «seq: 1» or an empty event list */
+  /* what actually goes on the wire: the keys that say nothing are dropped, so
+     a record never stores «seq: 1», an empty event list, or the field the
+     row's KIND does not take — a Continuation row ships its Σ category, a
+     with-SP row its sortie (or, on a legacy carrier, the old Σ claim). */
   function curPayload() {
     return curLive().map((e) => {
-      const o = { date: e.date || null, kind: e.kind || null,
-                  s_category: e.s_category || null };
+      const o = { date: e.date || null, kind: e.kind || null };
+      if (e.s_category) o.s_category = e.s_category;
+      if (e.sortie) o.sortie = e.sortie;
       if (WA.curSeq(e) > 1) o.seq = WA.curSeq(e);
       if ((e.e_items || []).length) o.e_items = (e.e_items || []).slice();
       return o;
     });
   }
-  /* the three facts that make two sorties of one day two rows and not one */
-  const curTrip = (e) => [String(e.kind || ""), String(e.s_category || ""),
+  /* the three facts that make two sorties of one day two rows and not one —
+     the WA.curIdent coalesce minus the seq it exists to hand out */
+  const curTrip = (e) => [String(e.kind || ""),
+                          String(e.s_category || "") || WA.normCode(e.sortie || ""),
                           String(e.date || "")].join("|");
   /* SEQ IS AUTHORED — the box is on the row and the instructor may change it —
      but the form never hands him a number the server is about to refuse. When a
@@ -417,13 +423,26 @@ WA.renderInstructor = async function (view, me, opts) {
   }
   /* the rows that cannot be saved yet, named the way the instructor reads them.
      The server refuses these too, by field — but «required date missing
-     (currency[2].date)» is an address, and this is a sentence. */
+     (currency[2].date)» is an address, and this is a sentence.
+     ROUND 21 — asked PER KIND: a Continuation flight still needs its Σ
+     category; a with-SP flight still needs what was flown (a legacy carrier —
+     the old Σ claim and no sortie — is complete as it stands). */
+  function curNeedsWhat(e) {
+    if (!e.kind) return false;
+    if (e.kind === "continuation") return !e.s_category;
+    if (e.kind === "with_sp") return !e.sortie && !e.s_category;
+    return false;
+  }
   function curIncomplete() {
     return C.rows.map((e, i) => ({ e, i })).filter(({ e }) =>
-        !curBlank(e) && (!e.date || !e.kind || !e.s_category)).map(({ e, i }) => {
+        !curBlank(e) && (!e.date || !e.kind || curNeedsWhat(e))).map(({ e, i }) => {
       const miss = [!e.date ? "a date" : "",
-                    !e.kind ? "whether it was your own flight or one with a student" : "",
-                    !e.s_category ? "which Σ category it was" : ""].filter(Boolean);
+                    !e.kind ? "whether it was a Continuation flight or one with an SP" : "",
+                    e.kind === "continuation" && curNeedsWhat(e)
+                      ? "which Σ category it was" : "",
+                    e.kind === "with_sp" && curNeedsWhat(e)
+                      ? "what was flown — the student's sortie, or repeat / fcf / cef, or the code" : ""]
+                   .filter(Boolean);
       const nm = WA.rowLabel(CUR_SEC, e) ||
         (e.e_items || []).map(WA.eItemCode).join(" · ") || "a new flight";
       return { i, text: nm + " — still needs " + miss.join(" and ") };
@@ -493,12 +512,17 @@ WA.renderInstructor = async function (view, me, opts) {
        applied without looking at its subject reads like. */
     const opt = (c) => `<option value="${esc(c.id)}"${cur === c.id ? " selected" : ""}
         title="${esc(WA.sCatTip(c.id))}">${esc(c.c + " — " + c.n)}${
-        (c.tp && !/test pilot/i.test(c.n)) ? " (Test Pilots)" : ""}</option>`;
+        (c.tp && !/test pilot/i.test(c.n)) ? " (Test Pilots)" : ""}${
+        (c.dp && !/demo pilot/i.test(c.n)) ? " (Demo pilots)" : ""}</option>`;
+    /* ROUND 21 — the optgroups are titled by the PRINTED TABLES, a source
+       citation and not a programme badge: the Programme column died with the
+       ruling («Το PROGRAMME δεν χρειάζεται»), and «Πίνακας 9 (ΑΕΡΟΣ)» is where
+       the category is printed, which is a different fact from a derived label
+       beside every row. */
     const grp = (g) => {
       const items = WA.sCatOptions().filter((c) => c.g === g);
       if (!items.length) return "";
-      return `<optgroup label="${esc(WA.currencyCatLabel(g) + " — " +
-        (g === "aeros" ? "Πίνακας 9, the air programme" : "Πίνακας 6, the simulator"))}">${
+      return `<optgroup label="${esc(g === "aeros" ? "Πίνακας 9 (ΑΕΡΟΣ)" : "Πίνακας 6 (F/S)")}">${
         items.map(opt).join("")}</optgroup>`;
     };
     const lost = cur && !WA.sCat(cur)
@@ -510,17 +534,102 @@ WA.renderInstructor = async function (view, me, opts) {
     return `<option value=""${cur ? "" : " selected"}>&mdash; choose &mdash;</option>` +
       lost + legacy + grp("aeros") + grp("fs");
   }
+  /* ── ROUND 21 — THE WITH-SP PICKER: THE STUDENTS' OWN SYLLABUS ───────────
+     «Όταν η επιλογή είναι With SP να ανοίγουν οι πτήσεις των μαθητών, έξτρα
+     repeat, fcf, cef.» BOTH bands open — the students fly aircraft AND
+     simulator with instructors — as the 8 (band, track) tables of the
+     generated R12 catalogue (WA_LOG_SORTIES; no new catalogue file), led by
+     one «Beyond the syllabus» group carrying the three markers. Off-catalogue
+     text arrives through the student form's own escape — the «Other…» option
+     that swaps the box to free text — and is saved as typed and shown marked:
+     the syllabus data may lag reality and a record must never become
+     unstorable. Band is NEVER stored: WA.sortieBand derives it where the code
+     is known, and honestly derives nothing for markers and free text. */
+  function curSortieOptions(e) {
+    const cur = String(e.sortie || "");
+    const curN = WA.normCode(cur);
+    const mk = WA.withspMarker(cur);
+    const opt = (v, t, tip, sel) => `<option value="${esc(v)}"${sel ? " selected" : ""}${
+      tip ? ` title="${esc(tip)}"` : ""}>${esc(t)}</option>`;
+    let out = `<option value=""${cur ? "" : " selected"}>&mdash; choose &mdash;</option>`;
+    if (cur && !WA.curSortieKnown(cur)) {
+      out += opt(cur, cur + " — off-catalogue (as typed)",
+        "Not in the generated syllabus catalogue — saved as typed and shown marked. " +
+        "The syllabus data may lag reality, and a record must never become unstorable.", true);
+    }
+    out += `<optgroup label="Beyond the syllabus">` +
+      WA.WITHSP_MARKERS.map((m) => opt(m.id, m.label, m.tip, !!(mk && mk.id === m.id))).join("") +
+      `</optgroup>`;
+    for (const b of WA.LOG_BANDS) {
+      for (const t of WA.TRACKS) {
+        const list = WA.logSorties(b.id, t);
+        if (!list.length) continue;
+        out += `<optgroup label="${esc(b.short + " — " + WA.itemCatLabel(t))}">` +
+          list.map((s) => opt(s.c, s.c + " — " + s.n,
+            "Training Section " + s.g + (s.h ? " · syllabus " + s.h + " h" : "") +
+            (s.nt ? " · night" : ""),
+            !mk && curN === s.c)).join("") + `</optgroup>`;
+      }
+    }
+    out += `<option value="__other__"
+      title="${esc("Frees the box to plain text — for a code the catalogue does not know yet. It is saved as typed and shown marked off-catalogue.")}">Other&hellip; (type the code)</option>`;
+    return out;
+  }
+  /* the ONE what-was-flown cell, per kind: a Continuation flight names its Σ
+     category; a with-SP flight names the student's sortie — and a with-SP row
+     still carrying the OLD FORM's Σ claim (rounds 19/20 stored a Σ on
+     'student' rows) wears it as a marked chip until a sortie replaces it. */
+  function curWhatCell(i, e) {
+    if (!e.kind) {
+      return `<span class="k" title="${esc("Choose Continuation or With SP first — a Continuation flight names its Σ category of Πίνακας 9 / Πίνακας 6, a With-SP flight names the student's sortie.")}">&mdash; choose the flight first &mdash;</span>`;
+    }
+    if (e.kind === "continuation") {
+      return `<select class="catbox" data-curf="${esc(i)}:s_category"
+             title="${esc(WA.sCatTip(e.s_category))}"
+             aria-label="Which Σ category this Continuation flight was">${curCatOptions(e)}</select>`;
+    }
+    const carrier = !e.sortie && e.s_category;
+    const chip = carrier
+      ? `<span class="mschip is-legacy" title="${esc(
+          "Recorded before the student-sortie catalogue — the old form asked for a Σ category on a with-SP flight. Σ as claimed: " +
+          WA.sCatText(e.s_category) + ". Nobody can reconstruct the student's sortie code from the claim, and the form will not guess: " +
+          "choose the sortie to replace it, or leave the row exactly as it stands.")}">Σ as claimed: ${
+          esc(WA.sCatCode(e.s_category))}</span> `
+      : "";
+    if (e._sfree) {
+      return chip + `<input type="text" data-curf="${esc(i)}:sortie" value="${esc(e.sortie || "")}"
+             maxlength="40" placeholder="e.g. C4101 or FCF profile 2" autocomplete="off"
+             aria-label="What was flown with the SP — free text">
+        <button type="button" class="btn btn-sm" data-curslist="${esc(i)}"
+          title="${esc("Back to the syllabus list. Whatever is typed stays in the box until you change it.")}">list</button>`;
+    }
+    return chip + `<select class="catbox" data-curf="${esc(i)}:sortie"
+           title="${esc(e.sortie ? WA.curSortieText(e.sortie)
+             : "What was flown with the SP: the student's syllabus sortie (either band), or repeat / fcf / cef, or Other… to type a code the catalogue does not know.")}"
+           aria-label="What was flown with the SP">${curSortieOptions(e)}</select>` +
+      (e.sortie && !WA.curSortieKnown(e.sortie)
+        ? ` <span class="badge badge-warn" title="${esc("Not in the generated syllabus catalogue — saved as typed and shown marked. The syllabus data may lag reality.")}">off-catalogue</span>`
+        : "");
+  }
+  /* what the RO twin and the logbook print in the same cell */
+  function curWhatText(e) {
+    if (e.s_category) return WA.sCatText(e.s_category);
+    if (e.sortie) return WA.curSortieText(e.sortie);
+    return "—";
+  }
   function curRowHTML(e, i) {
-    const legacy = WA.sCatIsLegacy(e.s_category);
+    const legacy = WA.sCatIsLegacy(e.s_category) ||
+                   (e.kind === "with_sp" && !!e.s_category);
     if (curRO) {
       return `<tr${legacy ? ` class="is-legacy"` : ""}>
         <td>${esc(e.date ? fmtD(e.date) : "—")}</td>
         <td>${esc(WA.currencyKindLabel(e.kind))}</td>
-        <td title="${esc(WA.sCatTip(e.s_category))}">${esc(e.s_category
-          ? WA.sCatText(e.s_category) : "—")}</td>
-        <td title="${esc((WA.currencyCat(WA.sCatGroup(e.s_category)) || {}).tip ||
-          "The programme is read off the Σ category.")}">${esc(e.s_category
-          ? WA.sCatGroupLabel(e.s_category) : "—")}</td>
+        <td title="${esc(e.s_category ? WA.sCatTip(e.s_category)
+            : (e.sortie ? WA.curSortieText(e.sortie) : ""))}">${esc(curWhatText(e))}${
+          e.kind === "with_sp" && e.s_category
+            ? ` <span class="k">(Σ as claimed — recorded before the student-sortie catalogue)</span>` : ""}${
+          e.sortie && !WA.curSortieKnown(e.sortie)
+            ? ` <span class="k">(off-catalogue)</span>` : ""}</td>
         <td class="num">${esc(WA.curSeq(e))}</td>
         <td class="ecell">${curEventsCell(i, e)}</td>
       </tr>`;
@@ -533,16 +642,10 @@ WA.renderInstructor = async function (view, me, opts) {
         ${WA.CURRENCY_KINDS.map((k) => `<option value="${esc(k.id)}"${
           e.kind === k.id ? " selected" : ""} title="${esc(k.tip)}">${esc(k.label)}</option>`).join("")}
       </select></td>
-      <td><select class="catbox" data-curf="${esc(i)}:s_category"
-             title="${esc(WA.sCatTip(e.s_category))}"
-             aria-label="Which Σ category this sortie was">${curCatOptions(e)}</select></td>
-      <td class="prog" title="${esc(e.s_category
-          ? ((WA.currencyCat(WA.sCatGroup(e.s_category)) || {}).tip || "")
-          : "The programme is read off the Σ category — choose one and it fills itself.")}">${esc(
-          e.s_category ? WA.sCatGroupLabel(e.s_category) : "—")}</td>
+      <td>${curWhatCell(i, e)}</td>
       <td class="num"><input type="number" min="1" max="9" step="1" class="seqbox"
              data-curf="${esc(i)}:seq" value="${esc(WA.curSeq(e))}"
-             title="${esc("Which flight of that day this is, for that kind and that Σ category. It is 1 unless you flew the same thing twice on the same day; the form takes the next free number when it has to.")}"
+             title="${esc("Which flight of that day this is, for that kind and that flight identity. It is 1 unless you flew the same thing twice on the same day; the form takes the next free number when it has to.")}"
              aria-label="Which flight of the day"></td>
       <td class="ecell">${curEventsCell(i, e)}</td>
       <td><button type="button" class="btn btn-sm btn-x" data-curdel="${esc(i)}"
@@ -559,10 +662,9 @@ WA.renderInstructor = async function (view, me, opts) {
     return `<div class="tblwrap"><table class="ftbl curtbl">
       <thead><tr>
         <th>Date</th>
-        <th title="${esc("Your own sortie, or one flown with a student. Neither of them names the student: their flight is recorded on their own form.")}">Flight</th>
-        <th title="${esc("WHICH SORTIE it was: the printed rows of Πίνακας 9 (Σ-1 · Σ-2 day · Σ-2 night · Σ-3 · Σ-4 · Σ-20) and of Πίνακας 6 (SIM-1 … SIM-ΔΑ), plus the two columns FDMS keeps for a night sortie with students and for an FCF. This is the fact the squadron's currency register is keyed by.")}">Σ category</th>
-        <th title="${esc("ΑΕΡΟΣ — the semester air programme (Πίνακας 9 of the 3-01). F/S — the semester simulator programme (Πίνακας 6). It is READ OFF the Σ category and never typed: one fact cannot be two answers.")}">Programme</th>
-        <th class="num" title="${esc("Which flight of that day — 1, and 2 for a second sortie of the same kind and Σ category on the same date.")}">#</th>
+        <th title="${esc("Continuation — a flight of your own. With SP — one flown with a student. Neither of them names the student: their flight is recorded on their own form.")}">Flight</th>
+        <th title="${esc("WHAT WAS FLOWN. A Continuation flight names its Σ category — the printed rows of Πίνακας 9 (Σ-1 · Σ-2 day · Σ-2 night · Σ-3 · Σ-4 · Σ-20) and of Πίνακας 6 (SIM-1 … SIM-ΔΑ), plus FDMS's recording columns and the Chapter-5 demo flight. A With-SP flight names the student's syllabus sortie (either band), or repeat / fcf / cef, or the code as typed.")}">Sortie / Σ category</th>
+        <th class="num" title="${esc("Which flight of that day — 1, and 2 for a second sortie of the same kind and identity on the same date.")}">#</th>
         <th title="${esc("The events of the 3-01 EVENTS table (Ch.4 §48) this sortie exercised — the closed list of " + WA.E_ITEMS.length + " the register is built on. A sortie may exercise MANY, and one that exercised none is still a sortie.")}">E-items</th>
         ${curRO ? "" : "<th></th>"}
       </tr></thead>
@@ -571,13 +673,17 @@ WA.renderInstructor = async function (view, me, opts) {
   }
   /* HOW MANY ROWS STILL CARRY A LEGACY CATEGORY — the rows round 19 stored with
      a programme and no Σ. They are not a fault to hide: they are work somebody
-     owes, so the card says how many there are and the table marks each one. */
+     owes, so the card says how many there are and the table marks each one.
+     ROUND 21 — and the SECOND such number beside it: the with-SP rows still
+     carrying the old form's Σ claim (wa.ins_withsp_scat_count's client twin). */
   const curLegacy = () => curLive().filter((e) => WA.sCatIsLegacy(e.s_category));
+  const curCarriers = () => curLive().filter((e) => e.kind === "with_sp" && e.s_category);
   function curCardHTML() {
     const live = curLive();
     const n = live.length;
     const ev = live.reduce((a, e) => a + (e.e_items || []).length, 0);
     const leg = curLegacy().length;
+    const car = curCarriers().length;
     return `
       <section class="card" id="ins-cur">
         <div class="idhead">
@@ -590,6 +696,13 @@ WA.renderInstructor = async function (view, me, opts) {
             "the programme was stored and the category was not. Nobody can tell from a date whether a " +
             "sortie was a Σ-1 or a Σ-3, so the form will not guess — pick the right category on " +
             (leg === 1 ? "that row" : "those rows") + " and press Save.")}">${esc(leg)} without a Σ</span>` : ""}
+          ${car ? `<span class="badge badge-bad" title="${esc(
+            car + " with-SP row" + (car === 1 ? "" : "s") + " still carr" + (car === 1 ? "ies" : "y") +
+            " the OLD form's Σ claim (rounds 19/20 asked for a Σ category on a flight with a student). " +
+            "Nobody can reconstruct the student's sortie code from the claim, so the form will not guess — " +
+            "choose the sortie on " + (car === 1 ? "that row" : "those rows") +
+            " to replace it, or leave " + (car === 1 ? "it" : "them") + " exactly as " +
+            (car === 1 ? "it stands" : "they stand") + "; no new row can take a Σ claim.")}">${esc(car)} with an old Σ claim</span>` : ""}
           <span class="badge${n ? " badge-good" : ""}"
             title="${esc(curSavedAt
               ? "Last saved " + fmtDT(curSavedAt)
@@ -599,15 +712,16 @@ WA.renderInstructor = async function (view, me, opts) {
         <p class="hint" style="margin-top:6px">${curRO
           ? "<b>Read-only.</b> An instructor's currency is a claim about who flew what, so it can only be entered from his own link &mdash; the server has no path for anybody else to write it. Everything below is what he recorded himself."
           : "Your own flying, for the squadron's currency register &mdash; the bridge into FDMS. " +
-            "One row per sortie: the day, whether it was <b>your own flight</b> or one <b>with a student</b>, " +
-            "<b>which Σ category</b> it was &mdash; the printed rows of Πίνακας 9 (ΑΕΡΟΣ) and Πίνακας 6 (F/S) " +
-            "&mdash; and the <b>E-items</b> of the 3-01 it exercised, as many as it exercised. " +
-            "The programme is read off the category, so there is nothing to say twice. " +
+            "One row per sortie: the day, whether it was a <b>Continuation</b> flight of your own or one " +
+            "<b>With SP</b>, and what was flown &mdash; a Continuation flight names its <b>Σ category</b> " +
+            "(the printed rows of Πίνακας 9 and Πίνακας 6), a With-SP flight names <b>the student&rsquo;s " +
+            "sortie</b> from the syllabus, or repeat / fcf / cef, or the code as typed &mdash; " +
+            "and the <b>E-items</b> of the 3-01 it exercised, as many as it exercised. " +
             "A flight that exercised no event is still a flight. " +
             "This names no student and changes no student&rsquo;s record."}</p>
         ${curTableHTML()}
         ${curRO ? "" : `<div class="addrow"><button type="button" class="btn btn-sm btn-add"
-            id="cur-add" title="${esc("Adds one flight of your own. Nothing is filled in for you: a date, a kind and a Σ category are facts, and the form assumes none of them.")}"
+            id="cur-add" title="${esc("Adds one flight of your own. Nothing is filled in for you: a date, a kind and what was flown are facts, and the form assumes none of them.")}"
             >+ flight</button></div>`}
       </section>`;
   }
@@ -621,6 +735,151 @@ WA.renderInstructor = async function (view, me, opts) {
     }
     refreshNav();
     refreshSave();
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     ROUND 21 — «MY FLIGHT LOGBOOK»: EVERYTHING THAT NAMES THIS INSTRUCTOR.
+     ──────────────────────────────────────────────────────────────────────────
+     RULING (2026-08-28): «Στο My Currency να έχουμε έναν πίνακα My Flight
+     Logbook, όπου θα μπαίνει ό,τι βάζει ο κάθε εκπαιδευτής. Εδώ είναι που θέλει
+     προσοχή: αν μπει ένας μαθητής και βάλει πτήση C4101 με [τον εκπαιδευτή] να
+     το βλέπουμε κι εδώ — ή αν προσθέσει κάποιος πτήση στο progress του FDMS.»
+
+     READ-ONLY, BELOW THE EDITABLE TABLE, and computed on the SERVER
+     (wa.instructor_logbook — one round trip per door, §4u): three sources in
+     one row shape — SELF (his own currency rows, projected), SP-ENTERED (every
+     flights/fs row of ANY active student naming him: oid first, surname
+     fallback, shared surnames FLAGGED and never guessed) and FDMS-PROGRESS
+     (the designed slot: rows whose provenance stamp is 'fdms' — zero today, so
+     the source column exists and counts 0 until the Phase-4 bridge lane lands
+     into it). The student's row belongs to the student — no control here
+     writes.
+
+     THE SELF LANE IS REDRAWN FROM THE SAVED ROWS (CUR_SAVED_ROWS — the same
+     migrated shape the server projects), so a currency save updates the
+     logbook without a second round trip and without the two ever disagreeing:
+     both are the stored record, one projection each. The SP/FDMS lanes are the
+     server's and only a reload refreshes them.
+     A SERVER THAT PREDATES THIS ROUND SHIPS NO `logbook` KEY — the card is
+     simply not drawn (the round-18 absent-is-not-closed doctrine). */
+  const LOG = (data.logbook && typeof data.logbook === "object") ? data.logbook : null;
+  function logSelfRows(rows) {
+    return rows.map((e) => ({
+      src: "self", date: e.date || null, sortie: e.sortie || null,
+      s_category: e.s_category || null,
+      band: e.sortie ? WA.sortieBand(e.sortie) : null,
+      kind: e.kind || null, seq: WA.curSeq(e),
+      grade: null, ng: null, mission: null, student: null, match: null,
+      ambiguous: false,
+      legacy: WA.sCatIsLegacy(e.s_category) || (e.kind === "with_sp" && !!e.s_category),
+    }));
+  }
+  function logSrcOrd(s) { return s === "self" ? 0 : (s === "fdms" ? 2 : 1); }
+  function logRows() {
+    const sp = (LOG && Array.isArray(LOG.rows))
+      ? LOG.rows.filter((r) => r && r.src !== "self") : [];
+    /* the server's own sort, mirrored: date desc · self → sp → fdms ·
+       student surname · seq desc */
+    return logSelfRows(CUR_SAVED_ROWS).concat(sp).sort((a, b) => {
+      const da = String(a.date || ""), db = String(b.date || "");
+      if (da !== db) return da < db ? 1 : -1;
+      const oa = logSrcOrd(a.src), ob = logSrcOrd(b.src);
+      if (oa !== ob) return oa - ob;
+      const sa = String((a.student || {}).last_name || ""),
+            sb = String((b.student || {}).last_name || "");
+      if (sa !== sb) return sa < sb ? -1 : 1;
+      return (Number(b.seq) || 1) - (Number(a.seq) || 1);
+    });
+  }
+  function logSrcChip(r) {
+    if (r.src === "self") {
+      return `<span class="badge" title="${esc("A row you entered yourself in the table above" +
+        (r.kind ? " — " + WA.currencyKindLabel(r.kind) : "") + ".")}">Self${
+        r.kind ? " · " + esc(WA.currencyKindLabel(r.kind)) : ""}</span>`;
+    }
+    if (r.src === "fdms") {
+      return `<span class="badge badge-acc" title="${esc("A flown event of FDMS Progress (not the scheduler board) that reached this record through the bridge — provenance 'fdms'.")}">FDMS</span>`;
+    }
+    return `<span class="badge badge-good" title="${esc("Entered by the student on their own form — their flight log names you as the instructor. Read-only here: the row belongs to the student.")}">SP</span>`;
+  }
+  function logFlightCell(r) {
+    const what = r.s_category ? WA.sCatText(r.s_category)
+      : (r.sortie ? WA.curSortieText(r.sortie) : "—");
+    const kindChip = (r.src !== "self" && r.kind && r.kind !== "syllabus")
+      ? ` <span class="k" title="${esc((WA.flightKind(r.kind) || {}).tip || "")}">${esc(WA.flightKindLabel(r.kind))}</span>` : "";
+    return esc(what) + kindChip +
+      (r.legacy ? ` <span class="badge badge-bad" title="${esc(r.src === "self"
+        ? "This row wears a legacy mark — recorded before the current taxonomy; see the table above."
+        : "The student's row wears the legacy mark — imported from the previous form.")}">legacy</span>` : "");
+  }
+  function logResultCell(r) {
+    if (r.src === "self") {
+      return `<span class="k" title="${esc("A Self row carries no grade — the grade of a flight with a student belongs to the student's own row.")}">&mdash;</span>`;
+    }
+    if (r.ng) return `<span class="k" title="Non-graded by nature (NG)">NG</span>`;
+    if (r.grade !== null && r.grade !== undefined && r.grade !== "") return WA.pct(r.grade);
+    if (r.mission) return esc(WA.missionLabel(r.mission));
+    return WA.debriefChip(r, r.band) || "&mdash;";
+  }
+  function logStudentCell(r) {
+    if (!r.student) return `<span class="k">&mdash;</span>`;
+    const s = r.student;
+    const nm = [s.last_name || "", s.first_name || ""].filter(Boolean).join(" ") +
+      (s.class ? " · " + s.class : "");
+    return esc(nm) + (r.ambiguous
+      ? ` <span class="badge badge-warn" title="${esc("Shared surname — more than one instructor on the roster carries the surname this row names, and the row has no unambiguous identity (no oid), so it may belong to another instructor of the same surname. It is flagged, never guessed, and both holders of the surname see it flagged in their own logbooks.")}">shared surname &mdash; may belong to another</span>`
+      : "");
+  }
+  function logCardHTML() {
+    if (!LOG) return "";
+    const rows = logRows();
+    const c = LOG.counts || {};
+    const nSelf = CUR_SAVED_ROWS.filter((e) => !curBlank(e)).length;
+    const nSp = Number(c.sp) || 0, nAmb = Number(c.sp_ambiguous) || 0,
+          nFdms = Number(c.fdms) || 0;
+    const counts = [
+      nSelf + " of your own",
+      nSp + " entered by students" + (nAmb ? " (" + nAmb + " shared-surname, flagged)" : ""),
+      nFdms + " from FDMS Progress",
+    ].join(" · ");
+    const trunc = LOG.truncated
+      ? ` <span class="badge badge-warn" title="${esc("The student-entered lanes are capped at the most recent 600 rows; the counts before this sentence are the TRUE totals, computed before the cap.")}">showing the most recent 600 of ${esc(nSp + nFdms)} student-entered rows — ${esc(LOG.omitted || 0)} older not listed</span>`
+      : "";
+    return `
+      <section class="card" id="ins-log">
+        <div class="idhead">
+          <span class="nm">My Flight Logbook <span class="tipdot" tabindex="0" role="note"
+            title="${esc("Every flight this application knows about you, from three sources: SELF — the rows you enter in the table above; SP — every flight a student logged on their own form naming you as the instructor (matched by identity where the row carries one, else by surname — shared surnames are flagged, never guessed); FDMS — flown events of FDMS Progress that arrive through the bridge (none yet; the column is ready). Read-only: the students' rows belong to the students, and your own are edited above.")}"
+            aria-label="My Flight Logbook: what this table is">&#9432;</span></span>
+          <span class="meta">${esc(counts)}</span>
+          ${trunc}
+        </div>
+        ${rows.length ? `<div class="tblwrap"><table class="ftbl">
+          <thead><tr>
+            <th>Date</th>
+            <th title="${esc("Self — your own row from the table above. SP — entered by the student on their own form. FDMS — a flown event of FDMS Progress, via the bridge (none yet).")}">Source</th>
+            <th title="${esc("What was flown — the Σ category or sortie of a Self row, or the sortie the student logged.")}">Flight</th>
+            <th title="${esc("Aircraft or simulator — read off the section the student's row sits in, or off the sortie code where it is known. A marker or off-catalogue text honestly derives nothing.")}">Band</th>
+            <th title="${esc("The student whose form the row lives on — SP and FDMS rows only. Your own rows name no student, by design.")}">Student</th>
+            <th title="${esc("The student row's grade, NG, or mission — read-only. Your own rows carry none: the grade belongs to the student.")}">Result</th>
+            <th class="num" title="Which flight of that identity on that day">#</th>
+          </tr></thead>
+          <tbody>${rows.map((r) => `<tr>
+            <td>${esc(r.date ? fmtD(r.date) : "—")}</td>
+            <td>${logSrcChip(r)}</td>
+            <td>${logFlightCell(r)}</td>
+            <td>${esc(r.band ? ((WA.logBand(r.band) || {}).short || r.band) : "—")}</td>
+            <td>${logStudentCell(r)}</td>
+            <td>${logResultCell(r)}</td>
+            <td class="num">${esc(Number(r.seq) || 1)}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>`
+        : `<div class="empty">Nothing yet &mdash; no flight of your own is saved above, and no student&rsquo;s log names ${curRO ? "this instructor" : "you"} so far.</div>`}
+      </section>`;
+  }
+  function logRedraw() {
+    const holder = document.getElementById("ins-log-holder");
+    if (holder) holder.innerHTML = logCardHTML();
   }
 
   function stuCard(s) {
@@ -699,10 +958,16 @@ WA.renderInstructor = async function (view, me, opts) {
     },
     currency: {
       label: WA.secLabel(CUR_SEC),
-      sub: "your own flying",
+      /* ROUND 21 — the door holds two tables now, and the tile says so; on a
+         server that predates the logbook the second half would be a promise
+         the door cannot keep, so it is only made where the payload carries it */
+      sub: LOG ? "your own flying · your logbook" : "your own flying",
       icon: "&#9992;",
-      what: "Your own sorties for the squadron&rsquo;s currency register &mdash; the day, the " +
-            "Σ category and the E-items. It names no student and changes nobody&rsquo;s record.",
+      what: "Your own sorties for the squadron&rsquo;s currency register &mdash; Continuation or " +
+            "With SP, what was flown, and the E-items" +
+            (LOG ? " &mdash; and below them your Flight Logbook: every flight a student logged " +
+                   "naming you, and the FDMS-Progress lane the bridge will fill" : "") +
+            ". It names no student and changes nobody&rsquo;s record.",
     },
   };
   /* WHICH DOOR IS OPEN — "" is the landing. It is read from the hash on every
@@ -827,10 +1092,11 @@ WA.renderInstructor = async function (view, me, opts) {
       </div>
     </div>
 
-    ${/* ── DOOR 2 — MY CURRENCY ───────────────────────────────────────── */ ""}
+    ${/* ── DOOR 2 — MY CURRENCY · MY FLIGHT LOGBOOK ───────────────────── */ ""}
     <div class="doorpane" id="ins-pane-currency" hidden>
       ${homeBar("currency")}
       <div class="wrap screen-only" id="ins-cur-holder">${curCardHTML()}</div>
+      <div class="wrap screen-only" id="ins-log-holder">${logCardHTML()}</div>
     </div>
 
     ${/* ROUND 14 — ONE SAVE, and it is the student form's floating pattern:
@@ -1010,13 +1276,13 @@ WA.renderInstructor = async function (view, me, opts) {
             <span class="pr-ins-meta">own flying &mdash; the squadron&rsquo;s currency register</span></h3>
           ${curLive().length
             ? `<table class="pr-t"><thead><tr>
-                 <th>Date</th><th>Flight</th><th>Σ category</th><th>Programme</th>
+                 <th>Date</th><th>Flight</th><th>Sortie / Σ category</th>
                  <th>#</th><th>E-items</th>
                </tr></thead><tbody>${WA.curSort(curLive()).map(({ e }) => `<tr>
                  <td>${esc(e.date ? fmtD(e.date) : "—")}</td>
                  <td>${esc(WA.currencyKindLabel(e.kind))}</td>
-                 <td>${esc(e.s_category ? WA.sCatText(e.s_category) : "—")}</td>
-                 <td>${esc(e.s_category ? WA.sCatGroupLabel(e.s_category) : "—")}</td>
+                 <td>${esc(curWhatText(e))}${e.kind === "with_sp" && e.s_category
+                   ? " (Σ as claimed — recorded before the student-sortie catalogue)" : ""}</td>
                  <td>${esc(WA.curSeq(e))}</td>
                  <td>${esc((e.e_items || []).map(WA.eItemCode).join(" · ") || "—")}</td>
                </tr>`).join("")}</tbody></table>`
@@ -1199,11 +1465,22 @@ WA.renderInstructor = async function (view, me, opts) {
         toast("Your currency is full (" + WA.INS_SECTION_CAP(CUR_SEC) + " flights)", true);
         return;
       }
-      /* NOTHING IS FILLED IN. A date, a kind and a Σ category are FACTS, and a
-         form that guesses one of them for an instructor has put a flight in his
-         logbook that he did not fly. The row says what it still needs. */
-      C.rows.push({ date: "", kind: "", s_category: "", seq: 1, e_items: [] });
+      /* NOTHING IS FILLED IN. A date, a kind and what was flown are FACTS, and
+         a form that guesses one of them for an instructor has put a flight in
+         his logbook that he did not fly. The row says what it still needs. */
+      C.rows.push({ date: "", kind: "", s_category: "", sortie: "", seq: 1, e_items: [] });
       curRedraw(`[data-currow="${C.rows.length - 1}"] input[type="date"]`);
+      return;
+    }
+    /* ROUND 21 — back from the free-text sortie box to the syllabus list.
+       Whatever is typed stays: revealing a control is not an edit (the
+       fingerprint doctrine), and the list shows the typed value marked. */
+    const slist = ev.target.closest("[data-curslist]");
+    if (slist) {
+      const row = C.rows[Number(slist.dataset.curslist)];
+      if (!row) return;
+      row._sfree = false;
+      curRedraw(`[data-curf="${Number(slist.dataset.curslist)}:sortie"]`);
       return;
     }
     const del = ev.target.closest("[data-curdel]");
@@ -1275,12 +1552,41 @@ WA.renderInstructor = async function (view, me, opts) {
       const n = Math.round(Number(v));
       v = (isFinite(n) && n >= 1 && n <= 9) ? n : 1;
     }
+    /* ROUND 21 — «Other…» is not a value, it is a mode: the box becomes free
+       text and keeps whatever the row already held. */
+    if (field === "sortie" && v === "__other__") {
+      row._sfree = true;
+      curRedraw(`[data-curf="${i}:sortie"]`);
+      return true;
+    }
     if (String(row[field] === undefined ? "" : row[field]) === String(v)) return false;
+    const prevKind = row.kind;
     row[field] = v;
-    /* the row may have just landed on another one's day, kind and Σ category */
+    /* ROUND 21 — ONE BOX, ONE FACT, kept true by the form and not only by the
+       refusal. Flipping the kind clears the field the new kind does not take
+       (a Σ on a with-SP row would otherwise become the forbidden second claim
+       the server refuses, and a sortie on a Continuation row likewise); and a
+       sortie chosen on a with-SP row that still wore the OLD form's Σ claim
+       REPLACES the claim — that is the correction the grow-guard exists to
+       allow. Nothing is written until Save; discard restores every clearing. */
+    if (field === "kind" && v !== prevKind) {
+      if (v === "continuation" && row.sortie) {
+        row.sortie = ""; row._sfree = false;
+        toast("A Continuation flight is named by its Σ category — the sortie box was cleared");
+      } else if (v === "with_sp" && row.s_category) {
+        row.s_category = "";
+        toast("A flight with an SP is named by the student's sortie — the Σ box was cleared");
+      }
+    }
+    if (field === "sortie" && v && row.kind === "with_sp" && row.s_category) {
+      row.s_category = "";
+      toast("The old Σ claim was replaced by the sortie — press Save to keep the change");
+    }
+    /* the row may have just landed on another one's day, kind and identity */
     const moved = curFixSeq(i);
     if (moved) {
-      toast("A flight of " + fmtD(row.date) + " (" + WA.sCatCode(row.s_category) +
+      toast("A flight of " + fmtD(row.date) + " (" +
+        (row.s_category ? WA.sCatCode(row.s_category) : WA.curSortieCode(row.sortie)) +
         ", " + WA.currencyKindLabel(row.kind) + ") is already recorded — this one is #" + moved);
     }
     curRedraw(`[data-curf="${i}:${field}"]`);
@@ -1323,6 +1629,9 @@ WA.renderInstructor = async function (view, me, opts) {
       CUR_SAVED = curFp(curLive());
       CUR_SAVED_ROWS = curLive().map((e) => ({ ...e, e_items: (e.e_items || []).slice() }));
       curRedraw();
+      /* ROUND 21 — the logbook's Self lane is a projection of the SAVED rows,
+         so it moves the moment they do */
+      logRedraw();
       return null;
     } catch (e) {
       return "Currency not saved — " + e.message;
