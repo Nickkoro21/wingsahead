@@ -1206,13 +1206,22 @@ WA.SUSPECT_WORD = "suspect";
 WA.SUSPECT_TAIL =
   "Nothing is refused and nothing is lost: the row is saved exactly as it stands, it is " +
   "marked here, and the double record is untangled together with " + WA.ADMIN_BODY + ".";
-/* ROUND 22b (verify finding 3) — WHAT A REFUSAL CALLS THE ROW THAT ALREADY
-   HOLDS THE SORTIE. It is the SLOT ID AS IT IS STORED, because that is the one
-   name the server can say: wa.solo_holder returns `coalesce(slot, 'an
-   additional solo')` and the two mirrors have to name the same thing in the
-   same words. WA.soloSlotLabel — the form's own heading — ends in "— solo",
-   so interpolating it mid-sentence produced «…the solo of C4801-04 — solo — a
-   solo is recorded…»: a stray clause the server twin never had. */
+/* ROUND 23b (WA-23 verify item 14) — WHAT A SUSPECT SENTENCE CALLS THE ROW
+   THAT ALREADY HOLDS THE SORTIE. Two sentences say it — (B) the same-day shape
+   and (C) the solo pair — and both are MARKS, said on the client and nowhere
+   else, since the ruling of 2026-08-28 (evening). There is no server twin left
+   to agree with: `wa.solo_holder`, `wa.solo_twin` and `wa.solo_row_name` were
+   DROPPED from db/schema.sql in the same commit that turned the refusals into
+   marks, and the «MIRROR: none» eight lines above is now the whole of the truth.
+   (Round 22b wrote this note in the present tense of that twin — «what a
+   REFUSAL calls the row», `wa.solo_holder` returning `coalesce(slot, …)`, «the
+   two mirrors» — and every clause of it stopped being true one commit later.)
+   IT IS STILL THE SLOT ID AS IT IS STORED, and the reason is unchanged and is
+   the client's own: WA.soloSlotLabel — the form's own heading — ends in
+   "— solo", so interpolating it mid-sentence produced «…the solo of C4801-04 —
+   solo — a solo is recorded…», a stray clause in the middle of the sentence.
+   The fallback names the shape the picker allows and the slot list does not
+   hold: a solo stored with no fixed slot at all. */
 WA.soloHolderName = function (slotId) {
   return WA.normLine(slotId) || "an additional solo";
 };

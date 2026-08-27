@@ -2686,11 +2686,39 @@ WA.renderAdmin = async function (view, me) {
        COUNT, so it travels in the summary CSV (four columns), in the drill-down
        and on the printed brief. Every other section leaves the cell empty
        rather than inventing a state it does not have. */
+    /* ── ROUND 23b — WHERE THE SUSPECT WORD RIDES, AND THE JUDGEMENT IS
+       RECORDED (§4y·12·3, WA-23 verify item 13c). Until this round the word
+       appeared on the form, in the drill-down and on the printed brief and
+       NOWHERE in this file — the one export the admin takes to the untangling
+       meeting was the one surface that did not say which rows there were to
+       untangle. It rides in DETAIL, as one more bit of the same " — " list the
+       track, the kind, the same-day seq and the NG already travel in, and it is
+       the SAME single word the brief prints beside the code (WA.SUSPECT_WORD).
+         · NOT the State column. Its four words ARE the colour scheme (the
+           round-13 note below), and «extra (suspect)» would be a fifth token in
+           a column every pivot counts by — the parenthetical would cost the
+           column the property it exists for.
+         · NOT the Flight-code column, where paper puts it: on paper that cell
+           is prose, here it is the key a spreadsheet looks a sortie up by, and
+           «C4802 (suspect)» no longer matches C4802.
+         · NOT A COLUMN OF ITS OWN: an eighteenth column, empty on all but a
+           handful of rows, is a column the reader scrolls past — and the mark
+           belongs beside the row's other marks, not in a lane of its own. */
     const rows = [["Student", "Class", "Section", "Date", "Detail", "Flight code",
       "Items", "Item count", "With whom / authorised by", "Grade", "To correct", "Entered by", "Counts",
       "Hours", "Awaiting", "Mission", "State"]];
     /* the claim map per student per section — computed ONCE per section rather
-       than per row, and by the same function every surface uses */
+       than per row, and by the same function every surface uses.
+       ROUND 23b (WA-23 verify item 13) — AND THE WHOLE RECORD GOES IN AS THE
+       THIRD ARGUMENT. That argument is what runs PASS 0 of WA.claims: a
+       position of a flight log that a DERIVED row holds — a checkride recorded
+       in Evaluations, a solo recorded in Solo flights — is spoken for before
+       any stored row of this section may take it. Without it this export, and
+       ONLY this export of the four surfaces, handed such a position to the
+       stored carrier and printed done / started in the State column while the
+       form, the drill-down and the printed brief all said EXTRA. The correct
+       call is the one WA.stateCounts, WA.slotRows and the student's claimsOf
+       have always made (app.js, student.js) — this line simply did not make it. */
     let CL = {};
     const stateOf = (sec, e, ix) => {
       if (!WA.hasSlots(sec)) return "";
@@ -2726,7 +2754,7 @@ WA.renderAdmin = async function (view, me) {
     for (const s of visible()) {
       const r = s.record;
       CL = {};
-      for (const k of WA.SLOT_SECTIONS) CL[k] = WA.claims(k, r[k] || []);
+      for (const k of WA.SLOT_SECTIONS) CL[k] = WA.claims(k, r[k] || [], r);
       (r.nfs || []).forEach((e) => add(s, "nfs", e,
         WA.nfsReasonLabel(e) + (e.note && e.reason !== "other" ? " — " + e.note : ""),
         "", "", "", null));
@@ -2780,6 +2808,15 @@ WA.renderAdmin = async function (view, me) {
           if (e.kind && e.kind !== "syllabus") bits.push(WA.flightKindLabel(e.kind));
           if (Number(e.seq || 1) > 1) bits.push("same-day re-fly #" + Number(e.seq));
           if (e.ng) bits.push("NG (non-graded)");
+          /* ROUND 23b — AND THE SUSPECT MARK TRAVELS (see the header note). Same
+             function, same test and same word as the printed brief: only
+             `suspect` is carried, never the flag's non-suspect labels
+             («off-catalogue», «solo flown»), because paper carries none of them
+             either and the export must not say more than the brief it is read
+             beside. It goes LAST of the bits — it is the row's verdict, not
+             another of its properties. */
+          const rf = WA.logRowFlag(k, e, r);
+          if (rf && rf.suspect) bits.push(WA.SUSPECT_WORD);
           add(s, k, e, bits.join(" — "), e.sortie, "", e.instructor, e.grade,
               undefined, "", e.duration, stateOf(k, e, ix));
         });
@@ -2805,7 +2842,18 @@ WA.renderAdmin = async function (view, me) {
            Detail, for BOTH shapes: a Weekly exam is a ground exam too and is
            marked the same way — it simply has no trials for the Counts column to
            speak about. */
-        const exCL = WA.claims("exams", r.exams || []);
+        /* ROUND 23b — THE SIBLING CALL SITE, AND THE JUDGEMENT ON IT. This line
+           read `const exCL = WA.claims("exams", r.exams || [])` — a SECOND
+           claim map for a section whose map is already in CL, built by a call
+           that carried no record. It was harmless in itself (WA.derivedSlots
+           answers `{}` for anything but the two flight logs, so the exams have
+           no PASS 0 to miss) but it is the exact shape verify item 13 caught
+           one section over, and the cure for a missing argument is not a second
+           place to forget it — it is one map. `CL.exams` is rebuilt for this
+           very student at the top of the loop, off the same list and with the
+           same indices, and it is the map the State column already reads: the
+           Counts column now reads it too. It also makes the note above CL true
+           again — «computed ONCE per section rather than per row». */
         /* ROUND 17 (R16 doc-nit, item 23) — «is there a mark at all?» is asked
            by WA.examGraded and by nothing else. This was the last inline copy
            of its four-clause test on the admin side; the export's words are
@@ -2826,7 +2874,7 @@ WA.renderAdmin = async function (view, me) {
           ].filter(Boolean).join(" — "),
           WA.examRowLabel(e), "", "", e.grade, undefined,
           WA.examSeries(e) ? ""
-            : (exCL.claimed[ix]
+            : (CL.exams.claimed[ix]
                 ? (WA.examPassed(e) ? "yes" : "yes — but no attempt has passed yet")
                 : "no — another attempt counts"),
           /* ROUND 15 residual, found by this round's own CSV read-back: this

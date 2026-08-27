@@ -7836,6 +7836,177 @@ house rejects.*
   `WA.SUSPECT_TAIL` is now the one place it would change, and it is a ruling.
 - **(d) §4y·10's first-letter Training Section test** still stands as written.
 
+### 4y·12. Round 23b (2026-08-28) — THE TWO WA-23 VERIFY FINDINGS: THE EXPORT THAT DISAGREED, AND THE COMMENT THAT LIED
+
+**A CLIENT-ONLY ROUND.** `db/schema.sql` comes out **byte-identical**
+(`md5 6da0f3ee3e40fbd7d19c1b22c17de979`, before and after). Nothing is stored,
+nothing is refused, no column is added, and no state word changes meaning.
+
+#### 4y·12·1. FINDING 13 — THE ONE SURFACE OF FOUR THAT DISAGREED
+
+`WA.claims(sec, list, rec)` takes the **record** as its third argument, and that
+argument is the whole of **PASS 0**: a position of a flight log that a DERIVED
+row holds — a checkride recorded in Evaluations, a solo recorded in Solo flights
+— is spoken for **before** any stored row of that section may take it
+(§4y·1). Every surface passed it: `WA.stateCounts` (app.js), `WA.slotRows`
+(app.js), the student form's `claimsOf` (student.js). **One line did not**:
+
+```js
+/* app/admin.js, «Export CSV — every entry» */
+for (const k of WA.SLOT_SECTIONS) CL[k] = WA.claims(k, r[k] || []);   /* ← no rec */
+```
+
+So in that export, and **only** there, `derived` came back `{}`, the stored
+carrier claimed the position the derived row owns, and the **State** column
+printed `done` / `started` where the form, the drill-down and the printed brief
+all print `extra`. The surface that disagreed was **the one the admin takes to
+the untangling meeting**.
+
+**PROVEN COLD, on the running app, before the fix** — one record, the tier-2
+shape (a solo `C4802` on 10/05/2026 and a stored `flights` `C4802` on the same
+day):
+
+| | claimed | State |
+|---|---|---|
+| `WA.claims("flights", list, rec)` — every other surface | `false` | **extra** |
+| `WA.claims("flights", list)` — the CSV | `true` | **done** |
+
+and the exported line read `…;C4802;…;done`.
+
+**THE FIX IS THE ARGUMENT.** `WA.claims(k, r[k] || [], r)`.
+
+**WHY TIER 2 AND NOT TIER 1.** A tier-1 carrier (`C4791`, solo-by-definition)
+was already right: since 22b `WA.slotKey` refuses a `so` position a key at all,
+so such a row is an extra with no help from pass 0. **Tier 2 is the case pass 0
+answers alone** — an ordinary solo *candidate* whose position is spoken for only
+while this record actually holds that solo — and it is exactly the case the
+export got wrong.
+
+#### 4y·12·2. THE SWEEP, AND THE JUDGEMENT ON THE SIBLING
+
+Every `WA.claims` / `WA.stateCounts` / `WA.slotRows` call in all client files was
+read. `WA.derivedSlots` returns `{}` for **every** section but `flights` and
+`fs` (asserted live: `flights` 2, `fs` / `exams` / `lessons` / `evaluations` /
+`solo_flights` 0), so the class can only bite the two flight logs.
+
+- **`app/student.js:225`** (`ensureLogSlots`) omits the record **on purpose**,
+  and the reason is written above it: seeding needs the narrower «which
+  positions does a ROW OF THIS SECTION hold». **Untouched.**
+- **The `lessons` / `exams` call sites** that omit it are behaviour-identical.
+  **Untouched**, except one:
+- **`app/admin.js` — `const exCL = WA.claims("exams", r.exams || [])`, DELETED.**
+  It built a *second* claim map for a section whose map is already in `CL`, by a
+  call carrying no record. Harmless in itself — asserted live, the two maps are
+  identical — but it is the exact shape finding 13 caught one section over, and
+  **the cure for a missing argument is not a second place to forget it**. The
+  Counts column now reads `CL.exams`, the same map the State column reads, and
+  the note above `CL` («computed ONCE per section») is true again.
+
+#### 4y·12·3. THE SUSPECT WORD REACHES THE CSV — AND WHERE IT RIDES
+
+The word appeared on the form, in the drill-down and on the printed brief and
+**nowhere in the export**. It now rides in **Detail**, as one more bit of the
+same `" — "` list the track, the kind, the same-day seq and the NG already
+travel in, from the same `WA.logRowFlag(sec, e, rec)` and under the same test
+the brief uses (`rf.suspect`), printing the same one word `WA.SUSPECT_WORD`.
+**The judgement, recorded:**
+
+- **NOT the State column.** Its four words **are** the colour scheme; `extra
+  (suspect)` would put a fifth token in the column every pivot counts by, and
+  the parenthetical would cost the column the property it exists for.
+- **NOT the Flight-code column**, where paper puts it: on paper that cell is
+  prose, here it is the key a spreadsheet looks a sortie up by, and
+  `C4802 (suspect)` no longer matches `C4802`.
+- **NOT a column of its own.** An eighteenth column, empty on all but a handful
+  of rows, is a column the reader scrolls past — and the mark belongs beside the
+  row's other marks.
+- **Only `suspect` travels**, never the flag's non-suspect labels
+  («off-catalogue», «solo flown», «checkride»): paper carries none of them
+  either, and the export must not say more than the brief it is read beside.
+
+#### 4y·12·4. FINDING 14 — THE COMMENT THAT SPOKE OF A TWIN THAT NO LONGER EXISTS
+
+The note above `WA.soloHolderName` still read, in the present tense, «WHAT A
+**REFUSAL** calls the row», cited `wa.solo_holder` returning
+`coalesce(slot, 'an additional solo')`, and spoke of «**the two mirrors**».
+Round 23 dropped `wa.solo_holder`, `wa.solo_twin` and `wa.solo_row_name` **in
+the same commit** that turned the refusals into marks, and wrote the correct
+`MIRROR: none` block **eight lines above** — so every clause of the note stopped
+being true one commit later. Rewritten to the present truth: the name feeds the
+**suspect sentences** (B) and (C), it is **client-only** since the ruling of
+2026-08-28 (evening), and the reason it is the stored slot **id** and not
+`WA.soloSlotLabel` is the client's own (the label ends in `— solo` and produced
+a stray clause mid-sentence) and is preserved.
+
+**THE SWEEP, CONFIRMED INDEPENDENTLY.** `grep` over `app/` and `tools/` for
+`solo_holder` / `solo_twin` / `solo_row_name`: the rewritten note is the only
+place they appear, and there they are named as **dropped**, in the past tense.
+The three functions are **0 rows in `pg_proc`** on the running database; the
+three MIRROR claims left standing near it (`wa.solo_slots`,
+`wa.solo_slot_codes`, `wa.solo_only_codes`) are **true** — all three exist. The
+spec's own historical narrative of rounds 22b / 23 keeps the names: it is a
+record of what was.
+
+#### 4y·12·5. DELTA · BUSTERS · GATE
+
+- **`db/schema.sql` — UNTOUCHED, byte-identical.** Same md5 before and after.
+- **Client** — `app/admin.js` (the `CL` map's third argument, `exCL` removed,
+  the suspect bit in the log rows' Detail, three comment blocks);
+  `app/app.js` (the `WA.soloHolderName` note only — **no executable line
+  changes**); `app/index.html` (two busters).
+- **Busters, touched-only** → `?v=20260828e` on `app.js` and `admin.js`.
+  `student.js` and `instructor.js` are **byte-identical** and stay at
+  `20260828d`; `styles.css` stays at `20260828b`; `config.js`,
+  `items-catalog.js`, `currency-catalog.js` unbumped.
+- **Gate**: committed, **not pushed** — the branch stands **five ahead** of
+  `origin/main`, and **ONE §4φ MCP gate covers all five**.
+
+#### 4y·12·6. SELF-VERIFICATION — RUN LIVE ON THE LOCAL STACK
+
+1. **The seeded shape** (a scratch record on a student who had none: solo
+   `C4802` 10/05, stored `flights` `C4802` **same day**, a `C4791` tier-1
+   carrier, a normal `C4801`) was **accepted by `wa.validate_record`** first —
+   the shape is one the app can really save.
+2. **BEFORE / AFTER byte-diff of «Export CSV — every entry»**, same student set,
+   same data, only the code changed: **74 lines before, 74 after, exactly 2
+   lines differ** — both of them the seeded suspect rows. Every other line,
+   including all three real demo records and the header, is **byte-identical**.
+
+   | row | before | after |
+   |---|---|---|
+   | `C4802` (tier 2) | `Contact;…;done` | `Contact — suspect;…;extra` |
+   | `C4791` (tier 1) | `Contact;…;extra` | `Contact — suspect;…;extra` |
+
+   The tier-1 row proves the State change is **scoped to the pass-0 class
+   alone** — its State was already right and did not move; only the mark
+   arrived.
+3. **The four surfaces agree**, on the same record, at the same moment: the
+   student form draws `frow st-extra` + `.cflag suspect`; the admin drill-down
+   draws `st-extra` + `.cflag suspect` with the derived `is-derived st-done` row
+   above it; the printed brief prints `(suspect)` and `extra`; the CSV prints
+   `— suspect` and `extra`.
+4. **The exams swap is behaviour-neutral**, asserted on a five-row exams shape
+   (three trials of one exam + two Weekly): `WA.claims("exams", list, rec)` and
+   `WA.claims("exams", list)` are **identical** in `claimed`, `keys`, `taken`
+   and `derived`; the same for `lessons`.
+5. `node --check` clean on all **seven** client files; **zero console errors** on
+   the admin's four tabs and on the student form.
+6. **Hygiene**: the scratch record **deleted**; the four surviving records'
+   `md5(data)`, `last_update`, `entered_by` and `updated_at` **byte-identical**
+   to the baseline taken before the round; the admin class chip restored to the
+   value found (`98B HAF`); privacy grep over all tracked files: **0
+   real-person hits**.
+
+#### 4y·12·7. THE ONE THING THIS ROUND DELIBERATELY DID NOT DO
+
+**The SOLO PAIR mark reaches neither the printed brief nor the CSV.**
+`WA.soloRowFlag` marks both rows of a solo pair on the student's form and in the
+admin drill-down (§4y·11·1 (C)) — and the printed brief's own solo table prints
+**nothing**. Carrying it into the export alone would make the CSV say *more*
+than the brief it is read beside, trading one disagreement for another. It is
+**one change on BOTH surfaces**, not half a change on one, and it is left named
+here for the next round rather than done crookedly in this one.
+
 
 ## 4. Screens
 
