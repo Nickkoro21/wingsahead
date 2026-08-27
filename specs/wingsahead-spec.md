@@ -6248,7 +6248,7 @@ for a round). Proven on the running database **before** the fix:
 |---|---|---|
 | `{"date":"2026-08-01","kind":"own","seq":1}` — no Σ | **ACCEPTED** | refused, `currency[0].s_category` |
 | `{…,"s_category":null,…}` — JSON null | **ACCEPTED** | refused, `currency[0].s_category` |
-| `{…,"s_category":"",…}` — blank | **ACCEPTED** | refused, `currency[0].s_category` |
+| `{…,"s_category":"",…}` — blank | refused *(already — `'' = any()` is FALSE, not NULL; the 20b verifier measured it against the restored pre-fix function — the original table overstated this row)* | refused, `currency[0].s_category` — now with the presence sentence |
 | `{"date":"2026-08-01","seq":1}` — no kind | **ACCEPTED** | refused, `currency[0].kind` |
 | `{…,"kind":null,…}` — JSON null | **ACCEPTED** | refused, `currency[0].kind` |
 | `{…,"kind":"solo",…}` — present, **wrong** | refused | refused *(unchanged)* |
@@ -6300,17 +6300,23 @@ meets one wording and not two:
 
 The verifier's recommendation, carried out: **all 24** `wa.chk` call sites whose
 predicate contains `= any(` were extracted by a paren-matching parser (not a
-regex over lines) and classified. Re-runnable — the script is §4w·5.
+regex over lines) and classified. The classifier was a one-off; its OUTPUT is
+this table, and the 20b verifier re-derived it independently with their own
+parser (agreeing on the total, all three fix targets, and every safe verdict —
+and correcting one filing, applied below). To re-derive: list every `wa.chk(`
+call whose predicate contains `= any(` in `db/schema.sql`, then bucket each as
+(α) explicit `is null or`, (β) bare-but-safe for a stated reason, (γ) required →
+presence layer. No standing script is claimed.
 
-**13 sites carry the EXPLICIT `is null or` form. They are genuinely-optional
+**12 sites carry the EXPLICIT `is null or` form. They are genuinely-optional
 enums and they KEEP it** — an optional field that is absent is not an error, and
 writing the NULL case out loud is what says so:
-`reason` (NFS, 2249) · `category` (2290) · `items` (2322) · `evaluation` (2382) ·
+`reason` (NFS, 2249) · `category` (2290) · `evaluation` (2382) ·
 `slot` (2394) · `evaluator` (FPC, 2468) · `track` (2489) · `kind` (flights,
 2540) · `mission` (2575) · `group` (2626) · `course` (2650) · `series` (2670) ·
 `exam` (2709).
 
-**11 sites are BARE.** Each was read for whether its left operand can be NULL:
+**12 sites are BARE.** Each was read for whether its left operand can be NULL:
 
 | line | site | verdict |
 |---|---|---|
@@ -6319,6 +6325,7 @@ writing the NULL case out loud is what says so:
 | 3434 | `k = any(wa.ins_sections())` | **safe** — same, loop variable |
 | 3446 | `f = any(wa.ins_entry_keys(k))` | **safe** — same, loop variable |
 | 2276 | `(e->>'reason') = any(wa.sms_reasons())` | **safe — the reference implementation.** The round-8 presence layer fires two lines above it |
+| 2322 | `(e->'items'->>i2) = any(wa.item_names(…))` | **safe** — refiled here by the 20b verifier (the original table filed it under «explicit `is null or`», which its predicate does not contain): `wa.chk_str_list` at 2308 fires first, the `is not null` AND-conjunct + type-escape guard it, and `wa.item_names('other')` returns an EMPTY array (FALSE, never NULL) |
 | 2527 | `not ((e->>'sortie') = any(wa.eval_ids()))` | **safe** — a presence layer already guards `sortie` for every non-legacy row. On a *legacy* row it no-ops, which is correct: a row with no sortie is not one of the eight checkrides |
 | 4100 | `lv = any(wa.level_keys())` | **safe** — the enclosing `if p_payload ? 'level' and jsonb_typeof(…) <> 'null'` **is** the presence test |
 | **3475** | `(e->>'kind') = any(wa.currency_kinds())` | **REQUIRED → presence layer added** (§4w·1) |
@@ -6406,9 +6413,11 @@ so the read-time repair cannot rescue a write. Verified, not assumed:
    (*«Ε-1β — SPIN»*) · true duplicate row identity · the retired `category` key ·
    missing date.
 5. **THE SWEEP, MACHINE-RUN** — the paren-matching classifier over
-   `db/schema.sql`: **24** `wa.chk` sites containing `= any(`, **13** explicit,
-   **11** bare, classified in the §4w·2 table. The classifier is the script in
-   §4w·2's paragraph and re-runs in one command.
+   `db/schema.sql`: **24** `wa.chk` sites containing `= any(`, **12** explicit,
+   **12** bare (the 20b verifier's independent re-derivation refiled one site;
+   see §4w·2), classified in the §4w·2 table. The classifier was a one-off —
+   the re-derivation recipe lives in §4w·2's opening paragraph; no standing
+   script exists, and the table says so instead of pointing at one.
 6. **SCHEMA APPLIED TWICE**, `ON_ERROR_STOP=1`, exit **0** both times, **0**
    `ERROR`/`FATAL` lines on the second pass.
 7. **NO FUNCTION CREATED, DROPPED OR RENAMED** — the three additions are
