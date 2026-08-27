@@ -148,7 +148,13 @@ WA.renderInstructor = async function (view, me, opts) {
       const list = Array.isArray(rec[k]) ? rec[k] : [];
       /* ROUND 13 — an empty log is no longer an empty line: the syllabus is
          pre-seeded, so "nothing flown" has a denominator and the card says it */
-      if (!list.length) {
+      /* ROUND 22 — «nothing flown yet» is only true when nothing is flown
+         ANYWHERE: a checkride recorded in Evaluations and a solo recorded in
+         Solo flights fill positions of this log without putting a row in it,
+         and a card that read the array’s length alone would tell an instructor
+         the student had not flown a sortie the record says they passed. */
+      const cn0 = WA.stateCounts(k, list, null, rec);
+      if (!list.length && !cn0.derived) {
         return `<div class="line">${esc(WA.secLabel(k))}: <span class="k">nothing flown yet &mdash; all ${
           esc(WA.slotCount(k))} sorties of the flow chart owed</span></div>`;
       }
@@ -165,8 +171,9 @@ WA.renderInstructor = async function (view, me, opts) {
       /* ROUND 13 — how much of the printed flow chart is still owed. An
          instructor about to brief a student is asking where in the stage they
          are, and "12 flown" cannot answer that without its denominator. */
-      const cn = WA.stateCounts(k, list);
-      return `<div class="line">${esc(WA.secLabel(k))}: ${per}` +
+      const cn = cn0;
+      return `<div class="line">${esc(WA.secLabel(k))}: ${per || `<span class="k">—</span>`}` +
+        (cn.derived ? ` <span class="k" title="${esc("Flown, and recorded in the sections that own them — the checkrides in Evaluations, the solos in Solo flights. They are not rows of this log and they are not owed in it.")}">· ${esc(cn.derived)} recorded elsewhere</span>` : "") +
         (hrs > 0 ? ` <span class="k">· ${esc(Math.round(hrs * 10) / 10)} h</span>` : "") +
         ` <span class="k" title="${esc("Of the " + WA.slotCount(k) +
           " sorties the printed flow chart prescribes here, " + cn.done + " are complete and " +
@@ -178,8 +185,8 @@ WA.renderInstructor = async function (view, me, opts) {
     }).join("") +
     ((rec.lessons || []).length || (rec.exams || []).length
       ? (() => {
-          const cl = WA.stateCounts("lessons", rec.lessons);
-          const cx = WA.stateCounts("exams", rec.exams);
+          const cl = WA.stateCounts("lessons", rec.lessons, null, rec);
+          const cx = WA.stateCounts("exams", rec.exams, null, rec);
           /* ROUND 14 — slotsDone, not done: an exam sat three times is ONE
              exam done, and «9 of 8» would be the arithmetic saying so.
              ROUND 15 — AND «DONE» IS NOT «PASSED». The ground exams got a pass
@@ -384,6 +391,33 @@ WA.renderInstructor = async function (view, me, opts) {
   const curIsDirty = () => curFp(curLive()) !== CUR_SAVED;
   const curChanges = () => WA.recordChanges(
     { [CUR_SEC]: CUR_SAVED_ROWS }, { [CUR_SEC]: curLive() }, [CUR_SEC]);
+  /* ── WHAT THE SAVE DIALOG SAYS THESE ROWS ARE (round 22, WA-21 verify
+     finding 2) ───────────────────────────────────────────────────────
+     Round 20 had ONE kind of row, so ONE sentence was the truth. Round 21 gave
+     the section two, and a Σ category is now a property of exactly one of them
+     — so the round-20 sentence («each row names the Σ category … and the
+     E-items») is false in front of every with-SP row, on the one screen where
+     the instructor SIGNS the claim. This reads the rows actually about to be
+     stored and describes those: the Σ half only where a Σ is really there,
+     the sortie half only where a sortie is, and both when both are. */
+  function curSaveWhat() {
+    const live = curLive();
+    const nC = live.filter((e) => e.kind === "continuation").length;
+    const nS = live.filter((e) => e.kind === "with_sp").length;
+    const ev = "the E-items of the 3-01 it exercised";
+    const sigma = "its Σ category of Πίνακας 9 / Πίνακας 6";
+    const sortie = "the student’s sortie";
+    if (nC && nS) {
+      return "Each row names the day, what was flown and " + ev + " — a Continuation flight names " +
+        sigma + " (" + nC + " here), a With-SP flight names " + sortie + " and carries no Σ (" + nS + " here).";
+    }
+    if (nC) return "Each row names the day, " + sigma + " and " + ev + ".";
+    if (nS) {
+      return "Each row names the day, " + sortie + " that was flown and " + ev +
+        " — a With-SP row carries no Σ category.";
+    }
+    return "Each row names the day, what was flown and " + ev + ".";
+  }
   /* what actually goes on the wire: the keys that say nothing are dropped, so
      a record never stores «seq: 1», an empty event list, or the field the
      row's KIND does not take — a Continuation row ships its Σ category, a
@@ -541,8 +575,10 @@ WA.renderInstructor = async function (view, me, opts) {
      generated R12 catalogue (WA_LOG_SORTIES; no new catalogue file), led by
      one «Beyond the syllabus» group carrying the three markers. Off-catalogue
      text arrives through the student form's own escape — the «Other…» option
-     that swaps the box to free text — and is saved as typed and shown marked:
-     the syllabus data may lag reality and a record must never become
+     that swaps the box to free text — and is saved IN CAPITALS and shown
+     marked (round 22 / WA-21 verify finding 3: `sortie` is a wa.code_fields
+     name, so the normalisation boundary upper-cases it — the promise says so
+     now): the syllabus data may lag reality and a record must never become
      unstorable. Band is NEVER stored: WA.sortieBand derives it where the code
      is known, and honestly derives nothing for markers and free text. */
   function curSortieOptions(e) {
@@ -553,8 +589,8 @@ WA.renderInstructor = async function (view, me, opts) {
       tip ? ` title="${esc(tip)}"` : ""}>${esc(t)}</option>`;
     let out = `<option value=""${cur ? "" : " selected"}>&mdash; choose &mdash;</option>`;
     if (cur && !WA.curSortieKnown(cur)) {
-      out += opt(cur, cur + " — off-catalogue (as typed)",
-        "Not in the generated syllabus catalogue — saved as typed and shown marked. " +
+      out += opt(cur, cur + " — off-catalogue",
+        "Not in the generated syllabus catalogue — " + WA.OFFCAT_SAVED + " " +
         "The syllabus data may lag reality, and a record must never become unstorable.", true);
     }
     out += `<optgroup label="Beyond the syllabus">` +
@@ -572,7 +608,7 @@ WA.renderInstructor = async function (view, me, opts) {
       }
     }
     out += `<option value="__other__"
-      title="${esc("Frees the box to plain text — for a code the catalogue does not know yet. It is saved as typed and shown marked off-catalogue.")}">Other&hellip; (type the code)</option>`;
+      title="${esc("Frees the box to plain text — for a code the catalogue does not know yet. It is " + WA.OFFCAT_SAVED)}">Other&hellip; (type the code)</option>`;
     return out;
   }
   /* the ONE what-was-flown cell, per kind: a Continuation flight names its Σ
@@ -597,18 +633,27 @@ WA.renderInstructor = async function (view, me, opts) {
           esc(WA.sCatCode(e.s_category))}</span> `
       : "";
     if (e._sfree) {
-      return chip + `<input type="text" data-curf="${esc(i)}:sortie" value="${esc(e.sortie || "")}"
+      /* ROUND 22 (WA-21 verify finding 1) — THE BOX AND ITS WAY BACK ARE ONE
+         CONTROL. The two used to be bare siblings in a `white-space: nowrap`
+         cell: the input took its own default width, the button was pushed past
+         the cell's edge and at 1280 px it slid UNDER the # column's seq box,
+         where roughly half of it could not be clicked at all. They are wrapped
+         now, and .curtbl .freewrap lays them out as a flex pair that stays
+         inside the cell at every width — the button clickable across its whole
+         face, and the input free to shrink instead of shoving. */
+      return chip + `<span class="freewrap"><input type="text" data-curf="${esc(i)}:sortie"
+             value="${esc(e.sortie || "")}"
              maxlength="40" placeholder="e.g. C4101 or FCF profile 2" autocomplete="off"
-             aria-label="What was flown with the SP — free text">
-        <button type="button" class="btn btn-sm" data-curslist="${esc(i)}"
-          title="${esc("Back to the syllabus list. Whatever is typed stays in the box until you change it.")}">list</button>`;
+             aria-label="What was flown with the SP — free text"
+        ><button type="button" class="btn btn-sm" data-curslist="${esc(i)}"
+          title="${esc("Back to the syllabus list. Whatever is typed stays in the box until you change it.")}">list</button></span>`;
     }
     return chip + `<select class="catbox" data-curf="${esc(i)}:sortie"
            title="${esc(e.sortie ? WA.curSortieText(e.sortie)
              : "What was flown with the SP: the student's syllabus sortie (either band), or repeat / fcf / cef, or Other… to type a code the catalogue does not know.")}"
            aria-label="What was flown with the SP">${curSortieOptions(e)}</select>` +
       (e.sortie && !WA.curSortieKnown(e.sortie)
-        ? ` <span class="badge badge-warn" title="${esc("Not in the generated syllabus catalogue — saved as typed and shown marked. The syllabus data may lag reality.")}">off-catalogue</span>`
+        ? ` <span class="badge badge-warn" title="${esc("Not in the generated syllabus catalogue — " + WA.OFFCAT_SAVED + " The syllabus data may lag reality.")}">off-catalogue</span>`
         : "");
   }
   /* what the RO twin and the logbook print in the same cell */
@@ -642,7 +687,7 @@ WA.renderInstructor = async function (view, me, opts) {
         ${WA.CURRENCY_KINDS.map((k) => `<option value="${esc(k.id)}"${
           e.kind === k.id ? " selected" : ""} title="${esc(k.tip)}">${esc(k.label)}</option>`).join("")}
       </select></td>
-      <td>${curWhatCell(i, e)}</td>
+      <td class="wcell">${curWhatCell(i, e)}</td>
       <td class="num"><input type="number" min="1" max="9" step="1" class="seqbox"
              data-curf="${esc(i)}:seq" value="${esc(WA.curSeq(e))}"
              title="${esc("Which flight of that day this is, for that kind and that flight identity. It is 1 unless you flew the same thing twice on the same day; the form takes the next free number when it has to.")}"
@@ -1747,8 +1792,18 @@ WA.renderInstructor = async function (view, me, opts) {
       who: WA.personRankName(WA.me || {}),
       onBehalf: asCO ? WA.personRankName(who) : "",
       title: "Save " + saveWords(ids.length, curCh.length) + "?",
+      /* ROUND 22 (WA-21 verify finding 2) — THE PREAMBLE IS PER KIND, BECAUSE
+         THE ROWS ARE. Round 21 split a currency row in two: a CONTINUATION row
+         names its Σ category, a WITH-SP row names the student’s sortie and
+         cannot carry a Σ at all. The dialog kept round 20’s sentence and told
+         every signer that «each row names the Σ category», which is false of
+         exactly the rows the round added — and this is the screen where the
+         claim is signed. It now says what is actually in front of them: the
+         two kinds by name, and the Σ sentence only where a Σ is really there. */
       what: inCur
-        ? "These are your own flights for the squadron’s currency register — the bridge into FDMS. Each row names the day, the Σ category of Πίνακας 9 / Πίνακας 6 and the E-items it exercised. They name no student, and they change no student’s record."
+        ? "These are your own flights for the squadron’s currency register — the bridge into FDMS. " +
+          curSaveWhat() +
+          " They name no student, and they change no student’s record."
         : (asCO
             ? "These are recorded as this instructor’s assessments and tagged “entered by " + WA.ADMIN_WORD + "”. Every one of them is about FIGHTERS, on the five-level scale."
             : "These are your assessments for the Wing Commander brief — one answer per student, about FIGHTERS, on the five-level scale."),

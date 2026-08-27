@@ -388,7 +388,7 @@ WA.renderAdmin = async function (view, me) {
     const st = s._stats;
     const cnt = (n) => ({ badge: String(n), tone: n ? "" : "muted" });
     const bars = (sec) => {
-      const cn = WA.stateCounts(sec, s.record[sec]);
+      const cn = WA.stateCounts(sec, s.record[sec], null, s.record);
       return { badge: cn.owed ? cn.owed + " owed" : (cn.n ? "all in" : "—"),
                tone: cn.owed ? "" : (cn.n ? "good" : "muted"),
                tip: WA.secLabel(sec) + " — " + WA.stateLine(sec, cn),
@@ -417,8 +417,8 @@ WA.renderAdmin = async function (view, me) {
       return { done: Math.min(Object.keys(seen).length, n), n };
     };
     const ev = evalSlots();
-    const gl = WA.stateCounts("lessons", s.record.lessons);
-    const gx = WA.stateCounts("exams", s.record.exams);
+    const gl = WA.stateCounts("lessons", s.record.lessons, null, s.record);
+    const gx = WA.stateCounts("exams", s.record.exams, null, s.record);
     const a = s.assessment || { n: 0, mean: null };
     const by = {
       "ana-eval": {
@@ -1231,15 +1231,43 @@ WA.renderAdmin = async function (view, me) {
       >${esc(d.label)}</span></td>`;
   };
   function logRows(s, band, track) {
-    return WA.slotRows(band, s.record[band], track).map((r) => {
+    return WA.slotRows(band, s.record[band], track, s.record).map((r) => {
       const e = r.e;
+      /* ROUND 22 — A POSITION FILLED FROM ANOTHER SECTION. The admin’s table
+         and the student’s form are THE SAME TABLE (round 13), so a derived row
+         appears here in the same place, in the same muted treatment, reading
+         the same Evaluations / Solo flights record. It is stored nowhere and
+         it is not an entry: the Source column says which section owns it. */
+      if (r.derived) {
+        const d = r.derived, def = r.def, sd0 = def.sortie || {};
+        return `<tr class="is-derived st-${esc(r.state)}">
+          <td><span title="${esc(WA.logSortieLabel(band, track, def.code, "syllabus") +
+              (sd0.g ? " · Training Section " + sd0.g : "") +
+              (sd0.h ? " · syllabus " + sd0.h + " h" : ""))}"><b>${esc(def.code)}</b></span>
+            <span class="dchip" title="${esc(WA.derivedTip(d))}">${esc(WA.derivedTag(d))}</span></td>
+          <td>${esc(fmtD(d.date))}</td>
+          <td>${esc(d.who || "—")}</td>
+          <td class="num k" title="${esc("The time flown is recorded on the row that owns this flight, in the " +
+            WA.secLabel(d.sec) + " section — a second copy here could disagree with it.")}">&mdash;</td>
+          <td>${esc(WA.derivedGradeText(d))}</td>
+          <td>${d.ng || d.grade === null || d.grade === undefined
+            ? `<span class="k">&mdash;</span>`
+            : `<span class="mchip is-${esc(WA.gradeMission(d.grade))}" title="${esc("Read from the grade: " +
+                d.grade + " % is “" + WA.missionLabel(WA.gradeMission(d.grade)) +
+                "” (the 60 % threshold of ΠΔ 151/13)")}">${esc(WA.missionLabel(WA.gradeMission(d.grade)))}</span>`}</td>
+          ${stateCell(r.state)}
+          <td class="k" title="${esc("Not stored in this log at all — read from the " +
+            WA.secLabel(d.sec) + " section, where the one row for this flight lives.")}">${esc(WA.secLabel(d.sec))}</td></tr>`;
+      }
       if (!e) {
         const d = r.def, sd = d.sortie || {};
-        return `<tr class="st-owed">
+        return `<tr class="${d.ck ? "is-derived " : ""}st-owed">
           <td><span title="${esc(WA.logSortieLabel(band, track, d.code, "syllabus") +
               (sd.g ? " · Training Section " + sd.g : "") +
               (sd.h ? " · syllabus " + sd.h + " h" : "") + (sd.nt ? " · night" : ""))}"
-            ><b>${esc(d.code)}</b></span></td>
+            ><b>${esc(d.code)}</b></span>${d.ck
+            ? ` <span class="dchip" title="${esc(WA.DERIVED_SRC.evaluations.tip)}">${
+                esc(WA.DERIVED_SRC.evaluations.tag)}</span>` : ""}</td>
           <td class="k">&mdash;</td><td class="k">&mdash;</td>
           <td class="num k">${sd.h ? esc(sd.h) : "&mdash;"}</td>
           <td class="k">&mdash;</td><td class="k">&mdash;</td>
@@ -1271,7 +1299,7 @@ WA.renderAdmin = async function (view, me) {
     const head = ["Flight", "Date", "Instructor", "Hours", "Grade", "Mission", "State", "Source"];
     const body = WA.TRACKS.map((t) => {
       const rows = logRows(s, band, t);
-      const cn = WA.stateCounts(band, all, t);
+      const cn = WA.stateCounts(band, all, t, s.record);
       return `
         <h3 style="margin-top:10px">${esc(WA.secLabel(band))} &mdash; ${esc(WA.itemCatLabel(t))}
           <span class="cnt">${esc(WA.stateLine(band, cn))}</span></h3>
@@ -1279,7 +1307,7 @@ WA.renderAdmin = async function (view, me) {
           : `<p class="hint">Nothing recorded in this track yet.</p>`}`;
     }).join("");
     return `<h2>${esc(WA.secLabel(band))} ${WA.tipDot(band)}
-        <span class="cnt">${esc(WA.stateLine(band, WA.stateCounts(band, all)))}</span></h2>
+        <span class="cnt">${esc(WA.stateLine(band, WA.stateCounts(band, all, null, s.record)))}</span></h2>
       ${stateLegend()}
       ${body}`;
   }
@@ -1812,9 +1840,9 @@ WA.renderAdmin = async function (view, me) {
             /* ROUND 13 — and how much of the syllabus is STILL OWED. A brief
                that said only what was flown could never answer the question the
                admin actually asks of it: how far through the stage is this one. */
-            const cn = WA.stateCounts(k, list);
+            const cn = WA.stateCounts(k, list, null, s.record);
             return `<div class="kline"><span class="k">${esc(WA.secLabel(k))}</span>
-              ${list.length
+              ${(list.length || cn.derived)
                 ? WA.TRACKS.map((t) => {
                     const n = list.filter((e) => (e.track || "") === t).length;
                     return n ? `<b>${esc(WA.itemCatLabel(t))}</b> ${esc(n)}` : "";
@@ -1832,7 +1860,11 @@ WA.renderAdmin = async function (view, me) {
                     const bad = list.filter((e) => WA.rowMission(e) === "incomplete").length;
                     return bad ? ` <span class="k" title="Flights whose mission was not completed — read from the grade where there is one, said by the squadron where there is not">· ${esc(bad)} incomplete</span>` : "";
                   })())
-                : `<span class="k">none recorded &mdash; all ${esc(WA.slotCount(k))} of the syllabus owed</span>`}</div>`;
+                : `<span class="k">none recorded &mdash; all ${esc(WA.slotCount(k))} of the syllabus owed</span>`}${
+                /* ROUND 22 — the positions this log does not own: a checkride
+                   recorded in Evaluations, a sortie flown SOLO and recorded in
+                   Solo flights. They are flown, so they are not owed above. */
+                cn.derived ? ` <span class="k" title="${esc("Flown, and recorded in the sections that own them — the checkrides in Evaluations, the solos in Solo flights. They are not rows of this log and they are not owed in it.")}">· ${esc(cn.derived)} recorded elsewhere</span>` : ""}</div>`;
           }).join("")}
           ${/* ROUND 13 — the ground programme has a denominator too: 47 courses
                 and 8 exams, all of them owed on day one */ ""}
@@ -2056,10 +2088,28 @@ WA.renderAdmin = async function (view, me) {
          count and the word, and they are the same four words. */
       const logPrint = ["flights", "fs"].map((k) => WA.TRACKS.map((t) => {
         const all = Array.isArray(s.record[k]) ? s.record[k] : [];
-        const list = WA.slotRows(k, all, t).filter((r) => r.e);
+        const list = WA.slotRows(k, all, t, s.record).filter((r) => r.e || r.derived);
         if (!list.length) return "";
-        const cn = WA.stateCounts(k, all, t);
-        const rws = list.map((r) => { const e = r.e; return `<tr>
+        const cn = WA.stateCounts(k, all, t, s.record);
+        const rws = list.map((r) => {
+          /* ROUND 22 — the paper prints a derived row too, and says where it is
+             recorded. Leaving it out would make the state words disagree with
+             the count in the heading two lines above (which counts it, because
+             the flight happened) — and a brief that under-reports a flown
+             checkride is exactly what the two rulings closed. */
+          if (r.derived) {
+            const d = r.derived;
+            return `<tr>
+              <td>${esc(r.def.code)} <span class="pr-n">(${esc(WA.derivedTag(d))})</span></td>
+              <td>${esc(fmtD(d.date))}</td>
+              <td>${esc(d.who || "—")}</td>
+              <td>—</td>
+              <td>${esc(WA.derivedGradeText(d))}</td>
+              <td>${d.ng || d.grade === null || d.grade === undefined ? "—"
+                : esc(WA.missionLabel(WA.gradeMission(d.grade))) + ` <span class="pr-n">(read from the grade)</span>`}</td>
+              <td>${esc(WA.rowStateDef(r.state).label)}</td></tr>`;
+          }
+          const e = r.e; return `<tr>
           <td>${esc(e.sortie || "—")}${WA.coTag(e)}${
             e.kind && e.kind !== "syllabus" ? ` <span class="pr-n">(${esc(WA.flightKindLabel(e.kind))})</span>` : ""}${
             Number(e.seq || 1) > 1 ? ` <span class="pr-n">(same-day re-fly #${esc(Number(e.seq))})</span>` : ""}</td>
@@ -2543,7 +2593,7 @@ WA.renderAdmin = async function (view, me) {
           a.n, s.completion.instructors_total])
         .concat(WA.LEVELS.map((l) => (a.counts || {})[l.id] || 0))
         .concat(WA.SLOT_SECTIONS.reduce((acc, k) => {
-          const cn = WA.stateCounts(k, s.record[k]);
+          const cn = WA.stateCounts(k, s.record[k], null, s.record);
           return acc.concat([cn.done, cn.started, cn.owed, cn.extra, WA.slotCount(k)]);
         }, []))
         .concat([s.completion.has_record ? fmtDT(s.last_update) : "not submitted"]));

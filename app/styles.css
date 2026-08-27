@@ -578,6 +578,45 @@ p.legend .lgchip.st-owed    { color: var(--muted); background: var(--st-owed); b
 p.legend .lgchip.st-extra   { color: var(--mustard); background: var(--st-extra); border-color: rgba(var(--mustard-rgb), 0.50); }
 p.legend .lgsep { opacity: 0.5; margin: 0 3px; }
 
+/* ══ ROUND 22 — A ROW THIS TABLE DOES NOT OWN ═════════════════════════
+   RULINGS (2026-08-28): the eight checkrides and every solo now show at their
+   place in the flow chart, READ from the section that stores them. They must be
+   legible as facts and unmistakable as controls, so the treatment is the house
+   muted one and NOT a fifth colour: the four state washes still say done /
+   started / owed / extra (a flown checkride is green like any flown sortie),
+   and what marks the row as derived is the DASHED left rule, the muted text and
+   the absence of a single box. The four states keep their meaning; only the
+   ownership is new, and only the ownership is drawn. */
+.ftbl tr.frow.is-derived td, .tbl tr.is-derived td {
+  color: var(--muted); font-style: italic;
+}
+.ftbl tr.frow.is-derived td:first-child,
+.tbl tr.is-derived td:first-child { box-shadow: inset 3px 0 0 var(--line); }
+.ftbl tr.frow.is-derived .slotc b, .tbl tr.is-derived b {
+  color: var(--text); font-style: normal;
+}
+/* the WORD that names the owning section — a reading, never a control */
+.dchip {
+  display: inline-block; font-size: 10px; letter-spacing: 0.3px; font-style: normal;
+  border: 1px dashed var(--line); border-radius: 999px; padding: 1px 8px;
+  color: var(--muted); cursor: help; white-space: nowrap; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; vertical-align: middle;
+}
+/* the ↗ that lands on the row which owns the fact — the answer to «why can I
+   not edit this» is one click from the question */
+.ftbl tr.frow.is-derived .cbtn { font-style: normal; }
+/* WHERE THE JUMP LANDS. A row somebody was sent to must be findable at a
+   glance and must not stay lit: the wash fades out on its own, and a reader who
+   prefers no motion gets the colour without the animation. */
+.is-flash { animation: waflash 1.6s ease-out 1; }
+@keyframes waflash {
+  0%   { background: var(--accent-soft); }
+  100% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-flash { animation: none; background: var(--accent-soft); }
+}
+
 /* the admin's log tables — a real table, because there the screen is wide */
 .tbl td.lag { color: var(--muted); font-style: italic; }
 /* the same four states in the admin's read-only tables and on paper */
@@ -1441,6 +1480,39 @@ tr.is-problem, .rrow.is-problem {
 .curtbl input[type="date"] { width: 138px; }
 .curtbl select { max-width: 220px; }
 .curtbl td.num { text-align: right; }
+/* ROUND 22 (WA-21 verify finding 1) — THE «OTHER…» FREE-TEXT PAIR.
+   The box and its «list» way back are ONE control and must stay inside their
+   own cell: as bare siblings of a `white-space: nowrap` cell the input took its
+   default width, the button was pushed past the cell edge, and at 1280 px it
+   slid under the # column's seq box — painted over, and unclickable across most
+   of its face. A flex pair fixes it at every width: the button keeps its whole
+   width and its own place, and the INPUT is the part that gives (min-width: 0
+   is what lets a flex item shrink below its intrinsic size at all). */
+.curtbl .freewrap {
+  /* BLOCK-level flex, and `width: 100%` is the whole of the fix: a block box
+     inside a table cell resolves its percentage against THE CELL, so the pair
+     can never render wider than the column it lives in — not even when the
+     auto table layout hands this cell less than its content asks for, which is
+     the state the round-21 verify caught it in. As inline siblings the input
+     kept its intrinsic ~177 px, the button was pushed out with it, and at
+     1280 px it came to rest under the # column's seq box: painted over, and
+     not clickable at any point across its face. */
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; max-width: 100%; min-width: 0; white-space: normal;
+}
+/* the INPUT is the part that gives (min-width: 0 is what allows a flex item to
+   shrink below its intrinsic size at all); the BUTTON never shrinks and never
+   moves, so its whole face stays live at every width */
+.curtbl .freewrap input[type="text"] {
+  flex: 1 1 auto; min-width: 0; width: auto;
+  min-height: 30px; padding: 4px 6px; font-size: 12px;
+  border-radius: 6px; background: var(--surface);
+  border: 1px solid var(--line); color: var(--text);
+}
+.curtbl .freewrap .btn { flex: 0 0 auto; white-space: nowrap; }
+/* the cell that holds it may grow DOWNWARDS (the legacy Σ-claim chip sits
+   above the pair on its own line) rather than sideways into its neighbour */
+.curtbl td.wcell { white-space: normal; min-width: 190px; }
 .curtbl .seqbox {
   width: 52px; min-height: 30px; padding: 4px 6px; font-size: 12px;
   border-radius: 6px; background: var(--surface);

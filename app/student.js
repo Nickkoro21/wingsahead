@@ -210,8 +210,27 @@ WA.renderStudent = async function (view, me, opts) {
   function ensureLogSlots() {
     for (const sec of WA.SLOT_SECTIONS) {
       const list = Array.isArray(S.data[sec]) ? S.data[sec] : (S.data[sec] = []);
+      /* ROUND 22 — THE RECORD IS DELIBERATELY NOT PASSED HERE, and this is the
+         one place in the file where that is right. WA.claims(sec, list, rec)
+         answers «which positions are spoken for, derived ones included»; what
+         seeding needs is the narrower «which positions does a ROW OF THIS
+         SECTION already hold». Skipping the seed under a derived position was
+         tried and is a defect: clear the solo and the position had no
+         placeholder to fall back to, so the C4791 row VANISHED from the table
+         instead of returning to owed — and the fingerprint would have moved
+         every time a solo was filled or emptied, marking the form dirty for a
+         row nobody typed. The placeholder is therefore always there, always
+         unstored (WA.slotOwed drops it from the payload), and drawn only when
+         nothing else holds its place. */
       const c = WA.claims(sec, list);
       for (const d of WA.slotDefs(sec)) {
+        /* A CHECKRIDE POSITION IS NEVER SEEDED. The eight are rows of the flow
+           chart and they now have their place in these tables, but the FACT is
+           stored in Evaluations and here it is DERIVED (or plainly owed).
+           Seeding a blank row for one would mint a row the server refuses by
+           name — the R12 checkride refusal — and give the student a box to type
+           a flight into that this section may not hold. */
+        if (d.ck) continue;
         if (!c.taken[d.key]) list.push(slotBlank(sec, d));
       }
       claimsDirty(sec);
@@ -223,11 +242,22 @@ WA.renderStudent = async function (view, me, opts) {
      count in its block header and the decision to drop it from the payload
      are all one answer. */
   const CLAIM = {};
+  /* ROUND 22 — the fingerprint of the DERIVED positions of the two log tables
+     (see syncDerived below). Declared here, beside the claim cache it guards,
+     because it is READ during the first render — a `let` further down the file
+     would still be in its temporal dead zone at that point. */
+  let DERIVED_SIG = null;
   function claimsDirty(secId) {
     if (secId) delete CLAIM[secId]; else for (const k of Object.keys(CLAIM)) delete CLAIM[k];
   }
   function claimsOf(secId) {
-    if (!CLAIM[secId]) CLAIM[secId] = WA.claims(secId, S.data[secId] || []);
+    /* ROUND 22 — the WHOLE record, not the section's list: a position of the
+       flight log can be filled from the Evaluations or the Solo flights
+       section, and the claim pass has to see them to leave that position
+       alone. claimsDirty() is called on every save and on every edit of those
+       two sections too (see the dirty sweep below), so the cache cannot go
+       stale behind a solo the student has just filled in. */
+    if (!CLAIM[secId]) CLAIM[secId] = WA.claims(secId, S.data[secId] || [], S.data);
     return CLAIM[secId];
   }
   /* one row's slot verdict: does it occupy a syllabus slot, which one, and
@@ -785,6 +815,23 @@ WA.renderStudent = async function (view, me, opts) {
   const cflag = (label, tip) =>
     ` <span class="cflag" title="${esc(tip)}">${esc(label)}</span>`;
 
+  /* ROUND 22 — does THIS record's solo section already hold that sortie? The
+     row that does is the one the Flights position is derived from, so the
+     answer is read off the same rows every other surface reads.
+     `date` narrows it to the PROVABLE duplicate — the same sortie on the same
+     day, which is one flight in two books and is refused on save. Called
+     without a date it answers the softer question the form also has to ask:
+     is this sortie's flow-chart position already held by a solo? That one is
+     not a refusal, it is a warning — the row is real and it will render as an
+     extra. MIRROR: db/schema.sql → wa.solo_holder. */
+  function soloHolder(code, date) {
+    const c = WA.normCode(code);
+    if (!c) return null;
+    return (S.data.solo_flights || []).find((x) =>
+      x && !WA.slotEmpty("solo_flights", x) && WA.normCode(x.sortie) === c &&
+      (date === undefined || (!!x.date && x.date === date))) || null;
+  }
+
   /* the live verdict on a TYPED flight code — the same four answers the server
      gives, said on the keystroke instead of after the save. An fcf / cef /
      other row is off-catalogue BY NATURE, so it is never marked as a surprise. */
@@ -807,10 +854,26 @@ WA.renderStudent = async function (view, me, opts) {
       return cflag("checkride",
         code + " is a checkride — record it in the Evaluations section, where the syllabus order and the pass rule apply to it. Two rows for one flight would be two grades that can disagree.");
     }
+    /* ROUND 22 — the two SOLO refusals, said on the keystroke. The first is a
+       property of the syllabus (a code nobody flies dual); the second is a
+       property of THIS record (the solo section already holds that sortie).
+       Both are refused by name on save — MIRROR: db/schema.sql. */
+    if (WA.isSoloOnlyCode(code)) return cflag("solo", WA.soloOnlyRefusal(code));
+    const same = soloHolder(code, e.date || "");
+    if (same) return cflag("solo", WA.soloTakenRefusal(code, same.slot, e.date));
+    const held = soloHolder(code);
+    if (held) {
+      return cflag("solo flown", code + " was flown SOLO on " + fmtD(held.date) +
+        " and is recorded in the Solo flights section (" + WA.soloSlotLabel(held.slot) +
+        "), which holds its place in the flow chart. This row is a SECOND, later " +
+        "sortie of the same code: it is stored and it counts, and it is shown as an " +
+        "EXTRA — the planned pass is the solo. Nothing is refused.");
+    }
     if (WA.kindOffCatalogue(e.kind)) return "";
     if (!WA.logSortieKnown(sec, e.track, code)) {
       return cflag("off-catalogue",
-        "Not in the generated syllabus catalogue — it is saved as typed and shown marked. If it was an FCF, a CEF or something else outside the flow chart, say so in the Kind column and this mark goes away.");
+        "Not in the generated syllabus catalogue — " + WA.OFFCAT_SAVED +
+        " If it was an FCF, a CEF or something else outside the flow chart, say so in the Kind column and this mark goes away.");
     }
     return "";
   }
@@ -1525,7 +1588,7 @@ WA.renderStudent = async function (view, me, opts) {
        old sentence true is what makes the new one safe: the skeleton is a
        RENDER, and an untouched slot is still stored nowhere. */
     { id: "flights", log: true, cols: LOG_COLS,
-      hint: "Every sortie of the printed flow chart is ALREADY HERE, one row each, from the first day — grey while it is owed, light green once you start writing in it, green when the row is complete and the mission was completed. THE GRADE MAY BE LEFT EMPTY: a debrief sometimes takes a while, and the row simply says it is waiting instead of pretending the flight did not happen. Four tables, one per track, in flow-chart order; anything beyond the syllabus's one planned pass — a repeat, an FCF, a CEF, a same-day re-fly — is an EXTRA row in mustard, after the slots and in date order. The eight checkrides are not here: they are recorded in the Evaluations section, where the syllabus order and the pass rule apply to them.",
+      hint: "Every sortie of the printed flow chart is ALREADY HERE, one row each, from the first day — grey while it is owed, light green once you start writing in it, green when the row is complete and the mission was completed. THE GRADE MAY BE LEFT EMPTY: a debrief sometimes takes a while, and the row simply says it is waiting instead of pretending the flight did not happen. Four tables, one per track, in flow-chart order; anything beyond the syllabus's one planned pass — a repeat, an FCF, a CEF, a same-day re-fly — is an EXTRA row in mustard, after the slots and in date order. TWO KINDS OF ROW ARE READ FROM ELSEWHERE and cannot be edited here: the eight CHECKRIDES, recorded in the Evaluations section (the syllabus order and the pass rule apply to them there), and any sortie flown SOLO, recorded in the Solo flights section (that is where who authorised it and the NG rule live). Both are shown at their place in the chart, muted, with a ↗ to the row that holds them — one flight, one record, two places to read it.",
       row: (e, i, m) => logRow("flights", i, e, m),
       blank: (track) => logBlank(track) },
 
@@ -1620,11 +1683,16 @@ WA.renderStudent = async function (view, me, opts) {
      the printed brief order the same record with the same function, so three
      surfaces cannot disagree about where a row goes. On THIS side every slot
      is claimed (ensureLogSlots seeded whatever nothing else claims), so the
-     mapping back to a stored index is total and `i < 0` cannot occur. */
+     mapping back to a stored index is total and `i < 0` cannot occur —
+     EXCEPT for the two shapes round 22 added, which is exactly why they are
+     let through the filter and rendered by their own function: a DERIVED
+     position (its row is stored in Evaluations or in Solo flights) and an
+     UNFLOWN CHECKRIDE position (nothing is stored for it anywhere yet). Both
+     have i = -1 by construction, and neither may ever be handed to trHTML —
+     which would address a stored row that does not exist. */
   function sortedRows(secId, list, track) {
-    return WA.slotRows(secId, list, track)
-      .filter((r) => r.i >= 0)
-      .map((r) => ({ e: r.e, i: r.i }));
+    return WA.slotRows(secId, list, track, S.data)
+      .filter((r) => r.i >= 0 || r.derived || (r.def && r.def.ck));
   }
   /* one <tr>. The classes are the row states the card form wore as a border:
      a leftover, an admin entry, an admin entry the owner may not touch — and, since
@@ -1660,20 +1728,24 @@ WA.renderStudent = async function (view, me, opts) {
     /* a block opens when it holds anything the student has touched; if the
        whole section is untouched the FIRST track opens, so a fresh student
        meets their syllabus instead of four closed boxes */
-    const whole = WA.stateCounts(sec.id, list);
+    const whole = WA.stateCounts(sec.id, list, null, S.data);
     const untouched = (whole.done + whole.started + whole.extra) === 0;
     return stateLegendHTML(sec.id) + WA.TRACKS.map((t, ti) => {
       const ord = sortedRows(sec.id, list, t);
-      const rows = ord.map(({ e, i }) => trHTML(sec, e, i));
-      const cn = WA.stateCounts(sec.id, list, t);
+      const rows = ord.map((r) => r.derived ? derivedTrHTML(sec, r)
+        : (r.i >= 0 ? trHTML(sec, r.e, r.i) : ckOwedTrHTML(sec, r)));
+      const cn = WA.stateCounts(sec.id, list, t, S.data);
       const nCat = WA.slotCount(sec.id, t);
+      const nCk = WA.slotDefs(sec.id).filter((d) => d.track === t && d.ck).length;
       return `
         <details class="logtbl" ${(cn.done + cn.started + cn.extra) > 0 ||
             (untouched && ti === 0) ? "open" : ""} data-logtbl="${esc(sec.id)}:${esc(t)}">
           <summary><b>${esc(WA.secLabel(sec.id))} &mdash; ${esc(WA.itemCatLabel(t))}</b>
             <span class="cnt">${esc(WA.stateLine(sec.id, cn))}</span>
             <span class="k" title="${esc("The printed flow chart prescribes " + nCat + " " +
-              (sec.id === "fs" ? "simulator" : "aircraft") + " sorties in this track, and every one of them is a row here from the first day. (The track's checkrides are not among them: they are recorded in the Evaluations section, where the syllabus order and the pass rule apply to them.)")}">${esc(nCat)} in the syllabus</span>
+              (sec.id === "fs" ? "simulator" : "aircraft") + " sorties in this track, and every one of them is a row here from the first day." +
+              (nCk ? " " + nCk + " of them " + (nCk === 1 ? "is a CHECKRIDE" : "are CHECKRIDES") +
+                     ": those rows are READ from the Evaluations section, where the syllabus order and the pass rule apply to them — they are shown here at their place in the chart and they cannot be edited or added to from this table." : ""))}">${esc(nCat)} in the syllabus</span>
           </summary>
           ${tblHTML(sec, sec.id + ":" + t, rows,
             "Nothing recorded in this track yet &mdash; use &ldquo;+ Add an extra flight&rdquo;.")}
@@ -1683,6 +1755,79 @@ WA.renderStudent = async function (view, me, opts) {
             >+ Add an extra flight</button></div>
         </details>`;
     }).join("");
+  }
+
+  /* ══ ROUND 22 — THE TWO ROWS THIS TABLE DOES NOT OWN ══════════════════════
+     RULINGS (2026-08-28): «Έβαλα την C4791 και έκανα save. Γιατί δεν
+     ανανεώνεται στον πίνακα Flights;» · «Στα flights δεν έχεις τις
+     αξιολογήσεις — τις θέλουμε.»
+     A DERIVED row shows a flight this student has flown whose ONE stored row
+     lives in another section. It is drawn at its place in the flow chart, in
+     the muted derived treatment, with NO control of its own but a link to the
+     row that owns the fact — because the answer to «why can I not edit this»
+     has to be one click away from the question.
+     It carries NO data-row: nothing in this file may address it as a stored
+     row of this section, because there is no such row. */
+  function derivedTrHTML(sec, r) {
+    const d = r.derived, def = r.def;
+    const sd = def.sortie || {};
+    const tip = WA.derivedTip(d);
+    return `<tr class="frow is-derived st-${esc(r.state)}" data-derived="${esc(d.key)}">
+      <td class="c-fl"><span class="slotc" title="${esc(
+          WA.logSortieLabel(sec.id, def.track, def.code, "syllabus") +
+          (sd.g ? " · Training Section " + sd.g : "") +
+          (sd.h ? " · syllabus " + sd.h + " h" : "") + (sd.nt ? " · night" : ""))}"
+        ><b>${esc(def.code)}</b></span></td>
+      <td class="c-dt">${esc(fmtD(d.date))}</td>
+      <td class="c-in">${esc(d.who || "—")}</td>
+      <td class="c-du"><span class="k" title="${esc(
+        "The time flown is recorded on the row that owns this flight, in the " +
+        WA.secLabel(d.sec) + " section — a second copy here could disagree with it.")}">&mdash;</span></td>
+      <td class="c-gr">${esc(WA.derivedGradeText(d))}</td>
+      <td class="c-ms">${derivedMissionCell(d)}</td>
+      <td class="c-kd"><span class="dchip" title="${esc(tip)}">${esc(WA.derivedTag(d))}</span></td>
+      <td class="c-ac">${stateChip(r.state, sec.id, null)}
+        <button type="button" class="cbtn" data-jump="${esc(WA.derivedJump(d))}"
+          title="${esc("Go to the row that holds this flight — " + WA.secLabel(d.sec) +
+            ". That is where it is recorded, and the only place it can be changed.")}"
+          aria-label="Go to the ${esc(WA.secLabel(d.sec))} row that holds this flight"
+          >&#8599;</button></td></tr>`;
+  }
+  /* the mission of a derived row — READ from the grade, never set: the row has
+     no grade of its own to set one beside. An NG solo is not scorable at all,
+     exactly as an NG row of this table is not. */
+  function derivedMissionCell(d) {
+    if (d.ng) {
+      return `<span class="k" title="${esc("A non-graded (NG) flight is not scorable at all — it carries neither a grade nor a mission")}">&mdash;</span>`;
+    }
+    if (d.grade === null || d.grade === undefined) return `<span class="k">&mdash;</span>`;
+    const m = WA.gradeMission(d.grade), def = WA.mission(m) || {};
+    return `<span class="mchip is-${esc(m)}" title="${esc("Read from the grade: " + d.grade +
+      " % is “" + (def.label || m) + "” (the 60 % threshold of ΠΔ 151/13)")}">${esc(def.label || m)}</span>`;
+  }
+  /* AN UNFLOWN CHECKRIDE — a position of the flow chart with nothing recorded
+     against it anywhere yet. Grey like any owed row, and read-only like every
+     checkride row: it is not a slot this table can be typed into. */
+  function ckOwedTrHTML(sec, r) {
+    const def = r.def, sd = def.sortie || {};
+    const ev = WA.evalById(def.code);
+    return `<tr class="frow is-derived st-owed">
+      <td class="c-fl"><span class="slotc" title="${esc(
+          WA.logSortieLabel(sec.id, def.track, def.code, "syllabus") +
+          (sd.g ? " · Training Section " + sd.g : "") +
+          (sd.h ? " · syllabus " + sd.h + " h" : ""))}"><b>${esc(def.code)}</b></span></td>
+      <td class="c-dt"><span class="k">&mdash;</span></td>
+      <td class="c-in"><span class="k">&mdash;</span></td>
+      <td class="c-du"><span class="k">&mdash;</span></td>
+      <td class="c-gr"><span class="k">&mdash;</span></td>
+      <td class="c-ms"><span class="k">&mdash;</span></td>
+      <td class="c-kd"><span class="dchip" title="${esc(
+        WA.DERIVED_SRC.evaluations.tip + (ev ? " Not flown yet — " + ev.id + " is checkride " +
+        ev.order + " of the eight." : ""))}">${esc(WA.DERIVED_SRC.evaluations.tag)}</span></td>
+      <td class="c-ac">${stateChip("owed", sec.id, null)}
+        <button type="button" class="cbtn" data-jump="evaluations:-1"
+          title="${esc("Go to the Evaluations section — that is where this checkride is recorded when it is flown.")}"
+          aria-label="Go to the Evaluations section">&#8599;</button></td></tr>`;
   }
 
   /* the two ground blocks — one table each, the same sort, the same row map */
@@ -1839,7 +1984,7 @@ WA.renderStudent = async function (view, me, opts) {
        the question the pre-seeded slots answer is what is still owed, and a
        bare row count could never say it. The hours and the lag ride along. */
     if (sec && (sec.log || WA.hasSlots(id))) {
-      return WA.stateLine(id, WA.stateCounts(id, list));
+      return WA.stateLine(id, WA.stateCounts(id, list, null, S.data));
     }
     return `${n} ${n === 1 ? "entry" : "entries"}`;
   }
@@ -1917,7 +2062,7 @@ WA.renderStudent = async function (view, me, opts) {
       const id = sec.id, list = S.data[id] || [];
       const label = WA.secLabel(id);
       if (WA.hasSlots(id)) {
-        const cn = WA.stateCounts(id, list);
+        const cn = WA.stateCounts(id, list, null, S.data);
         return {
           id, label,
           tip: label + " — " + WA.stateLine(id, cn),
@@ -2046,6 +2191,10 @@ WA.renderStudent = async function (view, me, opts) {
      loaded, AFTER the fixed syllabus slots were filled in (they are part of
      the form's idea of the record, and an untouched form must read clean) */
   markSaved();
+  /* ROUND 22 — and the baseline of the DERIVED positions, taken from the same
+     first render, so the first keystroke of a session does not rebuild two
+     tables that have not moved (and take the caret with them) */
+  DERIVED_SIG = derivedSig();
   placeFloat();
   if (!WA._stuFloatHooked) {
     WA._stuFloatHooked = true;
@@ -2130,7 +2279,7 @@ WA.renderStudent = async function (view, me, opts) {
         esc(code)} belongs to the ${esc(WA.itemCatLabel(t))} track</span>`;
     }
     if (!WA.sortieKnown(WA.itemCat(catId) ? catId : null, code)) {
-      return `<span class="warn-t" title="Not in the generated syllabus catalogue — it is saved as typed and shown marked">not in the syllabus catalogue</span>`;
+      return `<span class="warn-t" title="${esc("Not in the generated syllabus catalogue — " + WA.OFFCAT_SAVED)}">not in the syllabus catalogue</span>`;
     }
     return "";
   }
@@ -2296,7 +2445,7 @@ WA.renderStudent = async function (view, me, opts) {
     const t = String(det.dataset.logtbl || "").split(":")[1];
     const sum = det.querySelector("summary .cnt");
     if (!sum || !t) return;
-    sum.textContent = WA.stateLine(secId, WA.stateCounts(secId, S.data[secId] || [], t));
+    sum.textContent = WA.stateLine(secId, WA.stateCounts(secId, S.data[secId] || [], t, S.data));
   }
   /* ── THE COLOUR FOLLOWS THE KEYSTROKE (round 13) ──────────────────────────
      The round-5b rule applied to the row itself: typing a date must turn the
@@ -2420,12 +2569,45 @@ WA.renderStudent = async function (view, me, opts) {
      successful save, from the record as the SERVER normalised it. (SAVED and
      CLEAN_ST are declared at the top of this function — the first render
      takes the baseline before this line is ever reached.) */
+  /* ══ ROUND 22 — THE FLIGHT LOG FOLLOWS THE OTHER TWO SECTIONS ═════════════
+     RULING (2026-08-28): «Έβαλα την C4791 και έκανα save. Γιατί δεν
+     ανανεώνεται στον πίνακα Flights;» A solo filled in and a checkride
+     recorded change POSITIONS OF THE FLIGHTS TABLE — and the student who typed
+     them is standing in a different card, so no row-level refresh of THEIR
+     section can reach it. The derived map is therefore fingerprinted after
+     every edit and, on the edit that moves it, the two log sections are
+     redrawn whole. The box being typed into is in NEITHER of them, so nothing
+     loses its focus or its caret; and the fingerprint is cheap (8 checkrides
+     and 9 solo rows), so the common keystroke pays a string compare.
+     This is what makes the answer to the ruling «it updates NOW», not «it
+     updates after a save and a reload». */
+  function derivedSig() {
+    return WA.LOG_BANDS.map((b) => {
+      const d = WA.derivedSlots(b.id, S.data);
+      return Object.keys(d).sort().map((k) =>
+        k + "=" + d[k].state + "@" + d[k].date + "/" + d[k].grade + "/" +
+        (d[k].ng ? "ng" : "") + "/" + d[k].who).join(",");
+    }).join("|");
+  }
+  function syncDerived() {
+    const sig = derivedSig();
+    if (sig === DERIVED_SIG) return;
+    DERIVED_SIG = sig;
+    for (const b of WA.LOG_BANDS) {
+      claimsDirty(b.id);
+      if (document.getElementById("rows-" + b.id)) redraw(b.id);
+    }
+  }
+
   function markDirty() {
     S.dirty = WA.recordFingerprint(S.data) !== SAVED;
     const st = $("stu-status");
     st.className = "st";
     st.textContent = S.dirty ? "Unsaved changes — press Save." : CLEAN_ST;
     showFloat();
+    /* the two log tables, where a solo or a checkride has just moved one of
+       their positions (round 22) — before the rail, which reads their counts */
+    syncDerived();
     /* the panel's states are LIVE — every keystroke that moves a row between
        the four states moves the bar beside its section name too */
     refreshNav();
@@ -2558,6 +2740,27 @@ WA.renderStudent = async function (view, me, opts) {
 
   /* ── delegated listeners (attach once) ────────────────────────────────── */
   form.addEventListener("click", (ev) => {
+    /* ROUND 22 — THE JUMP OFF A DERIVED ROW. «why can I not edit this» has to
+       be one click from the answer, so the row that OWNS the fact is where the
+       arrow lands. It is a button and not an <a href="#…">: the hash carries
+       the personal token on this page, and a fragment link would throw it away.
+       i < 0 (an unflown checkride) lands on the section instead of a row. */
+    const jump = ev.target.closest("[data-jump]");
+    if (jump) {
+      const [sec, ix] = String(jump.dataset.jump).split(":");
+      const i = Number(ix);
+      const row = i >= 0 ? form.querySelector(`[data-row="${sec}:${i}"]`) : null;
+      const card = document.getElementById("sec-" + sec);
+      const to = row || card;
+      if (to) {
+        to.scrollIntoView({ block: row ? "center" : "start" });
+        if (row) {
+          row.classList.add("is-flash");
+          window.setTimeout(() => row.classList.remove("is-flash"), 1600);
+        }
+      }
+      return;
+    }
     const add = ev.target.closest("[data-add]");
     if (add) {
       const id = add.dataset.add;

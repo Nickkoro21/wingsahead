@@ -83,6 +83,14 @@ OUT_SQL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "db", "
 
 SQL_BEGIN = "-- ▼▼ GENERATED BLOCK — tools/gen-items-catalog.py — DO NOT EDIT BY HAND ▼▼"
 SQL_END = "-- ▲▲ GENERATED BLOCK ▲▲"
+# ROUND 22 — EVERY EMITTED FUNCTION CARRIES THE search_path PIN. Round 20 swept
+# all 102 wa helpers onto «set search_path = public, wa, pg_temp» and added a
+# deploy-time audit that FAILS on any wa function without it — but the sweep
+# edited db/schema.sql and not this generator, so the very next run would have
+# unpinned all ten functions below and broken the deploy at the audit. The pin
+# is emitted here now, so the two halves cannot contradict each other.
+# MIRROR: db/schema.sql — the r20 search_path audit block at the end of the file.
+SQL_PIN = "set search_path = public, wa, pg_temp"
 
 
 BANDS = ["flights", "fs"]
@@ -274,7 +282,8 @@ def sortie_hours(s, groups_by_id):
 
 
 def sql_block(cats, evals, flow_generated, idx_generated,
-              log_sorties, ground, exams, solo_slot_ids):
+              log_sorties, ground, exams, solo_slot_ids,
+              solo_codes, solo_only_codes):
     """the wa.eval_ids() + wa.item_names() mirror, as SQL text."""
     L = []
     L.append(SQL_BEGIN)
@@ -291,13 +300,13 @@ def sql_block(cats, evals, flow_generated, idx_generated,
     L.append("-- earlier one has not been flown.")
     L.append("-- MIRROR: app/app.js → WA.EVALUATIONS (ordered by WA_EVAL_ORDER).")
     L.append("create or replace function wa.eval_ids() returns text[]")
-    L.append("language sql immutable as $$")
+    L.append("language sql immutable " + SQL_PIN + " as $$")
     L.append("  select array[%s]::text[]" % ",".join(sq(e) for e in evals))
     L.append("$$;")
     L.append("")
     L.append("-- 1-based position of a checkride in the syllabus order · null when unknown")
     L.append("create or replace function wa.eval_pos(p_id text) returns int")
-    L.append("language sql immutable as $$")
+    L.append("language sql immutable " + SQL_PIN + " as $$")
     L.append("  select i from generate_subscripts(wa.eval_ids(), 1) i")
     L.append("  where (wa.eval_ids())[i] = p_id")
     L.append("$$;")
@@ -310,7 +319,7 @@ def sql_block(cats, evals, flow_generated, idx_generated,
     L.append("-- a row still filed under it must be given a real track first.")
     L.append("-- MIRROR: app/items-catalog.js → WA_ITEMS.categories[].items[].name")
     L.append("create or replace function wa.item_names(p_cat text) returns text[]")
-    L.append("language sql immutable as $$")
+    L.append("language sql immutable " + SQL_PIN + " as $$")
     L.append("  select case p_cat")
     for cid, _label in CATS:
         names = [it["name"] for it in next(c for c in cats if c["id"] == cid)["items"]]
@@ -333,7 +342,7 @@ def sql_block(cats, evals, flow_generated, idx_generated,
     L.append("-- flights/fs row is fully placed by the pair — no new lookup on the hot path.")
     L.append("-- MIRROR: app/items-catalog.js → WA_LOG_SORTIES.")
     L.append("create or replace function wa.sortie_codes(p_band text, p_track text) returns text[]")
-    L.append("language sql immutable as $$")
+    L.append("language sql immutable " + SQL_PIN + " as $$")
     L.append("  select case p_band || '/' || p_track")
     for band in BANDS:
         for cid, _lab in CATS:
@@ -349,7 +358,7 @@ def sql_block(cats, evals, flow_generated, idx_generated,
     L.append("-- catalogue code). The letter gives the track; only the flow chart gives the")
     L.append("-- band, which is why this is generated and wa.code_track is not.")
     L.append("create or replace function wa.sortie_band(p_code text) returns text")
-    L.append("language sql immutable as $$")
+    L.append("language sql immutable " + SQL_PIN + " as $$")
     L.append("  select case")
     for band in BANDS:
         codes = [r["c"] for cid, _l in CATS for r in log_sorties[band][cid]]
@@ -366,12 +375,12 @@ def sql_block(cats, evals, flow_generated, idx_generated,
     L.append("-- of four different groups.")
     L.append("-- MIRROR: app/items-catalog.js → WA_GROUND.")
     L.append("create or replace function wa.lesson_groups() returns text[]")
-    L.append("language sql immutable as $$")
+    L.append("language sql immutable " + SQL_PIN + " as $$")
     L.append("  select array[%s]::text[]" % ",".join(sq(g["g"]) for g in ground))
     L.append("$$;")
     L.append("")
     L.append("create or replace function wa.lesson_courses(p_group text) returns text[]")
-    L.append("language sql immutable as $$")
+    L.append("language sql immutable " + SQL_PIN + " as $$")
     L.append("  select case p_group")
     for g in ground:
         L.append("    when %s then array[" % sq(g["g"]))
@@ -388,7 +397,7 @@ def sql_block(cats, evals, flow_generated, idx_generated,
     L.append("-- would make the two systems disagree about what a student is owed.")
     L.append("-- MIRROR: app/items-catalog.js → WA_EXAMS.")
     L.append("create or replace function wa.exam_ids() returns text[]")
-    L.append("language sql immutable as $$")
+    L.append("language sql immutable " + SQL_PIN + " as $$")
     L.append("  select array[%s]::text[]" % ",".join(sq(e["id"]) for e in exams))
     L.append("$$;")
     L.append("")
@@ -396,7 +405,7 @@ def sql_block(cats, evals, flow_generated, idx_generated,
     L.append("-- it is NOT OWED by a HAF student. (FDMS's own SchedReady never reads the")
     L.append("-- flag and leaves JP190 pending for ever; that defect is not mirrored here.)")
     L.append("create or replace function wa.exam_conditional(p_id text) returns boolean")
-    L.append("language sql immutable as $$")
+    L.append("language sql immutable " + SQL_PIN + " as $$")
     L.append("  select case when p_id = any(array[%s]::text[]) then true else false end"
              % ",".join(sq(e["id"]) for e in exams if e["cond"]))
     L.append("$$;")
@@ -409,8 +418,35 @@ def sql_block(cats, evals, flow_generated, idx_generated,
     L.append("-- nothing to remove.")
     L.append("-- MIRROR: app/items-catalog.js → WA_SOLO_SLOTS.")
     L.append("create or replace function wa.solo_slots() returns text[]")
-    L.append("language sql immutable as $$")
+    L.append("language sql immutable " + SQL_PIN + " as $$")
     L.append("  select array[%s]::text[]" % ",".join(sq(s) for s in solo_slot_ids))
+    L.append("$$;")
+    L.append("")
+    L.append("-- ── ROUND 22 — THE SORTIE CODES A SOLO SLOT CAN HOLD ───────────────")
+    L.append("-- RULING (2026-08-28): «Έβαλα την C4791 και έκανα save. Γιατί δεν")
+    L.append("-- ανανεώνεται στον πίνακα Flights;» — the solo slot and the Flights row for one")
+    L.append("-- sortie were two books for one flight. The CHECKRIDE PRECEDENT closes it:")
+    L.append("-- the fact is stored ONCE, in the Solo flights section, and the Flights table")
+    L.append("-- RENDERS it. These two arrays are what the refusal is judged against.")
+    L.append("--   solo_slot_codes  — the union of the slots' own pickers: every code any")
+    L.append("--     fixed solo slot can hold. A stored flights row naming one of these is")
+    L.append("--     refused only when THIS record's solo section already holds it, because")
+    L.append("--     a candidate that was not flown solo WAS flown dual and its row is true.")
+    L.append("--   solo_only_codes  — a SOLO BY DEFINITION: the section REQUIRES its solo")
+    L.append("--     and its picker offers no alternative, so nobody ever flies that code")
+    L.append("--     dual. Refused always, by name, exactly as a checkride is. Derived here")
+    L.append("--     as `req and slots_of_section >= len(codes)`, so a section that ever")
+    L.append("--     prescribed 2 solos over 2 candidates would join it with no new code.")
+    L.append("-- MIRROR: app/app.js → WA.soloSlotCodes() / WA.soloOnlyCodes().")
+    L.append("create or replace function wa.solo_slot_codes() returns text[]")
+    L.append("language sql immutable " + SQL_PIN + " as $$")
+    L.append("  select array[%s]::text[]" % ",".join(sq(c) for c in solo_codes))
+    L.append("$$;")
+    L.append("")
+    L.append("create or replace function wa.solo_only_codes() returns text[]")
+    L.append("language sql immutable " + SQL_PIN + " as $$")
+    L.append("  select array[%s]::text[]" % ",".join(sq(c) for c in solo_only_codes)
+             if solo_only_codes else "  select array[]::text[]")
     L.append("$$;")
     L.append(SQL_END)
     return "\n".join(L)
@@ -471,6 +507,17 @@ def main():
                 "req": bool(g.get("solo_required")),
                 "codes": codes,
             })
+
+    # ROUND 22 — the two code sets the server's solo refusals are judged against.
+    # See the comment block emitted beside wa.solo_slot_codes() below.
+    solo_codes = sorted({c.upper() for sl in slots for c in sl["codes"]})
+    _n_slot = {}
+    for sl in slots:
+        _n_slot[sl["sec"]] = _n_slot.get(sl["sec"], 0) + 1
+    solo_only_codes = sorted({
+        c.upper() for sl in slots
+        if sl["req"] and _n_slot[sl["sec"]] >= len(sl["codes"])
+        for c in sl["codes"]})
 
     # ── THE SYLLABUS ORDER OF THE EIGHT CHECKRIDES (round 6) ─────────────
     # NOT a judgement call and NOT date order: the FILE ORDER of the sortie
@@ -774,7 +821,8 @@ def main():
     # \u2500\u2500 the SQL mirror, spliced into db/schema.sql between its markers \u2500\u2500\u2500\u2500
     block = sql_block(out_cats, eval_order, fc.get("generated", "?"),
                       idx.get("generated_at", "?"),
-                      log_sorties, ground, exams, [s["id"] for s in slots])
+                      log_sorties, ground, exams, [s["id"] for s in slots],
+                      solo_codes, solo_only_codes)
     with open(OUT_SQL, encoding="utf-8") as fh:
         sql = fh.read()
     if SQL_BEGIN not in sql or SQL_END not in sql:

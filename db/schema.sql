@@ -1239,6 +1239,60 @@ language sql immutable set search_path = public, wa, pg_temp as $$
   select case when p_id = any(array['JP190']::text[]) then true else false end
 $$;
 
+-- ── THE FIXED SOLO SLOTS (round 5, generated since round 12) ─────────────
+-- One slot per solo the stage prescribes — flow-chart Training Sections whose
+-- printed duration block says SOLO SORTIES > 0. F4301-06 prescribes TWO, so it
+-- carries two distinct slots. Hand-kept until round 12 opened the generator;
+-- it mirrored WA_SOLO_SLOTS by discipline alone, which is a drift that costs
+-- nothing to remove.
+-- MIRROR: app/items-catalog.js → WA_SOLO_SLOTS.
+create or replace function wa.solo_slots() returns text[]
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select array['C4790-91-S1','C4801-04-S1','C4901-05-S1','C5201-04-S1','C5301-04-S1','F4301-06-S1','F4301-06-S2','F4501-03-S1']::text[]
+$$;
+
+-- ── ROUND 22 — THE SORTIE CODES A SOLO SLOT CAN HOLD ───────────────
+-- RULING (2026-08-28): «Έβαλα την C4791 και έκανα save. Γιατί δεν
+-- ανανεώνεται στον πίνακα Flights;» — the solo slot and the Flights row for one
+-- sortie were two books for one flight. The CHECKRIDE PRECEDENT closes it:
+-- the fact is stored ONCE, in the Solo flights section, and the Flights table
+-- RENDERS it. These two arrays are what the refusal is judged against.
+--   solo_slot_codes  — the union of the slots' own pickers: every code any
+--     fixed solo slot can hold. A stored flights row naming one of these is
+--     refused only when THIS record's solo section already holds it, because
+--     a candidate that was not flown solo WAS flown dual and its row is true.
+--   solo_only_codes  — a SOLO BY DEFINITION: the section REQUIRES its solo
+--     and its picker offers no alternative, so nobody ever flies that code
+--     dual. Refused always, by name, exactly as a checkride is. Derived here
+--     as `req and slots_of_section >= len(codes)`, so a section that ever
+--     prescribed 2 solos over 2 candidates would join it with no new code.
+-- MIRROR: app/app.js → WA.soloSlotCodes() / WA.soloOnlyCodes().
+create or replace function wa.solo_slot_codes() returns text[]
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select array['C4791','C4802','C4803','C4902','C4903','C4904','C5202','C5203','C5302','C5303','F4301','F4302','F4303','F4304','F4305','F4501','F4502']::text[]
+$$;
+
+create or replace function wa.solo_only_codes() returns text[]
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select array['C4791']::text[]
+$$;
+-- ▲▲ GENERATED BLOCK ▲▲
+
+-- ══ THESE FOUR ROUNDS' FUNCTIONS LIVE **OUTSIDE** THE GENERATED BLOCK ═════
+-- ROUND 22 — A RELOCATION, AND THE TRAP IT DEFUSES. Rounds 14, 15, 18 and 19
+-- each added a HAND-WRITTEN function between the GENERATED-BLOCK markers above,
+-- where it read naturally beside the exams and the roster it belongs to. But
+-- tools/gen-items-catalog.py REPLACES EVERYTHING BETWEEN THOSE MARKERS: the
+-- next run of the generator — a syllabus correction, a new sortie — would have
+-- deleted all eight of them silently, and the deploy would have failed far
+-- from the cause (or, worse, succeeded against an older cloud that still had
+-- them). Nothing about them is generated, so they are moved out; the file
+-- order is unchanged relative to each other and every one of them still
+-- follows the functions it calls.
+-- The generator now also emits the search_path pin it used to drop (which
+-- would have failed the round-20 audit on the very next run), so the two
+-- halves of this file can no longer contradict each other by accident.
+
 -- ══ ROUND 14 — THE WEEKLY SERIES, AND HOW MANY TRIALS AN EXAM MAY HAVE ═════
 -- «στα ground exam να εχουμε 2nd trial, 3rd και να μπορουμε να βαλουμε τα ΕΕΘ
 --  με ΕΕΘ 1, ΕΕΘ 2 κλπ»
@@ -1364,19 +1418,6 @@ create or replace function wa.seniority_key(p public.people) returns text
 language sql immutable set search_path = public, wa, pg_temp as $$
   select wa.seniority_key(p.country, p.call_sign, p.last_name, p.first_name)
 $$;
-
--- ── THE FIXED SOLO SLOTS (round 5, generated since round 12) ─────────────
--- One slot per solo the stage prescribes — flow-chart Training Sections whose
--- printed duration block says SOLO SORTIES > 0. F4301-06 prescribes TWO, so it
--- carries two distinct slots. Hand-kept until round 12 opened the generator;
--- it mirrored WA_SOLO_SLOTS by discipline alone, which is a drift that costs
--- nothing to remove.
--- MIRROR: app/items-catalog.js → WA_SOLO_SLOTS.
-create or replace function wa.solo_slots() returns text[]
-language sql immutable set search_path = public, wa, pg_temp as $$
-  select array['C4790-91-S1','C4801-04-S1','C4901-05-S1','C5201-04-S1','C5301-04-S1','F4301-06-S1','F4301-06-S2','F4501-03-S1']::text[]
-$$;
--- ▲▲ GENERATED BLOCK ▲▲
 
 -- ══ ROUND 19 — THE INSTRUCTOR'S OWN CURRENCY (the FDMS bridge lane) ════════
 -- RULING (2026-08-26), verbatim: «στο link που θα στέλνουμε σε κάθε εκπαιδευτή
@@ -2238,6 +2279,40 @@ language sql immutable set search_path = public, wa, pg_temp as $$
     else false end
 $$;
 
+-- ══ ROUND 22 — DOES THIS RECORD'S SOLO SECTION ALREADY HOLD THAT SORTIE? ═══
+-- RULING (2026-08-28): «Έβαλα την C4791 και έκανα save. Γιατί δεν ανανεώνεται
+-- στον πίνακα Flights;» — the solo slot and the Flights row for one sortie were
+-- two books for one flight. The CHECKRIDE PRECEDENT applies: the fact is stored
+-- ONCE (in the Solo flights section, where who authorised it and the NG rule
+-- live) and the Flights table RENDERS it. This is the lookup the second of the
+-- two refusals is judged on — it returns the SLOT of the solo row that already
+-- holds that flight, so the refusal can name it, or null.
+--
+-- THE DATE IS PART OF THE QUESTION, AND THAT IS THE JUDGEMENT. «Two rows for one
+-- FLIGHT» is the harm the ruling names, and one flight is one sortie ON ONE DAY.
+-- A student who flew C4802 dual on the 5th and solo on the 12th flew TWO real
+-- sorties; refusing the dual one would refuse a flight that happened, which is
+-- the one thing this application must never do — and it needs no refusal, because
+-- the solo already holds the flow-chart POSITION and the dual row renders as the
+-- extra it is. So the refusal fires on the provable duplicate and on nothing else.
+-- An EMPTY solo slot holds nothing: a code is only «held» once the row is flown,
+-- exactly as a checkride slot is only flown once it has something in it. A solo
+-- with no date yet holds no DAY, so it cannot collide with one either.
+-- MIRROR: app/student.js → soloHolder(); app/app.js → WA.derivedSlots().
+create or replace function wa.solo_holder(p jsonb, p_code text, p_date text)
+returns text language sql immutable set search_path = public, wa, pg_temp as $$
+  select coalesce(e->>'slot', 'an additional solo')
+  from jsonb_array_elements(case when jsonb_typeof(p->'solo_flights') = 'array'
+                                 then p->'solo_flights' else '[]'::jsonb end) e
+  where jsonb_typeof(e) = 'object'
+    and not wa.slot_empty('solo_flights', e)
+    and nullif(trim(coalesce(e->>'sortie', '')), '') is not null
+    and upper(wa.norm_line(e->>'sortie')) = upper(wa.norm_line(p_code))
+    and nullif(trim(coalesce(e->>'date', '')), '') is not null
+    and (e->>'date') = p_date
+  limit 1
+$$;
+
 -- one entry, reduced to the keys its section allows (read-time repair)
 create or replace function wa.strip_entry(e jsonb, p_sec text) returns jsonb
 language sql immutable set search_path = public, wa, pg_temp as $$
@@ -2576,6 +2651,53 @@ begin
                          w || '.sortie',
                          format('%s is one of the eight checkrides — a checkride is recorded in the Evaluations section, where the syllabus order and the pass-attempt rule apply to it. Two rows for one flight would be two grades that can disagree.',
                                 upper(e->>'sortie')));
+
+          -- ══ ROUND 22 — AND THE SAME DOCTRINE FOR A SOLO, IN TWO TIERS ═══════
+          -- RULING (2026-08-28), the user's own words: «Έβαλα την C4791 και
+          -- έκανα save. Γιατί δεν ανανεώνεται στον πίνακα Flights;» A solo
+          -- is recorded in the Solo flights section; the Flights table renders
+          -- that record at the sortie's place in the flow chart and stores
+          -- nothing. A row here for the same sortie is the second book.
+          --
+          -- THE REFUSAL SET IS JUDGED FROM THE SYLLABUS, NOT ASSUMED, and the
+          -- syllabus has two shapes (spec §4y·3; app/app.js carries the same
+          -- judgement in prose):
+          --
+          -- TIER 1 — A SOLO BY DEFINITION. A Training Section whose solo is
+          --   REQUIRED and whose picker offers no alternative: the slot must be
+          --   filled and only one code can fill it, so nobody flies that code
+          --   dual, ever. Today that is exactly C4791, the stage's 1st SOLO.
+          --   Refused ALWAYS, by name — the checkride pattern, unchanged.
+          -- TIER 2 — A SOLO CANDIDATE. C4802 and C4803 are the two candidates
+          --   of a four-sortie section prescribing ONE solo: whichever was not
+          --   flown solo WAS flown dual, and its Flights row is the truth.
+          --   Refusing all 17 candidates by name would refuse a real flight,
+          --   which is the one thing this application must never do — so the
+          --   wider reading of the ruling was judged against, and this is the
+          --   record of it. The refusal fires only on the PROVABLE duplicate:
+          --   the same sortie ON THE SAME DAY as a flown solo of this record
+          --   (wa.solo_holder). A dual C4802 on another day is a second real
+          --   sortie: it is stored, and it renders as the EXTRA it is, because
+          --   the solo already holds the flow-chart position.
+          --
+          -- EXISTING ROWS ARE NOT DESTROYED. A record written before this round
+          -- that carries such a row keeps it — the keep-it-ask-for-it contract:
+          -- the client renders it as a marked EXTRA beside the derived row and
+          -- asks for it to be removed; nothing here rewrites anybody's record,
+          -- and nothing drops a row behind its owner's back. What is refused is
+          -- a SAVE that still contains one, which is the moment the owner is in
+          -- front of the form and can answer.
+          -- MIRROR: app/app.js → WA.soloOnlyRefusal / WA.soloTakenRefusal.
+          perform wa.chk(not (upper(wa.norm_line(e->>'sortie')) = any(wa.solo_only_codes())),
+                         w || '.sortie',
+                         format('%s is the stage''s 1st SOLO — a solo is recorded in the Solo flights section, where who authorised it and the NG rule live. Two rows for one flight would be two records that can disagree.',
+                                upper(wa.norm_line(e->>'sortie'))));
+          perform wa.chk(wa.solo_holder(p, e->>'sortie', e->>'date') is null,
+                         w || '.sortie',
+                         format('%s on %s is already recorded as the solo of %s — a solo is recorded in the Solo flights section, where who authorised it and the NG rule live. Two rows for one flight would be two records that can disagree.',
+                                upper(wa.norm_line(e->>'sortie')),
+                                coalesce(e->>'date', '—'),
+                                wa.solo_holder(p, e->>'sortie', e->>'date')));
 
           -- WHICH FLIGHT OF THAT CODE ON THAT DAY. Deliberate, never derived:
           -- an array index is a POSITION and this is a FACT, and there is no
@@ -3650,12 +3772,24 @@ begin
     -- upper(wa.norm_line(…)) so `c4101` and `C4101` cannot both be stored
     -- (identity only — the stored value is what the normalisation boundary
     -- made of it; the markers pass through upper() harmlessly).
+    -- ROUND 22 (WA-21 verify finding 6) — THE EMPTY-STRING EDGE, ALIGNED.
+    -- The client's rule is `String(x.s_category || "") || WA.normCode(x.sortie)`
+    -- (WA.curIdent): an EMPTY Σ falls through to the sortie. `coalesce` skips
+    -- only NULL, so a row carrying `"s_category": ""` identified itself as
+    -- «kind|‹nothing›|date|seq» here and as «kind|SORTIE|date|seq» there — two
+    -- rows the dialog printed as different could collide on the server, and two
+    -- the dialog printed as the same could both be stored. The RULING picks the
+    -- CLIENT's rule, so `nullif(…, '')` is added and the two agree by
+    -- construction. (No stored row carries the shape — curPayload never emits an
+    -- empty Σ — which is exactly why it had to be closed before one does.)
+    -- MIRROR: app/app.js → WA.curIdent.
     if k = 'currency' then
       seen := array[]::text[];
       for i in 0 .. jsonb_array_length(p->k) - 1 loop
         e := p->k->i;
         f := (e->>'kind') || '|' ||
-             coalesce(e->>'s_category', upper(wa.norm_line(e->>'sortie')), '') || '|' ||
+             coalesce(nullif(e->>'s_category', ''),
+                      upper(wa.norm_line(e->>'sortie')), '') || '|' ||
              (e->>'date') || '|' || coalesce(e->>'seq', '1');
         perform wa.chk(not (f = any(seen)), format('%s[%s]', k, i),
           format('this flight is already recorded (%s, %s, flight %s of the day) — give the second one its own number',
@@ -5449,6 +5583,72 @@ begin
   raise notice 'r20: search_path pinned on all % wa functions',
     (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'wa');
+end $$;
+
+
+-- ══ ROUND 22 (WA-21 verify finding 4) — THE MARKERS ARE A SUBSET, AND IT IS
+-- ══ ASSERTED, NOT MERELY WRITTEN DOWN ═════════════════════════════════
+-- wa.withsp_markers() is declared (§4x·2) as a SUBSET of wa.flight_kinds(): the
+-- three markers a with-SP currency row may carry in its `sortie` box ARE the R12
+-- flight-kind ids, and that is what makes the bridge join of §4x·6 a JOIN and not
+-- a translation table. Nothing enforced it. Add a fourth marker here, or rename a
+-- kind there, and the two lists drift apart silently — the join would then match
+-- nothing for that value and no error would ever be raised, which is the worst
+-- failure this file can have: a wrong answer with no complaint.
+-- SO IT FAILS THE DEPLOYMENT, WITH NAMES — the round-20 search_path audit's own
+-- pattern, for the same reason: an invariant a future round can break by accident
+-- must be checked by the machine, not remembered by a person. It reads the
+-- FUNCTIONS, so what it asserts is true of the DATABASE and not of this file.
+do $$
+declare bad text[];
+begin
+  select coalesce(array_agg(m order by m), '{}') into bad
+  from unnest(wa.withsp_markers()) m
+  where not (m = any(wa.flight_kinds()));
+  if coalesce(array_length(bad, 1), 0) > 0 then
+    raise exception 'wa.withsp_markers() is not a subset of wa.flight_kinds(): % — the with-SP markers ARE the R12 flight-kind ids (spec §4x·2) and the bridge join of §4x·6 depends on it; add the value to wa.flight_kinds() or take it out of wa.withsp_markers()',
+      array_to_string(bad, ', ');
+  end if;
+  -- and the two deliberate EXCLUSIONS stay excluded ON PURPOSE, not by accident:
+  -- 'syllabus' (a syllabus flight is named by its code) and 'other' (the
+  -- off-catalogue free text IS the other). Either one appearing in the marker
+  -- list is a mistake of exactly the same silent kind.
+  if 'syllabus' = any(wa.withsp_markers()) or 'other' = any(wa.withsp_markers()) then
+    raise exception 'wa.withsp_markers() must not contain «syllabus» or «other» — a syllabus flight is named by its code and the off-catalogue free text IS the other (spec §4x·2)';
+  end if;
+  raise notice 'r22: withsp_markers (%) is a subset of flight_kinds (%)',
+    array_to_string(wa.withsp_markers(), '/'), array_to_string(wa.flight_kinds(), '/');
+end $$;
+
+-- ══ ROUND 22 — THE SOLO CODE SETS ARE REAL SORTIES, AND SO IS THE REFUSAL ═══
+-- The two solo refusals of wa.validate_record are judged against two GENERATED
+-- arrays (wa.solo_slot_codes / wa.solo_only_codes, spliced out of the flow chart
+-- by tools/gen-items-catalog.py). A code in either of them that the flow chart
+-- does not know would be a refusal nobody could ever satisfy: the student would
+-- be told to record a sortie in a section whose picker cannot offer it. And
+-- solo_only ⊆ solo_slot holds by construction, so a run that broke it broke the
+-- derivation. Both are asserted, in the same pattern, for the same reason.
+do $$
+declare bad text[];
+begin
+  select coalesce(array_agg(c order by c), '{}') into bad
+  from unnest(wa.solo_slot_codes()) c
+  where wa.sortie_band(c) is null;
+  if coalesce(array_length(bad, 1), 0) > 0 then
+    raise exception 'wa.solo_slot_codes() names % sortie(s) the flow chart does not know: % — a solo candidate must be a real sortie of the printed chart (round 22; regenerate with tools/gen-items-catalog.py)',
+      array_length(bad, 1), array_to_string(bad, ', ');
+  end if;
+  select coalesce(array_agg(c order by c), '{}') into bad
+  from unnest(wa.solo_only_codes()) c
+  where not (c = any(wa.solo_slot_codes()));
+  if coalesce(array_length(bad, 1), 0) > 0 then
+    raise exception 'wa.solo_only_codes() is not a subset of wa.solo_slot_codes(): % — a solo BY DEFINITION is a solo CANDIDATE of some slot (round 22)',
+      array_to_string(bad, ', ');
+  end if;
+  raise notice 'r22: % solo candidate code(s), of which % refused by name always (%)',
+    coalesce(array_length(wa.solo_slot_codes(), 1), 0),
+    coalesce(array_length(wa.solo_only_codes(), 1), 0),
+    array_to_string(wa.solo_only_codes(), '/');
 end $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════

@@ -6704,6 +6704,24 @@ Student · Result (grade / NG / mission / awaiting-debrief chip) · #; counts
 line above; ambiguous and legacy rows wear marked chips; no control writes.
 Door tile sub becomes «your own flying · your logbook» (only where the payload
 carries the key — a pre-round-21 server draws no card and makes no promise).
+**PERFORMANCE — THE MEASURED NUMBER, AND THE TRADE IT BUYS (round 22, WA-21
+verify finding 5)**: the WA-21 verify timed `wa.instructor_dataset` at **3.3 s
+for a 930-row logbook** on the local stack. That is the cost of the shape this
+section chose deliberately, and the number belongs beside the choice: the SP
+lane migrates every ACTIVE student's record on read (`wa.migrate_record`, once
+per record via the lateral pattern) rather than reading a denormalised join
+table, because a stored projection is a second copy that eventually disagrees
+with its sources — the same argument that keeps the logbook out of the export
+and off the print sheet. **ACCEPTED AS THE TRADE, with the number attached**:
+one door, one round trip, at most one dataset call per page load, on a
+population bounded by the class sizes the squadron actually runs (≤31 records
+in scope + the caps of §4u). 930 rows is already several times a real
+instructor's stage. IF IT EVER STOPS BEING ACCEPTABLE the fix is named in
+advance and does not change the contract: cache the migrated record per
+(student, last_update) for the length of one request, which removes the second
+migration the students lane already pays for and leaves every projection
+identical. Not built — measured, judged and recorded.
+
 **Implementation note (recorded)**: the client re-projects the SELF lane from
 its own last-saved rows (the same migrated record the server projects — one
 truth, two projections), so a currency save updates the logbook without a
@@ -6843,6 +6861,357 @@ carry the clause). Schema changed → **COMMIT, DO NOT PUSH**.
    this round; the note that slice 3's landing surface (the logbook's fdms
    lane) now exists belongs to the next FDMS lane.
 
+## 4y. Round 22 (2026-08-28) — ONE FLIGHT, ONE RECORD: THE SOLO SLOT AND THE EIGHT CHECKRIDES RENDER INSIDE THE FLIGHTS TABLES
+
+TWO RULINGS (2026-08-28, record dated; verbatim):
+
+> «Έβαλα την C4791 και έκανα save. Γιατί δεν ανανεώνεται στον πίνακα Flights;»
+
+> «Στα flights δεν έχεις τις αξιολογήσεις — τις θέλουμε.»
+
+They are one question asked twice. The Flights tables draw the printed flow
+chart, and TWO KINDS OF SORTIE of that chart were not in them: a sortie flown
+SOLO (recorded in Solo flights) and the eight CHECKRIDES (recorded in
+Evaluations, and refused in the flights log by name since round 12). The first
+produced double bookkeeping — the user filled the C4791 solo, saved, and the
+Flights row for the same flight stayed grey and owed. The second produced a
+hole — the one surface that reads a stage in flow-chart order had eight gaps in
+it, and «what is this student still owed» came out eight short.
+
+**THE ANSWER IS THE CHECKRIDE PRECEDENT, GENERALISED: one fact, ONE stored row,
+and every other surface RENDERS it.** Nothing new is stored, nothing is
+duplicated, and no section loses ownership of its own record.
+
+### 4y·1. THE DERIVED ROW — WHAT IT IS, AND THE THREE INVARIANTS
+
+A **derived row** is a position of a Flights table whose flight is stored in
+another section of the same record. `WA.derivedSlots(sec, rec)` answers, for a
+whole record, «which positions of this log are filled from elsewhere, and what
+do they say», and every surface that draws or counts the log reads that one
+answer: the student's form, the admin's drill-down, the printed brief, the
+instructor's student card, the four counters and the nav rails.
+
+Three invariants, and they are the whole of the design:
+
+1. **NOTHING IS STORED.** A derived row has no index, never enters a payload,
+   never appears in an export, is never stamped and never counts as an entry.
+   `n` and `hours` deliberately ignore it: the row that holds the duration lives
+   in the section that stores it, and counting it here would count one flight's
+   hours twice. Rendering it or not rendering it leaves the stored bytes
+   identical.
+2. **IT IS NEVER EDITABLE.** The fact belongs to its own section. The row
+   carries no control of its own — only a **↗** that lands on the row which
+   owns it, because the answer to «why can I not edit this» has to be one click
+   from the question.
+3. **IT WINS ITS POSITION.** A stored flights row naming the same sortie cannot
+   claim it (`WA.claims` takes the derived keys in a pass 0, before either of
+   round 13's two passes). A legacy carrier that predates the refusal therefore
+   falls back to being a marked **EXTRA** — kept, visible, asked for, never
+   destroyed and never mistaken for the planned pass.
+
+**THE TREATMENT IS THE HOUSE MUTED ONE, NOT A FIFTH COLOUR.** The four state
+washes keep their meaning — a flown checkride is green like any flown sortie,
+an unflown one is grey like any owed row. What marks a row as derived is the
+dashed left rule, the muted italic cells and a chip naming the owning section
+(«checkride — recorded in Evaluations» · «recorded in Solo flights»). The state
+word is still in the last cell, so paper, a monochrome print and a screen
+reader get the same answer as the eye.
+
+### 4y·2. THE EIGHT CHECKRIDES REJOIN THE CHART — AS POSITIONS, NOT ROWS
+
+`WA.slotDefs('flights')` now carries all 133 flow-chart sorties per band
+instead of the checkride-less 125, each checkride position marked `ck`. **The
+aircraft denominator goes 77 → 85** (contact 32→36, instrument 12→14,
+formation 21→22, navigation 12→13); **the SIMULATOR tables gain none**, because
+none of the eight is an F/S sortie — verified against the generated catalogue,
+not assumed. The four `X in the syllabus` tooltips say how many of their rows
+are checkrides and why those cannot be typed into.
+
+WHAT DOES NOT MOVE:
+
+- **The R12 refusal stands verbatim.** A stored `flights`/`fs` row naming one
+  of the eight is refused by name, in the same sentence, unchanged.
+- **The picker is unchanged.** `WA.logPickList` still filters `!s.k`: a
+  position nobody may type into needs no option in the dropdown.
+- **No checkride placeholder is ever seeded.** `ensureLogSlots` skips `ck`
+  defs — seeding one would mint a row the server refuses by name and hand the
+  student a box for a flight this section may not hold.
+- **`WA.slotKey` returns null for a `ck` position**, so no stored row can ever
+  claim one, on any surface, whatever it says.
+
+A checkride's derived row reads the **OPERATIVE attempt** (`WA.evalOperativeOf`
+— round 11's pass rule), so the log cannot print a grade the Evaluations table
+disowns: `done` when it has a date AND the operative attempt passed (60 % on the
+printed scale — the flights table's own «the mission was completed»),
+`started` otherwise. A slot nobody has flown produces no derived row at all: the
+position renders plainly OWED, read-only.
+
+### 4y·3. THE SOLOS — AND THE REFUSAL SET, JUDGED FROM THE SYLLABUS
+
+Every **FILLED** solo row that names a sortie this log has a position for
+derives that position — the eight fixed slots AND an «additional solo», because
+a solo recorded is a solo recorded and the double bookkeeping is identical
+either way. A filled slot with no sortie chosen yet names no position and
+derives nothing; clearing the solo returns the position to an ordinary editable
+owed slot on the same keystroke. `done` when the row has its date, the person
+who authorised it and either NG (nobody could score it) or a passing grade.
+
+Item 1(b) of the ruling asks for the refusal set to be **judged** from the
+syllabus and the judgement **recorded**. It is in two tiers, because the
+syllabus itself has two shapes.
+
+**TIER 1 — A SOLO BY DEFINITION. Refused ALWAYS, by name.** A Training Section
+whose solo is REQUIRED and whose picker offers no alternative: the slot must be
+filled and only one code can fill it, so nobody flies that code dual, ever.
+Today that is **exactly one code — C4791**, the stage's 1st SOLO (section
+C4790-91, `req`, candidates: C4791 alone). It is the exact parallel of a
+checkride: the flow chart leaves no other way to fly it. Generated as
+`req && slots_of_section >= len(codes)` (`wa.solo_only_codes()` /
+`WA.soloOnlyCodes()`), so a section that ever prescribed 2 solos over 2
+candidates would join it without a line of new code.
+Sentence: *«C4791 is the stage's 1st SOLO — a solo is recorded in the Solo
+flights section, where who authorised it and the NG rule live. Two rows for one
+flight would be two records that can disagree.»*
+
+**TIER 2 — A SOLO CANDIDATE. Refused only on the PROVABLE duplicate.** The 17
+solo-candidate codes (`wa.solo_slot_codes()`) are NOT inherently solos: C4802
+and C4803 are the two candidates of a four-sortie section prescribing ONE solo,
+so whichever was not flown solo WAS flown dual and its Flights row is the truth.
+**THE WIDER READING OF THE RULING WAS JUDGED AGAINST, AND THIS IS THE RECORD OF
+IT**: refusing all 17 by name would refuse a real flight, which is the one thing
+this application must never do. «Two rows for one FLIGHT» is the harm the ruling
+names, and one flight is one sortie ON ONE DAY — so the refusal fires when this
+record's own solo section already holds that sortie **on that date**
+(`wa.solo_holder(p, code, date)`), and on nothing else. A dual C4802 on another
+day is a second real sortie: it is stored, and it renders as the EXTRA it is,
+because the solo already holds the flow-chart position. The form says so on the
+keystroke — a REFUSAL flag where the day matches, a WARNING flag («this row is a
+second, later sortie … it is shown as an EXTRA; nothing is refused») where it
+does not.
+Sentence: *«C4802 on 2026-08-25 is already recorded as the solo of C4801-04-S1 —
+a solo is recorded in the Solo flights section …»*
+
+**EXISTING ROWS ARE NEVER DESTROYED** — the keep-it-ask-for-it contract. A
+record written before this round that carries such a row keeps it: it renders as
+a marked EXTRA beside the derived row, the form asks for it, and nothing rewrites
+anybody's record. What is refused is a SAVE that still contains one, which is the
+moment its owner is in front of the form and can answer.
+
+### 4y·4. THE LIVE FOLLOW — WHY THE RULING'S «δεν ανανεώνεται» IS ANSWERED NOW
+
+A solo filled in and a checkride recorded change positions of the FLIGHTS table
+while the student is standing in a different card, so no row-level refresh of
+their own section can reach it. `student.js` fingerprints the derived map after
+every edit (`syncDerived`, 8 checkrides + 9 solo rows — a string compare on the
+common keystroke) and, on the edit that moves it, redraws the two log sections
+whole. The box being typed into is in neither of them, so nothing loses its
+focus or its caret. The baseline is taken from the FIRST render, so the first
+keystroke of a session does not rebuild two tables that have not moved.
+
+**AND THE PLACEHOLDER STAYS UNDERNEATH.** `ensureLogSlots` deliberately asks
+`WA.claims(sec, list)` **without** the record — «which positions does a ROW OF
+THIS SECTION hold», not «which are spoken for». Skipping the seed under a
+derived position was tried and is a defect, caught in the live verify: clear the
+solo and the position had no placeholder to fall back to, so **the C4791 row
+vanished from the table** instead of returning to owed — and the record
+fingerprint would have moved every time a solo was filled or emptied, marking the
+form dirty for a row nobody typed. The placeholder is therefore always there,
+always unstored (`WA.slotOwed` drops it from the payload), and drawn only when
+nothing else holds its place.
+
+### 4y·5. THE SIX WA-21 VERIFY FINDINGS
+
+1. **The «Other…» free-text pair no longer escapes its cell.** The box and its
+   «list» way back were bare siblings in a `white-space: nowrap` cell: the input
+   took its intrinsic width, the button was pushed past the cell edge and at
+   1280 px came to rest under the # column's seq box — painted over and not
+   clickable across most of its face. They are ONE control now
+   (`<span class="freewrap">`), laid out as a **block-level flex with
+   `width: 100%`** — a block box in a table cell resolves its percentage against
+   THE CELL, so the pair can never render wider than its column, not even when
+   the auto table layout hands the cell less than its content asks for. The
+   input is the part that gives (`min-width: 0`); the button never shrinks and
+   never moves. The cell (`td.wcell`) carries a `min-width` floor and may grow
+   downwards, so the legacy Σ-claim chip stacks above the pair instead of
+   shoving it sideways.
+2. **The currency save dialog is per-kind truthful.** Round 20 had one kind of
+   row, so one sentence was true. Round 21 gave the section two, and a Σ category
+   became a property of exactly one of them — yet the dialog still told every
+   signer «each row names the Σ category … and the E-items», false in front of
+   every with-SP row, on the one screen where the claim is SIGNED. `curSaveWhat()`
+   now reads the rows about to be stored and describes those: the Σ half only
+   where a Σ is really there, the sortie half only where a sortie is, both (with
+   counts) when both are.
+3. **The off-catalogue promise is honest.** Every «Other…» tooltip said the typed
+   code was «saved as typed». It is not: `sortie` / `slot` / `evaluation` /
+   `flight_code` are `wa.code_fields()` and go through `wa.norm_code` =
+   `upper(wa.norm_line(t))`, so `c4302` is STORED `C4302`. One sentence now, in
+   `WA.OFFCAT_SAVED`, used by every code box on both forms: «saved in capitals,
+   exactly as the log prints it … and leading and trailing spaces are trimmed».
+   The free-text fields that are NOT codes (a course code, a note) keep their own
+   wording, because for them the old promise was true.
+4. **`wa.withsp_markers() ⊆ wa.flight_kinds()` is now an executable assert.**
+   §4x·2 declares the three with-SP markers to BE the R12 flight-kind ids — that
+   is what makes the bridge join of §4x·6 a join and not a translation table —
+   and nothing enforced it. Add a fourth marker, or rename a kind, and the lists
+   drift silently: the join then matches nothing and no error is ever raised,
+   which is the worst failure this file can have. A deploy-time `do $$` block
+   FAILS with names, in the round-20 search-path audit's own pattern, and a
+   second clause refuses the two deliberate exclusions (`syllabus`, `other`) if
+   they ever appear. A companion block asserts that every
+   `wa.solo_slot_codes()` entry is a sortie the flow chart knows (a refusal
+   nobody could satisfy would otherwise be shippable) and that
+   `solo_only ⊆ solo_slot`.
+5. **The 3.3 s / 930-row logbook measurement is recorded in §4x·5** as the
+   accepted trade, with the number attached and the named fix held in reserve
+   (per-request cache keyed on (student, last_update)).
+6. **The `s_category = ''` identity edge is aligned on the CLIENT's rule.**
+   `WA.curIdent` falls through an empty Σ to the sortie; the server's
+   `coalesce(e->>'s_category', …)` skipped only NULL, so a row carrying
+   `"s_category": ""` identified itself two different ways. One line —
+   `nullif(e->>'s_category', '')` — and the two agree by construction. Proven
+   with a **mirror fixture**: 12 rows through `WA.curIdent` and through the
+   server's expression produce byte-identical identity lists; the pre-fix
+   expression collapsed a C4101 and a **C4102** of the same day into one
+   identity, i.e. it would have refused a second, real flight.
+
+### 4y·6. THE GENERATOR TRAP, FOUND AND DEFUSED (not asked for, and it would have broken the next deploy)
+
+`tools/gen-items-catalog.py` REPLACES everything between the GENERATED-BLOCK
+markers of `db/schema.sql`. Rounds 14, 15, 18 and 19 had each added a
+**hand-written** function inside those markers, where it read naturally beside
+the exams and the roster it belongs to — eight functions in all
+(`wa.exam_series`, `wa.series_label`, `wa.exam_trials`, `wa.exam_pass_min`,
+`wa.exam_passed`, `wa.natkey`, `wa.seniority_key` ×2). And round 20's
+search-path sweep pinned the ten GENERATED functions **in the schema file only**,
+never in the generator that writes them.
+
+So the next run of the generator — a syllabus correction, one new sortie — would
+have **silently deleted 126 lines of live schema** and **unpinned ten wa
+functions**, and the deploy would have failed at the round-20 audit, far from the
+cause. Verified by running it: 10 insertions, 136 deletions.
+
+Both halves are closed. The eight hand-written functions are RELOCATED below the
+`▲▲ GENERATED BLOCK ▲▲` marker (a pure relocation — same relative order, every
+one still defined after what it calls), and the generator emits
+`set search_path = public, wa, pg_temp` on every function it writes (`SQL_PIN`).
+Re-run afterwards, the generator's diff against the schema is **exactly the two
+new functions and nothing else**, and `app/items-catalog.js` comes back
+byte-identical (md5 unchanged).
+
+### 4y·7. DELTA — SCHEMA · CLIENT · BUSTERS · GATE
+
+**Schema**: +3 functions (`wa.solo_slot_codes`, `wa.solo_only_codes` generated;
+`wa.solo_holder` hand-written) → the r20 audit now prints **«search_path pinned
+on all 117 wa functions»**; +2 refusals in the flights/fs branch of
+`wa.validate_record`; the `nullif` in the currency identity; +2 deploy-time
+audit blocks. The token-echo SELECT is still the LAST statement.
+
+**Client**: `WA.derivedSlots` / `derivedKeys` / `derivedTag` / `derivedTip` /
+`derivedGradeText` / `derivedJump` / `DERIVED_SRC`; `WA.soloSlotCodes` /
+`soloOnlyCodes` / `isSoloOnlyCode` / `soloOnlyRefusal` / `soloTakenRefusal`;
+`WA.OFFCAT_SAVED`. `WA.claims` / `stateCounts` / `slotRows` take an optional
+trailing **record** — omitted, every one of them behaves exactly as it did
+before this round, which is what keeps an older caller correct. `stateCounts`
+gains `derived`. New surfaces: the derived `<tr>` and the read-only unflown-
+checkride `<tr>` on the student form, the derived row and its Source cell in the
+admin drill-down, the derived line on the printed brief, «N recorded elsewhere»
+on the admin card and the instructor card, and the `data-jump` handler.
+
+**Cache-busters (touched-only)**: `app.js`, `student.js`, `admin.js`,
+`instructor.js`, `styles.css` → `?v=20260828b`. `config.js`,
+`items-catalog.js` and `currency-catalog.js` are byte-identical and unbumped.
+
+**Deployment gate — THE SCHEMA GOES FIRST**, through the §4φ Supabase MCP gate:
+the main session runs `db/schema.sql` on the cloud in batches, the token-echo
+SELECT stays the LAST statement for the batch splitter, then the app
+(`?v=20260828b`). **ONE gate covers BOTH round 21 and round 22** — this commit
+stacks on the unpushed WA-21 commit and the branch is TWO AHEAD of
+`origin/main`. Schema changed → **COMMIT, DO NOT PUSH.**
+
+### 4y·8. SELF-VERIFICATION — RUN LIVE ON THE LOCAL STACK (all PASS)
+
+1. **The ruling's own scenario, end to end.** On a student whose record was
+   `{}`: the C4791 position rendered as an editable owed slot; filling the solo
+   slot (sortie · date · grade 82 · instructor) turned the **Flights C4791 row
+   flown/green on the keystroke** — «C4791 | 20/08/2026 | ALPHA | — | 82 % |
+   Mission complete | recorded in Solo flights», zero controls — the block count
+   went `done 0 · owed 36` → `done 1 · owed 35` and the rail `85 owed` → `84
+   owed`. Saved through the real form; **the stored record's `flights` array came
+   back EMPTY** (no derived row, no placeholder); reloaded, the derived row
+   rendered identically from the server's own copy. The fixture was then restored
+   byte-exactly (md5 `99914b93…`, `last_update` / `created_at` / `updated_at` /
+   `entered_by` all as found).
+2. **The raw-RPC refusals, through `public.save_student_record`**: a C4791
+   flights row → *«C4791 is the stage's 1st SOLO …»* (400); a C4802 row on the
+   same day as the record's own C4802 solo → *«C4802 on 2026-08-25 is already
+   recorded as the solo of C4801-04-S1 …»* (400); a C4590 row → the R12
+   checkride sentence, **verbatim and unchanged** (400).
+3. **The refusal does not over-fire**: `C4802` on ANOTHER day is accepted; an
+   EMPTY solo slot blocks nothing; `C4101` is accepted; the C4791 SOLO ITSELF is
+   accepted; `c4791` lower-case and a `repeat`-kind C4791 are both refused (the
+   code is a solo however the row is labelled).
+4. **Clear → the position comes back.** Live, without a save: clearing the solo
+   returned the C4791 row to an editable owed slot (5 controls), `owed 27 → 28`,
+   rail `69 → 70`, and the table still held all 36 contact positions; refilling
+   it returned it to derived/green. This is the defect §4y·4 records — it was
+   caught here and fixed.
+5. **The checkrides render at their flow-chart positions** — the demo record with
+   all 8 checkrides and all 8 solos shows **16 derived rows**, `Flights 69 owed`
+   of 85, C4590 and C4790 in place between C4403 and C4601 / C4602 and C4791. The
+   ↗ on C4590 lands on `evaluations:0` and flashes it; the ↗ on C4791 lands on
+   `solo_flights:0`.
+6. **The pass-attempt rule is what the log prints**: a checkride graded 41 reads
+   `started`; a later attempt at 71 makes the row `done` with grade 71 and
+   `attempts: 2`.
+7. **Derived rows change no stored byte**: `WA.recordFingerprint` and
+   `JSON.stringify` of a record are identical before and after every render path
+   runs over it; `WA.filled` sees none; the F/S log gains none (0 derived, slot
+   count still 48).
+8. **A legacy carrier is kept and marked**: a stored flights row naming a derived
+   sortie does not claim the position, reads `extra`, and is counted as one.
+9. **Every surface agrees.** Student form 9 derived / `done 9 · owed 27`; admin
+   drill-down 16 derived rows with a Source column; printed brief prints them
+   («C4590 (checkride — recorded in Evaluations) … done») and its heading reads
+   `done 16 · started 0 · owed 69`; the admin card line reads «Flights · 69 of 85
+   owed · 16 recorded elsewhere».
+10. **Finding 1**: at 1280 px the «list» button sits inside its cell, does not
+    overlap the seq box, and is live at **6/6 probe points across its face** —
+    and stays 6/6 when the column is force-squeezed to 150 px and to 110 px.
+11. **Finding 6**: 12-row mirror fixture — client and server identity lists
+    byte-identical; the pre-fix server expression collapsed three distinct rows
+    (including a C4101 and a C4102) into one identity.
+12. **Schema x2, `ON_ERROR_STOP=1`, exit 0 both**, 0 SQL ERROR/FATAL lines; the
+    audits print «r20: search_path pinned on all 117 wa functions», «r22:
+    withsp_markers (repeat/fcf/cef) is a subset of flight_kinds», «r22: 17 solo
+    candidate code(s), of which 1 refused by name always (C4791)».
+13. **Hygiene**: `node --check` clean on all seven client files and
+    `ast.parse` on the generator; **zero console errors** on the student form,
+    the admin (overview / analysis / brief) and both instructor doors; the local
+    demo left exactly as found — all four `student_records` md5 + `last_update`
+    unchanged, `instructor_records` md5 unchanged, roster counts 25/16/1
+    unchanged; privacy grep over all tracked files: 0 real-person hits.
+
+### 4y·9. OPEN ITEMS THE ROUND LEAVES, BY NAME
+
+1. **The aircraft denominator moved, 77 → 85**, and every historical sentence in
+   this spec that says «77 aircraft sorties» describes the pre-round-22 shape.
+   Not rewritten — the record of what each round did stays what it said — but a
+   reader comparing §4m to a live screen should read this line.
+2. **A derived row shows no DURATION.** Neither an evaluation nor a solo row
+   stores one, so the cell says «—» with the reason in its tooltip, and the
+   block's `h` total does not include those flights. If the squadron wants the
+   hours of a checkride and a solo in the log's total, the fields have to be
+   added to those two sections first — a ruling, not an inference.
+3. **The instructor's «N recorded elsewhere» line** was verified through the
+   admin's identical code path; the demo roster has no instructor scoped to the
+   one class whose students hold records, so it was not seen on that surface with
+   a non-zero count.
+4. **Tier 2 is date-scoped by judgement** (§4y·3). If the squadron would rather
+   have the wider refusal — any solo-candidate row whose position the solo
+   already holds — it is one predicate, and it should be a ruling, because it
+   refuses records that are true.
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -6862,7 +7231,17 @@ carry the clause). Schema changed → **COMMIT, DO NOT PUSH**.
    `done X · started Y · owed Z · extra N` on every block header. **An untouched
    slot is stored NOWHERE**; a slot row is cleared (⌫) rather than deleted, and
    the extras — repeats, FCF, CEF, same-day re-flies, off-catalogue rows — render
-   after the slots in date order. The same form, bound to somebody else, is what
+   after the slots in date order.
+   **Round 22 (§4y): TWO KINDS OF ROW ARE READ FROM ELSEWHERE.** The aircraft
+   count is now **85, not 77** — the eight CHECKRIDES have their place in the
+   chart again — and any sortie flown SOLO shows there too. Both render as
+   **derived read-only rows** in the house muted treatment, at their flow-chart
+   position, with the owning section named on the row («checkride — recorded in
+   Evaluations» · «recorded in Solo flights») and a **↗** that lands on the row
+   which holds the fact. They store nothing, are never editable, never enter a
+   payload or an export, and never count as entries — but they are **not owed**,
+   so the four counts, the block headers and the nav rails follow them.
+   The same form, bound to somebody else, is what
    **the admin** fills in on a student's behalf (§4s·4 — the admin is the flight
    commander and the developer, **not** the squadron CO).
 2. **Instructor link — round 20 (§4v·2): it opens on a WELCOME PAGE, and then
@@ -7067,6 +7446,58 @@ carry the clause). Schema changed → **COMMIT, DO NOT PUSH**.
    button. That rename lives in the database and **only** there.
 
 ## 7. Open items
+
+- **ΑΠΟΦΑΝΣΕΙΣ 2026-08-28 (Γύρος 22, §4y) — ΜΙΑ ΠΤΗΣΗ, ΕΝΑ ΑΡΧΕΙΟ.**
+  1. «*Έβαλα την C4791 και έκανα save. Γιατί δεν ανανεώνεται στον πίνακα
+     Flights;*» — το solo slot και η γραμμή Flights ήταν ΔΥΟ ΒΙΒΛΙΑ ΓΙΑ ΜΙΑ
+     ΠΤΗΣΗ. Με το προηγούμενο του checkride: το γεγονός αποθηκεύεται ΜΙΑ ΦΟΡΑ
+     (Solo flights) και ο πίνακας Flights το ΕΜΦΑΝΙΖΕΙ ως παραγόμενη (derived)
+     γραμμή, χωρίς τίποτα αποθηκευμένο — με σύνδεσμο ↗ στη γραμμή που το
+     κατέχει. Το owed, οι μετρήσεις και οι ράγες ακολουθούν, ΖΩΝΤΑΝΑ (χωρίς
+     save και reload).
+  2. «*Στα flights δεν έχεις τις αξιολογήσεις — τις θέλουμε.*» — οι ΟΚΤΩ
+     αξιολογήσεις παίρνουν τη θέση τους μέσα στους πίνακες Flights (77 → 85
+     αεροσκάφους· καμία στο F/S), ως derived read-only γραμμές που διαβάζουν
+     τον λειτουργικό κανόνα του γύρου 11. Η ΑΠΑΓΟΡΕΥΣΗ του R12 ΜΕΝΕΙ ΑΥΤΟΥΣΙΑ:
+     μια αξιολόγηση αποθηκεύεται ΜΟΝΟ στο Evaluations.
+
+  **Η ΚΡΙΣΗ ΓΙΑ ΤΗ ΛΙΣΤΑ ΑΠΑΓΟΡΕΥΣΗΣ** (§4y·3, ζητήθηκε ρητά): ΔΥΟ ΒΑΘΜΙΔΕΣ.
+  **C4791 πάντα** — μοναδικός υποψήφιος ενός ΥΠΟΧΡΕΩΤΙΚΟΥ solo, κανείς δεν την
+  πετάει με εκπαιδευτή, ακριβώς όπως ένα checkride. **Οι υπόλοιποι 16 υποψήφιοι
+  ΜΟΝΟ στο αποδείξιμο διπλότυπο**: ίδιο sortie ΤΗΝ ΙΔΙΑ ΗΜΕΡΑ με flown solo του
+  ίδιου αρχείου. Η ευρύτερη ανάγνωση ΘΑ ΑΡΝΙΟΤΑΝ ΠΤΗΣΗ ΠΟΥ ΕΓΙΝΕ (μια C4802 με
+  εκπαιδευτή άλλη μέρα — η C4803 πέταξε solo), και αυτό είναι το ένα πράγμα που
+  η εφαρμογή δεν επιτρέπεται να κάνει· εκεί δεν χρειάζεται άρνηση, γιατί το solo
+  κρατά ήδη τη θέση και η διπλή γραμμή εμφανίζεται ως EXTRA. Παλιές γραμμές ΔΕΝ
+  καταστρέφονται (legacy carrier, keep-it-ask-for-it).
+
+  **ΟΙ ΕΞΙ ΔΙΑΠΙΣΤΩΣΕΙΣ ΤΟΥ WA-21 ΚΛΕΙΝΟΥΝ** (§4y·5): το κουμπί «list» μένει
+  μέσα στο κελί του και είναι πατήσιμο σε όλο του το πλάτος· ο διάλογος save του
+  currency λέει την αλήθεια ΑΝΑ ΕΙΔΟΣ γραμμής· η υπόσχεση off-catalogue λέει
+  πλέον «κεφαλαία, όπως τυπώνει το log» (τα code πεδία περνούν από
+  `upper(wa.norm_line())`)· `wa.withsp_markers() ⊆ wa.flight_kinds()` γίνεται
+  εκτελέσιμο assert που ΡΙΧΝΕΙ ΤΟ DEPLOY με ονόματα· το 3.3s/930 γραμμές
+  καταγράφεται ως αποδεκτό trade στο §4x·5 με τον αριθμό δίπλα· και η ταυτότητα
+  `s_category=''` ευθυγραμμίζεται με τον κανόνα του client (μία γραμμή,
+  αποδεδειγμένη με mirror fixture 12 γραμμών).
+
+  **ΚΑΙ ΕΝΑ ΠΟΥ ΔΕΝ ΖΗΤΗΘΗΚΕ** (§4y·6): ο generator έτρωγε 8 χειρόγραφες
+  συναρτήσεις που ζούσαν μέσα στα GENERATED markers και ξεκάρφωνε 10
+  `search_path` pins — ο επόμενος δικός του κύκλος θα είχε σβήσει 126 γραμμές
+  ζωντανού σχήματος και θα είχε ρίξει το deploy στο audit του γύρου 20, μακριά
+  από την αιτία. Οι οκτώ μετακινήθηκαν έξω από τα markers, ο generator εκπέμπει
+  πλέον το pin, και το αποτέλεσμα επαληθεύτηκε byte-προς-byte (το
+  `items-catalog.js` γυρίζει ίδιο, το schema diff είναι ΜΟΝΟ οι δύο νέες
+  συναρτήσεις).
+
+  **ΑΝΟΙΧΤΑ** (§4y·9): ο παρονομαστής 77→85 (τα ιστορικά κείμενα των παλιών
+  γύρων μένουν όπως γράφτηκαν)· μια derived γραμμή ΔΕΝ δείχνει ώρες, γιατί ούτε
+  η αξιολόγηση ούτε το solo αποθηκεύουν duration — αν τις θέλουμε στο σύνολο
+  ωρών, θέλει απόφανση και πεδία στις δύο εκείνες ενότητες πρώτα· η γραμμή «N
+  recorded elsewhere» του εκπαιδευτή δοκιμάστηκε μέσω του ίδιου κώδικα στον
+  admin (το demo roster δεν έχει εκπαιδευτή στην τάξη με δεδομένα)· και η
+  ΒΑΘΜΙΔΑ 2 είναι κρίση — αν θέλετε ευρύτερη απαγόρευση, είναι ΑΠΟΦΑΝΣΗ, γιατί
+  αρνείται εγγραφές που είναι αληθινές.
 
 - **ΑΠΟΦΑΝΣΗ 2026-08-28 (Γύρος 21, §4x) — CONTINUATION / WITH SP, ΤΟ DEMO,
   ΚΑΙ ΤΟ MY FLIGHT LOGBOOK.** «*Στο flight επιλογές Continuation, With SP …

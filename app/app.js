@@ -1032,6 +1032,22 @@ WA.normLine = function (v) {
 };
 WA.normCode = function (v) { return WA.normLine(v).toUpperCase(); };
 
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 22 (WA-21 verify finding 3) — WHAT AN OFF-CATALOGUE CODE IS PROMISED.
+   Every «Other…» tooltip in this application used to say the typed code was
+   «saved as typed». It is not: a field named `sortie` / `slot` / `evaluation`
+   / `flight_code` goes through wa.norm_code at the normalisation boundary,
+   which is `upper(wa.norm_line(t))` — so `c4302` is STORED `C4302`, and a
+   promise that says otherwise is a small lie the very next screen exposes.
+   ONE SENTENCE, everywhere a code box can be typed into. The free-text fields
+   that are NOT codes (a course code, a note) keep their own wording, because
+   for them the old promise was true.
+   MIRROR: db/schema.sql → wa.code_fields / wa.norm_code. */
+WA.OFFCAT_SAVED =
+  "saved in capitals, exactly as the log prints it — every sortie code is stored " +
+  "upper-cased (type c4302 and the record holds C4302), and leading and trailing " +
+  "spaces are trimmed. Nothing else about it is changed, and it is shown marked.";
+
 WA.sortieOf = function (code) {
   if (!code) return null;
   if (!WA._sortieIx) {
@@ -1104,6 +1120,79 @@ WA.soloSlotTip = function (id) {
          " · the syllabus prescribes " + s.of + " solo" + (s.of === 1 ? "" : "s") +
          " here" + (s.req ? " (required)" : "") +
          " · candidate sortie" + (s.codes.length === 1 ? "" : "s") + ": " + s.codes.join(", ");
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 22 — WHICH SORTIE CODES BELONG TO A SOLO SLOT, AND WHICH ARE A SOLO
+   BY DEFINITION. THE JUDGEMENT, WRITTEN DOWN.
+   ──────────────────────────────────────────────────────────────────────────
+   RULING (2026-08-28): «Έβαλα την C4791 και έκανα save. Γιατί δεν ανανεώνεται
+   στον πίνακα Flights;» — the solo slot and the Flights row for one sortie
+   were two books for one flight. The CHECKRIDE PRECEDENT closes it: one fact,
+   one row, and the other surface renders it DERIVED.
+   Item 1(b) asks for the refusal set to be JUDGED from the syllabus. Here is
+   the judgement, in two tiers, because the syllabus itself has two shapes:
+
+   TIER 1 — A SOLO BY DEFINITION (refused ALWAYS, by name). A Training Section
+     whose solo is REQUIRED and whose picker offers no alternative: the slot
+     MUST be filled and only one code can fill it, so that code is never flown
+     dual by anybody. Today that is exactly ONE code — C4791, the stage's 1st
+     SOLO (section C4790-91, required, candidates: C4791 alone). It is the
+     exact parallel of a checkride: the flow chart leaves no other way to fly
+     it. The general form is `req && slotsOfSection >= codes.length`, so a
+     section that ever prescribed 2 solos over 2 candidates would join it
+     without a line of new code.
+
+   TIER 2 — A SOLO CANDIDATE (refused only when THIS record's own solo section
+     already names it). C4802 and C4803 are the two candidates of a four-sortie
+     section prescribing ONE solo: whichever was not flown solo WAS flown dual,
+     and its Flights row is the truth. Refusing all 17 candidates by name would
+     refuse a real flight — the one thing this application must never do. So
+     the refusal is the honest one: two rows for ONE flight.
+
+   MIRROR: db/schema.sql → wa.solo_slot_codes() / wa.solo_only_codes().
+   ══════════════════════════════════════════════════════════════════════════ */
+/* every code any fixed solo slot can hold — the union of the slots' pickers */
+WA.soloSlotCodes = function () {
+  if (WA._soloCodes) return WA._soloCodes;
+  const seen = {};
+  for (const s of WA.soloSlots()) for (const c of (s.codes || [])) seen[WA.normCode(c)] = true;
+  WA._soloCodes = Object.keys(seen).sort();
+  return WA._soloCodes;
+};
+/* the codes of TIER 1 — a solo by definition, wherever it is written */
+WA.soloOnlyCodes = function () {
+  if (WA._soloOnly) return WA._soloOnly;
+  const n = {};
+  for (const s of WA.soloSlots()) n[s.sec] = (n[s.sec] || 0) + 1;
+  const seen = {};
+  for (const s of WA.soloSlots()) {
+    if (!s.req || n[s.sec] < (s.codes || []).length) continue;
+    for (const c of (s.codes || [])) seen[WA.normCode(c)] = true;
+  }
+  WA._soloOnly = Object.keys(seen).sort();
+  return WA._soloOnly;
+};
+WA.isSoloOnlyCode = function (code) {
+  const c = WA.normCode(code);
+  return !!c && WA.soloOnlyCodes().indexOf(c) >= 0;
+};
+/* THE REFUSAL SENTENCES, written once — the server raises them and the form
+   says them before the server has to. The checkride sentence pattern, one
+   section over: WHAT it is · WHERE it lives · WHY two rows are a corruption.
+   MIRROR: db/schema.sql → the two solo refusals of wa.validate_record. */
+WA.soloOnlyRefusal = function (code) {
+  const c = WA.normCode(code) || String(code || "");
+  return c + " is the stage's 1st SOLO — a solo is recorded in the Solo flights section, " +
+    "where who authorised it and the NG rule live. Two rows for one flight would be two " +
+    "records that can disagree.";
+};
+WA.soloTakenRefusal = function (code, slotId, date) {
+  const c = WA.normCode(code) || String(code || "");
+  return c + (date ? " on " + fmtD(date) : "") +
+    " is already recorded as the solo of " + WA.soloSlotLabel(slotId) +
+    " — a solo is recorded in the Solo flights section, where who authorised it and the " +
+    "NG rule live. Two rows for one flight would be two records that can disagree.";
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1626,18 +1715,34 @@ WA.rowStateTip = function (sec, e, st) {
 };
 
 /* THE SLOT CATALOGUE OF ONE SECTION, in syllabus order — the flow chart for
-   the two flight logs (MINUS the eight checkrides, which are recorded in the
-   Evaluations section and must not exist twice), the 47 (group, course) pairs
-   for the lessons and the 8 exam groups. Built once and cached: it is derived
-   from the generated catalogue and cannot change while the page is open. */
+   the two flight logs, the 47 (group, course) pairs for the lessons and the 8
+   exam groups. Built once and cached: it is derived from the generated
+   catalogue and cannot change while the page is open.
+
+   ROUND 22 — THE EIGHT CHECKRIDES REJOIN THE FLIGHT LOG, AS POSITIONS.
+   RULING (2026-08-28): «Στα flights δεν έχεις τις αξιολογήσεις — τις
+   θέλουμε.» Until this round the flow chart was drawn into these tables MINUS
+   its eight checkrides, and the table said so; the effect was that the one
+   place the squadron reads a stage in flow-chart order had eight holes in it,
+   and «what is this student still owed» was answered short by eight.
+   WHAT DOES NOT CHANGE — WHERE THE FACT LIVES. A checkride is stored ONLY in
+   Evaluations, the R12 refusal stands verbatim, and nothing here is editable
+   or storable: `ck: true` marks a position whose ROW IS DERIVED (see
+   WA.derivedSlots) or, until it is flown, simply OWED. The number of aircraft
+   sorties the chart prescribes goes 77 → 85 and the four Contact / Instrument
+   / Formation / Navigation tables each gain their own; the SIMULATOR tables
+   gain none, because none of the eight is an F/S sortie.
+   THE DROPDOWN IS UNCHANGED (WA.logPickList still filters `!s.k`): a position
+   nobody may type into needs no option in the picker. */
 WA.slotDefs = function (sec) {
   WA._slotDefs = WA._slotDefs || {};
   if (WA._slotDefs[sec]) return WA._slotDefs[sec];
   const out = [];
   if (sec === "flights" || sec === "fs") {
     for (const t of WA.TRACKS) {
-      for (const s of WA.logPickList(sec, t)) {
-        out.push({ key: t + "|" + s.c, sec, track: t, code: s.c, sortie: s });
+      for (const s of WA.logSorties(sec, t)) {
+        out.push({ key: t + "|" + s.c, sec, track: t, code: s.c, sortie: s,
+                   ck: !!s.k });
       }
     }
   } else if (sec === "lessons") {
@@ -1671,7 +1776,15 @@ WA.slotCount = function (sec, track) {
    seq 1, and a code the track's own flow-chart list knows. A same-day re-fly
    (seq > 1), a repeat / FCF / CEF / other, and an off-catalogue code are all
    extras, and so is a course that is not a course OF ITS GROUP (the join key
-   is the PAIR — OJT is a course of four different groups). */
+   is the PAIR — OJT is a course of four different groups).
+   ROUND 22 — AND NEVER A DERIVED POSITION. A checkride position (`ck`) is
+   filled from Evaluations and from nowhere else, so a stored flights row
+   naming one may not take it: the server refuses such a row by name, and a
+   legacy carrier that predates the refusal renders as a marked EXTRA — kept,
+   visible, asked for, never destroyed and never mistaken for the planned
+   pass. The solo positions are blocked the same way but per RECORD, which is
+   why they are handled in WA.claims and not here (this function sees one row
+   and not the record it lives in). */
 WA.slotKey = function (sec, e) {
   if (!e || typeof e !== "object") return null;
   if (sec === "flights" || sec === "fs") {
@@ -1680,7 +1793,8 @@ WA.slotKey = function (sec, e) {
     const code = WA.normCode(e.sortie);
     if (!code || !e.track) return null;
     const k = e.track + "|" + code;
-    return WA.slotIndex(sec)[k] ? k : null;
+    const d = WA.slotIndex(sec)[k];
+    return (d && !d.ck) ? k : null;
   }
   if (sec === "lessons") {
     const c = WA.normLine(e.course);
@@ -1730,8 +1844,163 @@ WA.rowPlanned = function (sec, e) {
   if (WA.examSeries(e)) return true;
   return !!WA.exam(WA.normLine(e.exam));
 };
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUND 22 — THE DERIVED ROWS. ONE FACT, ONE ROW, TWO PLACES TO READ IT.
+   ──────────────────────────────────────────────────────────────────────────
+   TWO RULINGS (2026-08-28) and ONE mechanism:
+     «Έβαλα την C4791 και έκανα save. Γιατί δεν ανανεώνεται στον πίνακα
+      Flights;»   — the solo the student filled in stayed OWED in the log.
+     «Στα flights δεν έχεις τις αξιολογήσεις — τις θέλουμε.»
+                  — the eight checkrides were missing from the log entirely.
+
+   Both are the same shape: a flight whose ONE STORED ROW lives in another
+   section, and a Flights-table position that has to tell the truth about it
+   without owning it. So this function answers, for a whole RECORD, «which
+   positions of this log are filled from somewhere else, and what do they
+   say» — and every surface that draws or counts the log reads it.
+
+   THE THREE INVARIANTS, and they are the whole of the design:
+     · NOTHING IS STORED. A derived row has no index, is never in a payload,
+       is never exported, is never stamped and never counts as an entry. Render
+       it or do not render it: the stored bytes are identical either way.
+     · IT IS NEVER EDITABLE. The fact belongs to its own section; the row
+       carries a jump link to the row that owns it, and no control of its own.
+     · IT WINS ITS POSITION. A stored flights row naming the same sortie is
+       refused by the server (by name), and any legacy carrier that predates
+       the refusal falls back to being a marked EXTRA — kept, never destroyed.
+
+     → { [key]: { src, key, track, code, state, date, who, grade, ng,
+                  passed, attempts, sec, slot, i, label, why, jump } }
+   ══════════════════════════════════════════════════════════════════════════ */
+WA.DERIVED_SRC = {
+  evaluations: {
+    tag: "checkride — recorded in Evaluations",
+    tip: "One of the eight checkrides. It is recorded in the Evaluations section, where the " +
+         "syllabus order and the pass-attempt rule apply to it — this row READS that record " +
+         "and stores nothing. Two rows for one flight would be two grades that can disagree.",
+  },
+  solo_flights: {
+    tag: "recorded in Solo flights",
+    tip: "This sortie was flown SOLO. It is recorded in the Solo flights section, where who " +
+         "authorised it and the NG rule live — this row READS that record and stores nothing. " +
+         "Two rows for one flight would be two records that can disagree.",
+  },
+};
+WA.derivedSlots = function (sec, rec) {
+  const out = {};
+  if (!rec || typeof rec !== "object") return out;
+  if (sec !== "flights" && sec !== "fs") return out;
+  const ix = WA.slotIndex(sec);
+  const isD = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ""));
+
+  /* ── (1) THE EIGHT CHECKRIDES ────────────────────────────────────────────
+     The OPERATIVE attempt and not merely the latest (round 11's pass rule,
+     WA.evalOperativeOf) — the same row every other checkride surface reads,
+     so the log cannot print a grade the Evaluations table disowns. A slot
+     nobody has flown produces NOTHING: its position stays plainly OWED. */
+  const evRows = WA.evalRows(rec).filter((r) => r.flown && r.id);
+  for (const d of WA.EVALUATIONS) {
+    const op = WA.evalOperativeOf(evRows, d.id);
+    if (!op.row) continue;
+    const track = d.cat, key = track + "|" + d.id;
+    if (!ix[key] || !ix[key].ck) continue;      /* not a position of THIS band */
+    out[key] = {
+      src: "evaluations", sec: "evaluations", key, track, code: d.id,
+      i: op.row.i, slot: d.id, date: op.row.date || "", who: op.row.with || "",
+      grade: op.row.grade, ng: false, passed: op.passed, attempts: op.attempts,
+      /* DONE is the flights table's own word: everything the row asks for is
+         in AND the mission was completed. For a checkride «the mission was
+         completed» IS the pass-attempt rule — 60 % on the printed scale. */
+      state: (isD(op.row.date) && op.passed) ? "done" : "started",
+      label: d.id + " — " + d.name,
+    };
+  }
+
+  /* ── (2) THE SOLOS ───────────────────────────────────────────────────────
+     Every FILLED solo row that names a sortie this log has a position for —
+     the eight fixed slots AND an additional solo, because a solo recorded is
+     a solo recorded and the double bookkeeping is identical either way. A
+     filled slot with no sortie chosen yet names no position and derives
+     nothing. Later rows win, so a record that (wrongly) holds two solos of
+     one sortie shows the last one and the section itself refuses the pair. */
+  const solos = (rec && Array.isArray(rec.solo_flights)) ? rec.solo_flights : [];
+  solos.forEach((e, i) => {
+    if (!e || typeof e !== "object" || WA.slotEmpty("solo_flights", e)) return;
+    const code = WA.normCode(e.sortie);
+    if (!code) return;
+    const track = WA.codeTrack(code);
+    if (!track) return;
+    const key = track + "|" + code;
+    const d = ix[key];
+    if (!d || d.ck) return;             /* a checkride is never a solo slot */
+    const ng = !!e.ng;
+    const g = (e.grade === null || e.grade === undefined || e.grade === "")
+      ? null : Number(e.grade);
+    const who = String(e.instructor || "").trim();
+    out[key] = {
+      src: "solo_flights", sec: "solo_flights", key, track, code,
+      i, slot: e.slot || null, date: e.date || "", who,
+      grade: (g === null || !isFinite(g)) ? null : g, ng,
+      passed: ng || (g !== null && isFinite(g) && WA.gradePassed(g)),
+      attempts: 1,
+      /* the flights table's own DONE, read off a solo row: the date, the
+         person who authorised it, and either NG (nobody could score it) or a
+         grade that passed. Anything less is STARTED — the row is real and
+         unfinished, which is exactly what the light green says. */
+      state: (isD(e.date) && who && (ng || (g !== null && isFinite(g) && WA.gradePassed(g))))
+        ? "done" : "started",
+      label: WA.soloSlotLabel(e.slot),
+    };
+  });
+  return out;
+};
+/* the keys of one scope — what the owed arithmetic must subtract */
+WA.derivedKeys = function (sec, rec, track) {
+  const d = WA.derivedSlots(sec, rec);
+  return Object.keys(d).filter((k) => track == null || d[k].track === track);
+};
+/* ── HOW A DERIVED ROW SAYS WHAT IT IS ────────────────────────────────────
+   One vocabulary for the student's form, the admin's drill-down and the
+   printed brief, so three surfaces cannot describe the same row three ways.
+   The WORD names the section that owns the fact; the SENTENCE says why the
+   row is not editable here and what a second row would do to the record. */
+WA.derivedTag = function (d) {
+  return (d && WA.DERIVED_SRC[d.src] ? WA.DERIVED_SRC[d.src].tag : "recorded elsewhere");
+};
+WA.derivedTip = function (d) {
+  if (!d) return "";
+  const base = WA.DERIVED_SRC[d.src] ? WA.DERIVED_SRC[d.src].tip : "";
+  const bits = [d.label || d.code];
+  if (d.src === "evaluations") {
+    bits.push(d.attempts > 1
+      ? d.attempts + " attempts recorded — this is the operative one"
+      : "one attempt recorded");
+    if (d.grade !== null) bits.push(d.passed ? "passed" : "no successful attempt yet");
+  } else if (d.src === "solo_flights") {
+    bits.push(d.ng ? "non-graded (NG)" : (d.grade === null ? "no grade yet" : d.grade + " %"));
+    if (d.who) bits.push("authorised by " + d.who);
+  }
+  return base + " — " + bits.join(" · ") + ".";
+};
+/* the grade a derived row prints — the same words the log's own cells use */
+WA.derivedGradeText = function (d) {
+  if (!d) return "—";
+  if (d.ng) return "NG";
+  return (d.grade === null || d.grade === undefined) ? "—" : String(d.grade) + " %";
+};
+/* the jump target: section + the STORED index of the owning row, so the
+   surface can put the reader in front of the row that holds the fact */
+WA.derivedJump = function (d) {
+  return d ? (d.sec + ":" + d.i) : "";
+};
+
 /* WHO OCCUPIES EACH SLOT — in TWO PASSES, and the order of the passes is the
    whole of the rule.
+     0. A DERIVED POSITION (round 22) is taken before either pass runs: the
+        fact is stored in another section and no row of THIS one may claim it.
+        A stored row that names such a sortie therefore falls through to being
+        an EXTRA — which is what a legacy carrier is, and what the server now
+        refuses to create a new one of.
      1. A ROW SOMEBODY HAS WRITTEN IN takes the slot, first one in stored
         order. A second written row naming the same sortie is an EXTRA: the
         slot is the syllabus's ONE planned pass and a re-fly is not it.
@@ -1744,10 +2013,15 @@ WA.rowPlanned = function (sec, e) {
    Stored order never changes under a half-typed row, so both passes are
    deterministic. A placeholder that ends up claiming nothing is REDUNDANT: it
    is drawn nowhere and stored nowhere — see WA.slotOwed. */
-WA.claims = function (sec, list) {
+WA.claims = function (sec, list, rec) {
   const arr = Array.isArray(list) ? list : [];
   const taken = {}, claimed = new Array(arr.length).fill(false),
         keys = new Array(arr.length);
+  /* ROUND 22 — PASS 0. The derived positions are taken before anything else
+     may take them; `derived` marks them so a caller can tell a position filled
+     from another section from one filled by a row of this one. */
+  const derived = rec ? WA.derivedSlots(sec, rec) : {};
+  for (const k of Object.keys(derived)) taken[k] = true;
   for (let i = 0; i < arr.length; i++) keys[i] = WA.slotKey(sec, arr[i]);
   /* ROUND 14 — WHICH OF SEVERAL WRITTEN ROWS HOLDS THE SLOT.
      For the two flight logs and the lessons the answer is round 13's: the
@@ -1763,7 +2037,7 @@ WA.claims = function (sec, list) {
   const holder = {};
   for (let i = 0; i < arr.length; i++) {
     const k = keys[i];
-    if (!k || WA.slotUntouched(sec, arr[i])) continue;
+    if (!k || derived[k] || WA.slotUntouched(sec, arr[i])) continue;
     /* ROUND 14 — a PLANNED row with nothing in it does not take the slot away
        from the attempt that has something in it: a 2nd trial that has only
        been scheduled must not decide the colour of an exam already sat. */
@@ -1781,7 +2055,7 @@ WA.claims = function (sec, list) {
     if (!k || !WA.slotUntouched(sec, arr[i]) || taken[k]) continue;
     taken[k] = true; claimed[i] = true;
   }
-  return { claimed, keys, taken };
+  return { claimed, keys, taken, derived };
 };
 
 /* HAS ANYBODY TOUCHED THIS ROW? — the shape test, and the one the sparse rule
@@ -1898,15 +2172,23 @@ WA.rowState = function (sec, e, claimed) {
    rows: the student's form carries the placeholders and the admin's record does
    not, and both must reach the same number. Hours and the debrief lag count
    the TOUCHED rows only — a slot nobody has flown has flown no hours. */
-WA.stateCounts = function (sec, list, track) {
+WA.stateCounts = function (sec, list, track, rec) {
   const arr = Array.isArray(list) ? list : [];
-  const c = WA.claims(sec, arr);
+  const c = WA.claims(sec, arr, rec);
   const out = { done: 0, started: 0, owed: 0, extra: 0, hours: 0, lag: 0, n: 0,
                 /* ROUND 14 — how many SLOTS are complete, which is not the same
                    number as how many ROWS are: an exam sat three times has one
                    slot and up to three done rows, so every «X of 8» sentence
                    reads this and every «done X» reads the other. */
-                slotsDone: 0 };
+                slotsDone: 0,
+                /* ROUND 22 — how many of this scope's positions are filled from
+                   ANOTHER section. They are counted in done/started like any
+                   filled position (the sortie was flown, so it is not owed) and
+                   they are NOT entries: `n` and `hours` deliberately leave them
+                   alone, because the row that holds the duration lives in the
+                   section that stores it and counting it here would count one
+                   flight's hours twice. */
+                derived: 0 };
   let claimedN = 0;
   for (let i = 0; i < arr.length; i++) {
     const e = arr[i];
@@ -1929,9 +2211,19 @@ WA.stateCounts = function (sec, list, track) {
     if (sec !== "lessons" && WA.awaitingDebrief(e)) out.lag++;
   }
   out.hours = Math.round(out.hours * 10) / 10;
+  /* ROUND 22 — THE DERIVED POSITIONS, BEFORE THE OWED SUBTRACTION. A flown
+     checkride and a flown solo are not owed in this table: their colour is the
+     one their own section gives them, and the grey they used to wear was the
+     table saying a flight had not happened when the record says it had. */
+  for (const k of Object.keys(c.derived || {})) {
+    const d = c.derived[k];
+    if (track != null && d.track !== track) continue;
+    out.derived++; out[d.state]++; out.slotsDone += (d.state === "done") ? 1 : 0;
+  }
   /* += , not = : the catalogue's untouched slots PLUS the stored rows that are
      themselves owed (a Weekly exam on the programme and not yet sat) */
-  out.owed += Math.max(0, WA.slotCount(sec, track == null ? null : track) - claimedN);
+  out.owed += Math.max(0, WA.slotCount(sec, track == null ? null : track)
+                          - claimedN - out.derived);
   return out;
 };
 /* ── THE DISPLAY ORDER, AND IT IS ONE FUNCTION ────────────────────────────
@@ -1943,10 +2235,15 @@ WA.stateCounts = function (sec, list, track) {
    rows it was always the right rule for.
    The student's form, the admin's drill-down and the printed brief all call this,
    so the three cannot show the same record in three different orders.
-     → [{ def, e, i, state }]   i = the STORED index, -1 when nothing claims it */
-WA.slotRows = function (sec, list, track) {
+   ROUND 22 — and a position can now be filled from ANOTHER SECTION. Such a row
+   carries `derived` (the WA.derivedSlots record) and, deliberately, `e: null`
+   and `i: -1`: there is no stored row of THIS section behind it, and every
+   caller that maps a rendered row back to a stored one must keep missing.
+     → [{ def, e, i, state, derived? }]   i = the STORED index, -1 when nothing
+        of this section claims it */
+WA.slotRows = function (sec, list, track, rec) {
   const arr = Array.isArray(list) ? list : [];
-  const c = WA.claims(sec, arr);
+  const c = WA.claims(sec, arr, rec);
   const by = {}, alts = {}, series = [], extras = [];
   arr.forEach((e, i) => {
     if (track !== undefined && track !== null && (e.track || "") !== track) return;
@@ -1986,8 +2283,11 @@ WA.slotRows = function (sec, list, track) {
   for (const d of WA.slotDefs(sec)) {
     if (track !== undefined && track !== null && d.track !== track) continue;
     const hit = by[d.key];
-    out.push({ def: d, e: hit ? hit.e : null, i: hit ? hit.i : -1,
-               state: hit ? WA.rowState(sec, hit.e, true) : "owed" });
+    const der = (c.derived || {})[d.key];
+    out.push(der
+      ? { def: d, e: null, i: -1, derived: der, state: der.state }
+      : { def: d, e: hit ? hit.e : null, i: hit ? hit.i : -1,
+          state: hit ? WA.rowState(sec, hit.e, true) : "owed" });
     /* the other trials of this exam, immediately under it. `alt` marks them so
        a caller can render the trial badge and NOT a second slot header; `def`
        is repeated on purpose (it is the same exam), and nothing counts defs —
