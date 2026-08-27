@@ -814,6 +814,11 @@ WA.renderInstructor = async function (view, me, opts) {
       s_category: e.s_category || null,
       band: e.sortie ? WA.sortieBand(e.sortie) : null,
       kind: e.kind || null, seq: WA.curSeq(e),
+      /* ROUND 23 — a CURRENCY row stores no duration: it records WHAT was
+         flown, not for how long. The Hours column exists for the student-
+         entered lanes and a Self row honestly carries none. MIRROR:
+         wa.instructor_logbook → self_rows, which sends 'duration', null. */
+      duration: null,
       grade: null, ng: null, mission: null, student: null, match: null,
       ambiguous: false,
       legacy: WA.sCatIsLegacy(e.s_category) || (e.kind === "with_sp" && !!e.s_category),
@@ -905,6 +910,9 @@ WA.renderInstructor = async function (view, me, opts) {
             <th title="${esc("Self — your own row from the table above. SP — entered by the student on their own form. FDMS — a flown event of FDMS Progress, via the bridge (none yet).")}">Source</th>
             <th title="${esc("What was flown — the Σ category or sortie of a Self row, or the sortie the student logged.")}">Flight</th>
             <th title="${esc("Aircraft or simulator — read off the section the student's row sits in, or off the sortie code where it is known. A marker or off-catalogue text honestly derives nothing.")}">Band</th>
+            ${/* ROUND 23 — «Οι WA-21 logbook rows carry the duration where they
+                 already show flight data.» */ ""}
+            <th class="num" title="${esc("The time flown, from the student's own row. Your own rows carry none — a currency row records what was flown, not for how long.")}">Hours</th>
             <th title="${esc("The student whose form the row lives on — SP and FDMS rows only. Your own rows name no student, by design.")}">Student</th>
             <th title="${esc("The student row's grade, NG, or mission — read-only. Your own rows carry none: the grade belongs to the student.")}">Result</th>
             <th class="num" title="Which flight of that identity on that day">#</th>
@@ -914,6 +922,8 @@ WA.renderInstructor = async function (view, me, opts) {
             <td>${logSrcChip(r)}</td>
             <td>${logFlightCell(r)}</td>
             <td>${esc(r.band ? ((WA.logBand(r.band) || {}).short || r.band) : "—")}</td>
+            <td class="num">${r.duration === null || r.duration === undefined || r.duration === ""
+              ? `<span class="k">&mdash;</span>` : esc(r.duration)}</td>
             <td>${logStudentCell(r)}</td>
             <td>${logResultCell(r)}</td>
             <td class="num">${esc(Number(r.seq) || 1)}</td>
@@ -1780,6 +1790,29 @@ WA.renderInstructor = async function (view, me, opts) {
     const ids = inCur ? [] : dirtyIds();
     const curCh = (inCur && !curRO) ? curChanges() : [];
     if (!ids.length && !curCh.length) return;
+    /* ── ROUND 23 — THE REFUSAL COMES FIRST, ON THIS DOOR TOO ───────────────
+       The same pre-existing defect as the student's form (§4y·11·6): this
+       function showed «Save N?» and only then reached saveCurrency(), which
+       calls curIncomplete() and refuses — so the instructor confirmed a save
+       that did not happen. Leaving ONE door confirm-then-refusing while the
+       other validates first is exactly the drift the house rejects: one act,
+       two positions on the screen. saveCurrency() keeps its own guard — it is
+       reachable from saveAll() directly — and cannot drift, because both call
+       the SAME curIncomplete(). The assessment lane needs no twin: dirtyIds()
+       reports rows, it refuses nothing, and a card the SERVER refuses is
+       reported per card after the write, by design (round 14). */
+    if (inCur && !curRO) {
+      const bad = curIncomplete();
+      if (bad.length) {
+        const st = $("ins-status");
+        st.className = "st err";
+        st.textContent = "Currency not saved — " + bad[0].text +
+          (bad.length > 1 ? " (and " + (bad.length - 1) + " more)" : "");
+        toast(bad[0].text, true);
+        curMark(bad[0].i);
+        return;
+      }
+    }
     const before = {}, after = {};
     for (const sid of ids) { before[sid] = savedStateOf(sid); after[sid] = stateOf(sid); }
     /* ROUND 19 — the currency rows name themselves through the SAME builder

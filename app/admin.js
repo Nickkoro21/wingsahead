@@ -1155,6 +1155,15 @@ WA.renderAdmin = async function (view, me) {
     const list = Array.isArray(s.record.solo_flights) ? s.record.solo_flights : [];
     const bySlot = {};
     for (const e of list) if (e.slot) bySlot[e.slot] = e;
+    /* ROUND 23 — the PAIR mark, on the review surface too: two solos of one
+       sortie are marked on both rows in the student's own form, and a brief
+       that showed them clean would be the reviewer reading less than the
+       reviewed (§4y·11·1, and the round-23 principle of §4y·11·2). Same
+       function, same sentence. */
+    const soloFlag = (e) => {
+      const sf = (e && WA.soloRowFlag) ? WA.soloRowFlag(s.record, list.indexOf(e)) : null;
+      return sf ? ` <span class="cflag" title="${esc(sf.tip)}">${esc(sf.label)}</span>` : "";
+    };
     const out = WA.soloSlots().map((sl) => {
       const e = bySlot[sl.id];
       const flown = !!e && !WA.slotEmpty("solo_flights", e);
@@ -1162,7 +1171,8 @@ WA.renderAdmin = async function (view, me) {
         <td title="${esc(WA.soloSlotTip(sl.id))}"><b>${esc(sl.sec)}</b>${
           sl.of > 1 ? ` <span class="k">solo ${sl.n} of ${sl.of}</span>` : ""}${
           sl.req ? ` <span class="badge badge-warn">required</span>` : ""}</td>
-        <td>${flown && e.sortie ? WA.sortieCell(null, e.sortie) : `<span class="k">${esc(sl.codes.join(" / "))}</span>`}</td>
+        <td>${flown && e.sortie ? WA.sortieCell(null, e.sortie) + soloFlag(e)
+                                : `<span class="k">${esc(sl.codes.join(" / "))}</span>`}</td>
         <td>${flown ? esc(fmtD(e.date)) : `<span class="badge">not flown yet</span>`}</td>
         <td>${!flown ? "—" : (e.ng ? `<span class="badge">NG — non-graded</span>` : WA.pct(e.grade))}</td>
         <td>${!flown ? "—" : WA.soloWhoHTML(e)}</td>
@@ -1171,7 +1181,7 @@ WA.renderAdmin = async function (view, me) {
     for (const e of list) {
       if (e.slot && WA.soloSlot(e.slot)) continue;
       out.push(`<tr><td><span class="badge badge-acc">additional</span></td>
-        <td>${e.sortie ? WA.sortieCell(null, e.sortie) : "—"}</td>
+        <td>${e.sortie ? WA.sortieCell(null, e.sortie) + soloFlag(e) : "—"}</td>
         <td>${esc(fmtD(e.date))}</td>
         <td>${e.ng ? `<span class="badge">NG — non-graded</span>` : WA.pct(e.grade)}</td>
         <td>${WA.soloWhoHTML(e)}</td>${srcCell(e)}</tr>`);
@@ -1225,10 +1235,24 @@ WA.renderAdmin = async function (view, me) {
      SENTENCE is the row's: a Weekly exam and a minted re-sit are grey because
      they are on the programme, not because the flow chart prescribes them (they are not
      in it), and unlike a flow-chart slot they ARE stored. WA.rowStateTip. */
-  const stateCell = (st, sec, e) => {
+  const stateCell = (st, sec, e, att) => {
     const d = WA.rowStateDef(st);
-    return `<td><span class="stchip st-${esc(st)}" title="${esc(WA.rowStateTip(sec, e, st))}"
+    return `<td><span class="stchip st-${esc(st)}" title="${esc(WA.rowStateTip(sec, e, st, att))}"
       >${esc(d.label)}</span></td>`;
+  };
+  /* ── ROUND 23 — THE REVIEW SURFACE MUST NOT BE BLINDER THAN THE SURFACE
+     BEING REVIEWED (22b verify item 13). Two chips this drill-down did not
+     carry: the student's own ROW FLAG — track / band / checkride / SUSPECT /
+     off-catalogue, from WA.logRowFlag, the very function the form calls — and
+     the FAIL seam's reading chip. Same words, same rules, one place. */
+  const cflagOf = (band, e, rec) => {
+    const f = WA.logRowFlag(band, e, rec);
+    return f ? ` <span class="cflag" title="${esc(f.tip)}">${esc(f.label)}</span>` : "";
+  };
+  const attChip = (att, code) => {
+    if (!att || !(att.fails || []).length) return "";
+    return ` <span class="dchip" title="${esc(WA.attentionTip(att, code))}"
+      >${esc(WA.attentionTag(att))}</span>`;
   };
   function logRows(s, band, track) {
     return WA.slotRows(band, s.record[band], track, s.record).map((r) => {
@@ -1244,18 +1268,21 @@ WA.renderAdmin = async function (view, me) {
           <td><span title="${esc(WA.logSortieLabel(band, track, def.code, "syllabus") +
               (sd0.g ? " · Training Section " + sd0.g : "") +
               (sd0.h ? " · syllabus " + sd0.h + " h" : ""))}"><b>${esc(def.code)}</b></span>
-            <span class="dchip" title="${esc(WA.derivedTip(d))}">${esc(WA.derivedTag(d))}</span></td>
+            <span class="dchip" title="${esc(WA.derivedTip(d))}">${esc(WA.derivedTag(d))}</span>${
+            attChip(r.att, def.code)}</td>
           <td>${esc(fmtD(d.date))}</td>
           <td>${esc(d.who || "—")}</td>
-          <td class="num k" title="${esc("The time flown is recorded on the row that owns this flight, in the " +
-            WA.secLabel(d.sec) + " section — a second copy here could disagree with it.")}">&mdash;</td>
+          ${/* ROUND 23 — the hours, read from the row that owns the flight */ ""}
+          <td class="num k" title="${esc("Read from the row that owns this flight, in the " +
+            WA.secLabel(d.sec) + " section — the one place it is stored.")}">${
+            d.dur === null || d.dur === undefined || d.dur === "" ? "&mdash;" : esc(d.dur)}</td>
           <td>${esc(WA.derivedGradeText(d))}</td>
           <td>${d.ng || d.grade === null || d.grade === undefined
             ? `<span class="k">&mdash;</span>`
             : `<span class="mchip is-${esc(WA.gradeMission(d.grade))}" title="${esc("Read from the grade: " +
                 d.grade + " % is “" + WA.missionLabel(WA.gradeMission(d.grade)) +
                 "” (the 60 % threshold of ΠΔ 151/13)")}">${esc(WA.missionLabel(WA.gradeMission(d.grade)))}</span>`}</td>
-          ${stateCell(r.state)}
+          ${stateCell(r.state, band, null, r.att)}
           <td class="k" title="${esc("Not stored in this log at all — read from the " +
             WA.secLabel(d.sec) + " section, where the one row for this flight lives.")}">${esc(WA.secLabel(d.sec))}</td></tr>`;
       }
@@ -1265,18 +1292,21 @@ WA.renderAdmin = async function (view, me) {
            against it anywhere yet: an unflown checkride and, now, the stage's
            1st SOLO. Both name the section that will hold them, in the one
            vocabulary the student's form uses. */
+        /* ROUND 23 — `r.state`, not the hard-coded "owed": a position a FAIL
+           names reads STARTED, and the drill-down must say the same word the
+           counts in the heading above it are computed from. */
         const own = WA.slotOwner(d), meta = WA.DERIVED_SRC[own] || {};
-        return `<tr class="${own ? "is-derived " : ""}st-owed">
+        return `<tr class="${own ? "is-derived " : ""}st-${esc(r.state)}">
           <td><span title="${esc(WA.logSortieLabel(band, track, d.code, "syllabus") +
               (sd.g ? " · Training Section " + sd.g : "") +
               (sd.h ? " · syllabus " + sd.h + " h" : "") + (sd.nt ? " · night" : ""))}"
             ><b>${esc(d.code)}</b></span>${own
             ? ` <span class="dchip" title="${esc(WA.slotOwnerTip(d))}">${
-                esc(meta.tag || "recorded elsewhere")}</span>` : ""}</td>
+                esc(meta.tag || "recorded elsewhere")}</span>` : ""}${attChip(r.att, d.code)}</td>
           <td class="k">&mdash;</td><td class="k">&mdash;</td>
           <td class="num k">${sd.h ? esc(sd.h) : "&mdash;"}</td>
           <td class="k">&mdash;</td><td class="k">&mdash;</td>
-          ${stateCell("owed")}<td class="k">&mdash;</td></tr>`;
+          ${stateCell(r.state, band, null, r.att)}<td class="k">&mdash;</td></tr>`;
       }
       const kind = WA.flightKind(e.kind);
       const seq = Number(e.seq || 1);
@@ -1288,14 +1318,15 @@ WA.renderAdmin = async function (view, me) {
           kind && kind.id !== "syllabus"
             ? ` <span class="badge badge-acc" title="${esc(kind.tip)}">${esc(kind.label)}</span>` : ""}${
           seq > 1
-            ? ` <span class="badge" title="A deliberate same-day re-fly — the ${esc(seq)}th flight of this sortie on this date, not a duplicate">#${esc(seq)}</span>` : ""}</td>
+            ? ` <span class="badge" title="A deliberate same-day re-fly — the ${esc(seq)}th flight of this sortie on this date, not a duplicate">#${esc(seq)}</span>` : ""}${
+          cflagOf(band, e, s.record)}${attChip(r.att, WA.normCode(e.sortie))}</td>
         <td>${esc(fmtD(e.date))}</td>
         <td>${esc(e.instructor || "—")}</td>
         <td class="num">${e.duration === null || e.duration === undefined || e.duration === ""
           ? `<span class="k">—</span>` : esc(e.duration)}</td>
         ${logGradeCell(e)}
         ${logMissionCell(e)}
-        ${stateCell(r.state)}
+        ${stateCell(r.state, band, e, r.att)}
         ${srcCell(e)}</tr>`;
     });
   }
@@ -1841,18 +1872,24 @@ WA.renderAdmin = async function (view, me) {
           ${["flights", "fs"].map((k) => {
             const list = Array.isArray(s.record[k]) ? s.record[k] : [];
             const lag = list.filter(WA.awaitingDebrief).length;
-            const hrs = list.reduce((a, e) => a + (isFinite(Number(e.duration)) ? Number(e.duration) : 0), 0);
             /* ROUND 13 — and how much of the syllabus is STILL OWED. A brief
                that said only what was flown could never answer the question the
                admin actually asks of it: how far through the stage is this one. */
             const cn = WA.stateCounts(k, list, null, s.record);
+            /* ROUND 23 — THE HOURS COME FROM THE SHARED COUNTER, and this is
+               where a second copy of the arithmetic died. The brief reduced
+               `list` itself, so it could never see the DERIVED rows' hours —
+               the one surface that would still have under-reported once the
+               solos and the checkrides gained a duration. One number, one
+               function, every surface. */
+            const hrs = cn.hours;
             return `<div class="kline"><span class="k">${esc(WA.secLabel(k))}</span>
               ${(list.length || cn.derived)
                 ? WA.TRACKS.map((t) => {
                     const n = list.filter((e) => (e.track || "") === t).length;
                     return n ? `<b>${esc(WA.itemCatLabel(t))}</b> ${esc(n)}` : "";
                   }).filter(Boolean).join(" · ") +
-                  (hrs > 0 ? ` <span class="k">· ${esc(Math.round(hrs * 10) / 10)} h</span>` : "") +
+                  (hrs > 0 ? ` <span class="k">· ${esc(hrs)} h</span>` : "") +
                   ` <span class="k" title="${esc("The printed flow chart prescribes " +
                     WA.slotCount(k) + " sorties here; " + cn.done + " are complete, " + cn.started +
                     " started and " + cn.owed + " have nothing recorded against them yet" +
@@ -2093,7 +2130,11 @@ WA.renderAdmin = async function (view, me) {
          count and the word, and they are the same four words. */
       const logPrint = ["flights", "fs"].map((k) => WA.TRACKS.map((t) => {
         const all = Array.isArray(s.record[k]) ? s.record[k] : [];
-        const list = WA.slotRows(k, all, t, s.record).filter((r) => r.e || r.derived);
+        /* ROUND 23 — AND A POSITION A FAIL NAMES, even with no row of this log
+           behind it. The owed rows are still not printed one by one; this one
+           is not «nothing recorded» — something was attempted at it and the
+           record says where, which is exactly what a brief must not swallow. */
+        const list = WA.slotRows(k, all, t, s.record).filter((r) => r.e || r.derived || r.att);
         if (!list.length) return "";
         const cn = WA.stateCounts(k, all, t, s.record);
         const rws = list.map((r) => {
@@ -2105,19 +2146,36 @@ WA.renderAdmin = async function (view, me) {
           if (r.derived) {
             const d = r.derived;
             return `<tr>
-              <td>${esc(r.def.code)} <span class="pr-n">(${esc(WA.derivedTag(d))})</span></td>
+              <td>${esc(r.def.code)} <span class="pr-n">(${esc(WA.derivedTag(d))})</span>${
+                r.att ? ` <span class="pr-n">(${esc(WA.attentionTag(r.att))})</span>` : ""}</td>
               <td>${esc(fmtD(d.date))}</td>
               <td>${esc(d.who || "—")}</td>
-              <td>—</td>
+              ${/* ROUND 23 — the hours, from the row that owns the flight */ ""}
+              <td>${d.dur === null || d.dur === undefined || d.dur === "" ? "—" : esc(d.dur)}</td>
               <td>${esc(WA.derivedGradeText(d))}</td>
               <td>${d.ng || d.grade === null || d.grade === undefined ? "—"
                 : esc(WA.missionLabel(WA.gradeMission(d.grade))) + ` <span class="pr-n">(read from the grade)</span>`}</td>
               <td>${esc(WA.rowStateDef(r.state).label)}</td></tr>`;
           }
-          const e = r.e; return `<tr>
+          /* a position with a FAIL against it and NOTHING flown yet */
+          if (!r.e) {
+            return `<tr>
+              <td>${esc(r.def.code)} <span class="pr-n">(${esc(WA.attentionTag(r.att))})</span></td>
+              <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+              <td>${esc(WA.rowStateDef(r.state).label)}</td></tr>`;
+          }
+          /* ROUND 23 — PAPER CARRIES THE WORD, NOT THE TOOLTIP. A row the form
+             marks SUSPECT prints «(suspect)» beside its code, and a position a
+             FAIL names prints «(FAIL recorded)» — a brief that showed a clean
+             row where the screen shows a marked one would be the review surface
+             disagreeing with the reviewed one, on the copy that gets signed. */
+          const e = r.e, rf = WA.logRowFlag(k, e, s.record);
+          return `<tr>
           <td>${esc(e.sortie || "—")}${WA.coTag(e)}${
             e.kind && e.kind !== "syllabus" ? ` <span class="pr-n">(${esc(WA.flightKindLabel(e.kind))})</span>` : ""}${
-            Number(e.seq || 1) > 1 ? ` <span class="pr-n">(same-day re-fly #${esc(Number(e.seq))})</span>` : ""}</td>
+            Number(e.seq || 1) > 1 ? ` <span class="pr-n">(same-day re-fly #${esc(Number(e.seq))})</span>` : ""}${
+            rf && rf.suspect ? ` <span class="pr-n">(${esc(WA.SUSPECT_WORD)})</span>` : ""}${
+            r.att ? ` <span class="pr-n">(${esc(WA.attentionTag(r.att))})</span>` : ""}</td>
           <td>${esc(fmtD(e.date))}</td>
           <td>${esc(e.instructor || "—")}</td>
           <td>${e.duration === null || e.duration === undefined || e.duration === "" ? "—" : esc(e.duration)}</td>
@@ -2614,8 +2672,10 @@ WA.renderAdmin = async function (view, me) {
      stored number — a fractional legacy grade is never rounded away here. */
   function exportEntriesCSV() {
     /* ROUND 12 — three columns no other column carries: "Hours" is the flown
-       duration (WA-only until FDMS grows the field), "Awaiting" is the debrief
-       lag — «δεκτο το null» — and (round 12b) "Mission" is complete /
+       duration — since ROUND 23 it is carried by the SOLO and CHECKRIDE rows
+       too, because the ruling of 2026-08-28 gave those two sections the same
+       `duration` key the log rows use — "Awaiting" is the debrief lag
+       («δεκτο το null»), and (round 12b) "Mission" is complete /
        incomplete, marked when it is READ FROM THE GRADE rather than said. A
        spreadsheet that read a blank Grade as a zero would be reading a failure
        that never happened, so both facts are stated in columns of their own. */
@@ -2688,15 +2748,18 @@ WA.renderAdmin = async function (view, me) {
         const w = WA.evalOperativeOf(evRows, d.id).row;
         if (w) opIdx[d.id] = w.i;
       }
+      /* ROUND 23 — and the HOURS travel from these two sections too (argument
+         11), under the same column the flight logs use */
       WA.filled("evaluations", r.evaluations).forEach((e) => add(s, "evaluations", e,
         e.evaluation ? WA.evalLabel(e.evaluation) : "(not identified)", e.evaluation, "",
         e.with, e.grade, undefined,
         e.evaluation ? (opIdx[e.evaluation] === r.evaluations.indexOf(e)
-          ? "yes" : "no — another attempt counts") : ""));
+          ? "yes" : "no — another attempt counts") : "",
+        e.duration));
       WA.filled("solo_flights", r.solo_flights).forEach((e) => add(s, "solo_flights", e,
         (e.slot ? WA.soloSlotLabel(e.slot) : "additional solo") +
         (e.ng ? " — NG (non-graded)" : " — graded"),
-        e.sortie, "", WA.soloWho(e), e.grade));
+        e.sortie, "", WA.soloWho(e), e.grade, undefined, "", e.duration));
       /* ROUND 11 — the FPC's Detail cell carries its stored result NAMED as a
          legacy note (an unmarked "pass" in a spreadsheet column beside a 48 %
          is exactly the disagreement the box was removed for); the CEF's Result

@@ -6948,6 +6948,11 @@ position renders plainly OWED, read-only.
 
 ### 4y·3. THE SOLOS — AND THE REFUSAL SET, JUDGED FROM THE SYLLABUS
 
+> ⚠ **SUPERSEDED IN PART, 2026-08-28 (evening)** — both tiers are now **MARKS,
+> not refusals**: §4y·11·1. The two-tier JUDGEMENT stands and still decides
+> which sentence a row wears; the refusal it produced does not. The text below
+> is the record of what round 22 did and is not rewritten.
+
 Every **FILLED** solo row that names a sortie this log has a position for
 derives that position — the eight fixed slots AND an «additional solo», because
 a solo recorded is a solo recorded and the double bookkeeping is identical
@@ -7198,19 +7203,24 @@ stacks on the unpushed WA-21 commit and the branch is TWO AHEAD of
    this spec that says «77 aircraft sorties» describes the pre-round-22 shape.
    Not rewritten — the record of what each round did stays what it said — but a
    reader comparing §4m to a live screen should read this line.
-2. **A derived row shows no DURATION.** Neither an evaluation nor a solo row
+2. **A derived row shows no DURATION.** ~~Neither an evaluation nor a solo row
    stores one, so the cell says «—» with the reason in its tooltip, and the
-   block's `h` total does not include those flights. If the squadron wants the
-   hours of a checkride and a solo in the log's total, the fields have to be
-   added to those two sections first — a ruling, not an inference.
+   block's `h` total does not include those flights.~~
+   **CLOSED by the ruling of 2026-08-28 (evening): §4y·11·3.** The two owning
+   sections gained an optional `duration`, the derived rows carry it, and the
+   block totals include it — which is exactly the ruling this item asked for.
 3. **The instructor's «N recorded elsewhere» line** was verified through the
    admin's identical code path; the demo roster has no instructor scoped to the
    one class whose students hold records, so it was not seen on that surface with
    a non-zero count.
-4. **Tier 2 is date-scoped by judgement** (§4y·3). If the squadron would rather
+4. **Tier 2 is date-scoped by judgement** (§4y·3). ~~If the squadron would rather
    have the wider refusal — any solo-candidate row whose position the solo
    already holds — it is one predicate, and it should be a ruling, because it
-   refuses records that are true.
+   refuses records that are true.~~
+   **CLOSED — the other way.** Tier 2 is not widened; it is **GONE**, together
+   with tier 1 and the 22b pair refusal: all three are MARKS now, §4y·11·1. The
+   date scope survives as the line between the two SENTENCES — the same-day
+   shape wears «suspect», another day wears «solo flown» and suspects nothing.
 
 ### 4y·10. Round 22b (2026-08-28) — THE THREE FINDINGS OF THE WA-22 ADVERSARIAL READ
 
@@ -7263,7 +7273,15 @@ row the student cannot find.
 pair*». Nothing refused it, on either side. Both refusals are now built, in
 **both mirrors**, in identical words:
 
-- **(a) TWO SOLOS OF ONE SORTIE** — `WA.soloPairRefusal` / `wa.solo_twin`:
+- **(a) TWO SOLOS OF ONE SORTIE** — ⚠ **SUPERSEDED 2026-08-28 (evening):** the
+  pair check is now a **MARK ON BOTH ROWS**, not a refusal, and `wa.solo_twin`
+  is dropped — §4y·11·1. «Ένα solo που δεν πετάχτηκε … συνήθως πετιέται σε
+  κάποιο repeat» — a genuine second solo of one code is a flight that happened.
+  The reasoning below (what the pair does to the record, the stored order, the
+  NULL-blind discipline) stands verbatim and is what the MARK is built on;
+  **finding 2 (b), the checkride fence, is unchanged and still a refusal.**
+  The round-22b text, kept as the record of what that round did:
+  `WA.soloPairRefusal` / `wa.solo_twin`:
   «*F4302 is recorded as the solo of both F4301-06-S1 and F4301-06-S2 — one
   flight, one record …*». The pair derives **one** position of the flight log
   between them (the later wins) while **both** are stored, counted and exported:
@@ -7390,6 +7408,435 @@ three**, schema first, then the app.
    render («d is not defined») — found by the console check, fixed, and every
    surface re-verified afterwards.
 
+### 4y·11. Round 23 (2026-08-28, evening) — ΜΑΡΚΑΡΙΣΜΑ, ΟΧΙ ΑΡΝΗΣΗ: THE SUSPECT MARK, DURATION ON THE DERIVED ROWS, AND THE EXTRAS/FAIL SEAM
+
+**THE RULING, DATED.** It arrived after WA-22 / 22b had built one-truth out of
+REFUSALS, and it **partially overturns** them:
+
+> «Δεν υπάρχει διπλότυπο για την ίδια πτήση. Μια έξοδος (π.χ. C4202) μπορεί να
+> πεταχτεί Mission Incomplete — δεν παίρνει βαθμολογία και δεν μετράει στη ροή
+> του syllabus· θα μετρήσει μόνο όταν είναι Mission Complete. Ένα solo που δεν
+> πετάχτηκε σε μια ενότητα (λόγω καιρού) συνήθως πετιέται σε κάποιο repeat.
+> Όπως είναι με το which-sortie που μπορούμε να κάνουμε type είναι μια χαρά — θα
+> μπαίνει ως έξτρα γραμμή. Για να μην το πνίξουμε: ΜΑΡΚΑΡΙΣΜΑ ως ύποπτο, και το
+> ξεδιαλύνουμε μετά και μαζί.»
+> «Να βάλουμε και το duration στις παράγωγες γραμμές. Προσοχή: οι cef, fcf,
+> repeat, mission incomplete είναι έξτρα γραμμές. Μπορεί να βαθμολογηθούν και με
+> fail, almost good, αλλά και non graded. Όμως αν κάποιος περάσει ένα fail στην
+> C4602 επάνω, πρέπει τότε να ενημερώνεται το flight.»
+
+It **overturns in part** §4y·3 (both tiers) and §4y·10 finding 2 (a) (the pair);
+it **closes** §4y·9 item 2 (a derived row shows no duration) and §4y·9 item 4
+(tier 2's date scope). The one-truth core is left standing.
+
+#### 4y·11·1. SUSPECT, NOT REFUSED
+
+**THE THREE REFUSALS THAT GO**, all three of them client MARKS now — the row is
+**saved exactly as it stands**, rendered as an EXTRA, and marked:
+
+| was refused | is now |
+|---|---|
+| **TIER 1** — a `flights`/`fs` row naming a solo-by-definition code (C4791) | `.cflag` **suspect**, sentence (A) |
+| **TIER 2** — the same sortie on the SAME DAY as a flown solo of this record | `.cflag` **suspect**, sentence (B) |
+| **THE PAIR** (22b 2a) — two solo rows naming one sortie | `.cflag` **suspect** on **BOTH** rows, at rest, sentence (C) |
+
+**THE FOUR REFUSALS THAT STAY**, because they are STRUCTURALLY IMPOSSIBLE — no
+true flight matches them: **R12** (a checkride code in `flights`/`fs`), the **22b
+2b fence** (a checkride code in a solo slot), the **letter/track** rules
+(`wa.code_track`, the band, the solo slot's first-letter test), and the
+**syllabus-order** rules. So do the instructor-on-every-row rule, NG⇒no-grade,
+mission-beside-grade, `wa.chk_duration` and the caps.
+
+**WHERE THE MARK COMPUTES: derived at render, NOTHING STORED, on either side.**
+Four reasons, in the order they bite. (1) It is a property of the RECORD, not of
+a row: «this sortie appears twice» is a *relation* between two rows, and a flag
+stored on one of them would have to be re-evaluated whenever the other changed
+and would **survive the edit that resolved it** — a mark that outlives its reason
+teaches the reader to ignore marks. (2) The R19 lesson runs both ways: a new
+stored key costs two registry entries, a migrate branch, a strip branch, a
+validator branch and a state test, and buys a value that can **disagree with the
+two facts it summarises** — the FPC `result` defect (round 11) and the `verdict`
+defect (12b) in a third costume. (3) The WA-22 derived-row precedent (§4y·1) is
+the same shape: a suspect mark is a READING of the record, exactly as a derived
+row is. (4) The computation already existed on all three sides; three sites
+changed their **verb** (refuse → mark) and the server lost its `wa.chk` entirely.
+**The server is not asked for a suspect list and the dataset payload does not
+grow**: the admin holds the full migrated record client-side and computes with
+the *same* `WA.*` functions the student's form uses — **one function, three
+surfaces**, the `WA.slotOwner` pattern of 22b.
+
+**THE ONE SHARED FUNCTION.** `WA.logRowFlag(sec, e, rec)` is the whole of
+student.js's `logSortieFlag` body lifted to `app/app.js` and given the record;
+`soloHolder()` went with it as **`WA.soloHolderOf(rec, code, date)`**, and the
+solo section's own pair mark is **`WA.soloRowFlag(rec, i)`**. Callers: the
+student's form (a two-line wrapper), the admin's drill-down (**closing 22b
+verify item 13**) and the printed brief, which prints the WORD — `(suspect)` —
+beside the existing `(Repeat)` / `(same-day re-fly #2)` parentheticals, because
+paper cannot hover.
+
+**THE FOUR SENTENCES** — house voice: WHAT · WHERE · WHY it may be a double ·
+WHAT HAPPENS NOW. The last clause is written **once** (`WA.SUSPECT_TAIL`), so
+four sentences cannot end four ways: *«Nothing is refused and nothing is lost:
+the row is saved exactly as it stands, it is marked here, and the double record
+is untangled together with the squadron administration.»*
+
+- **(A) TIER 1**, label **suspect**: *«C4791 is the stage's 1st SOLO and the
+  syllabus gives no other way to fly it — the solo itself is recorded in the Solo
+  flights section, where who authorised it and the NG rule live, and that record
+  holds this position in the flow chart. So this row may be a SECOND RECORD of
+  the same flight; it is kept as an EXTRA and marked.»*
+- **(B) TIER 2**, label **suspect**: *«C4802 on 12/08/2026 is also recorded as
+  the solo of C4801-04-S1 — the same sortie on the same day, which is one flight
+  in two books. This row is kept as an EXTRA and marked.»* (date through `fmtD`).
+- **(C) THE PAIR**, label **suspect**, on **both** rows of the Solo flights
+  section and at rest: *«F4302 is recorded as the solo of both F4301-06-S1 and
+  F4301-06-S2 — a sortie is flown solo ONCE, so one of these two rows is probably
+  a second record of one flight. They derive ONE position of the flight log
+  between them (the later row wins it) while both are stored, counted and
+  exported. Both rows are kept, and both are marked.»* The names print in
+  **stored order**, so the sentence reads the same standing on either row.
+- **(D) THE SOLO-CANDIDATE EXTRA ON ANOTHER DAY**, label **solo flown**, **NOT**
+  suspect: *«… This row is a SECOND sortie of the same code on ANOTHER DAY —
+  normally a real, separate flight. It is stored, it counts, and it is shown as
+  an EXTRA. Nothing is refused and nothing is suspected.»*
+  **JUDGEMENT, RECORDED**: only the **same-day** shape wears the word. A dual
+  C4802 on the 5th beside a solo C4803 on the 12th is the commonest *true* shape
+  in the whole syllabus (§4y·3's own worked example); marking it suspect would
+  cry wolf on the normal case and teach the squadron to ignore the word — the one
+  failure a marking scheme cannot survive.
+
+**WHAT LEFT THE SERVER**, and why dropped rather than kept unused: three
+`wa.chk` calls and the three functions that existed only to feed them —
+`wa.solo_holder`, `wa.solo_twin`, `wa.solo_row_name` (`drop function if
+exists`, idempotent under the ×2 `ON_ERROR_STOP` run). *A predicate with no
+caller is a rule nobody enforces wearing the clothes of a rule; the next reader
+takes it for one and the round after re-wires the refusal by accident.*
+**WHAT STAYED**: `wa.solo_only_codes()` / `wa.solo_slot_codes()` and **all three
+r22 audit assertions** — they are the GENERATED MIRROR of the client's mark set
+(`tools/gen-items-catalog.py` emits the JS copy and the SQL copy in one run, so
+asserting the SQL copy asserts the run). The r22 notice keeps its `r22:` identity
+and changes one word: *«17 solo candidate code(s), of which 1 marked SUSPECT by
+name always (C4791) — no longer refused (ruling 2026-08-28, §4y·11·1)»*.
+
+**DOES C4791 RETURN TO `WA.logPickList`? NO** — judgement, recorded. The case for
+is that the picker no longer offers a choice the save refuses. The case against
+wins on three counts: (1) the `so` position is **still never claimable by a
+stored row**, so a C4791 row typed into the Flights table is ALWAYS an extra
+wearing the word — offering it in the *syllabus dropdown* would be the list
+saying «this is one of your sorties, put it here», and the picker would be
+**manufacturing** the double record the mark exists to catch; (2) free text can
+always type it, and typing it is a **deliberate** act that meets the mark on the
+keystroke, whereas picking from the list is trust in the list; (3) `ck` and `so`
+have been ONE rule since 22b (`WA.slotOwner`) and splitting them would put two
+doctrines back where one was.
+
+#### 4y·11·2. THE THREE 22b VERIFY FINDINGS THIS CLOSES
+
+- **Item 11 — the pair, invisible at rest.** A legacy/live pair of solos naming
+  one sortie was refused on SAVE and shown NOWHERE on the screen. Both rows now
+  carry the `.cflag` **suspect** from page load, in the student's form and in the
+  admin's solo table alike — and the record **saves**.
+- **Item 12 — a genuine second solo of C4791 was unrecordable.** It is
+  recordable again, as the suspect extra the ruling describes.
+- **Item 13 — the admin drill-down was blinder than the student's form.** It now
+  renders `WA.logRowFlag` as the same `.cflag`, in the same words, from the same
+  function: track / band / checkride / **suspect** / off-catalogue. **The
+  principle, for the spec: the review surface must not be blinder than the
+  surface being reviewed.** `stateCell` was called with ONE argument for derived
+  and owed rows; it now takes the band, the row and the attention map, so the
+  row-aware sentence reaches paper and screen alike.
+
+#### 4y·11·3. DURATION ON THE DERIVED ROWS
+
+**THE FIELD: `duration`** — the *same* key as the flights/fs rows, deliberately.
+One name buys `wa.chk_duration`, `WA.fieldText('duration') → «1.3 h»`,
+`WA.FIELD_WORDS.duration`, `durParse` / `durFix`, the section-generic
+`[data-dur]` handler, the CSV Hours column and the change list, **with zero new
+code**; a second name (`hours`, `dur`) would need every one of them twice.
+Sections: **`solo_flights`** and **`evaluations`**. Optional everywhere.
+
+**BOTH REGISTRY MIRRORS, SAME COMMIT (the R19 rule).** `WA.ENTRY_KEYS` and
+`wa.entry_keys` both gain the key. **The registry entry IS the migration**:
+absent ≡ null everywhere, so `wa.migrate_record` needs no branch — what the
+entry does is stop `wa.strip_entry` / the client strip from **destroying** the
+key on the first read.
+
+**THE PRESENCE-BEFORE-MEMBERSHIP SEAM: `slot_empty` MUST learn the key**, in
+both mirrors. *Proof it neither disarms nor false-fires*: `empty(v)` is
+null / undefined / "" (and `is null` on the SQL side covers an absent key and an
+explicit null alike), so **no stored record changes state on deploy** — no
+record can carry the key today, because it was unregistered and therefore
+stripped. A row carrying *only* a duration correctly stops being an empty slot
+(a duration is a report about a flight that happened) and is then asked for its
+date and its instructor by the rules that already exist — the same shape as a
+grade typed on its own.
+**`duration` NEVER changes a state**: `WA.rowDone` is not consulted for these
+two sections and `derivedSlots`' inline state tests are unchanged. The ruling
+says «να βάλουμε», not «να απαιτούμε»; requiring it would turn every
+already-green solo and checkride amber on deploy for a field nobody has filled.
+
+**VALIDATION**, both sides: `wa.chk_duration` in the `evaluations` and
+`solo_flights` branches of `wa.validate_record`, and — client side — the
+flights branch's five clauses **extracted** into one `durOK()` that all three
+branches call, because a second copy of those sentences is a second place for
+them to drift from `wa.chk_duration`.
+
+**THE FORM**: a new labelled-field builder `durF()` beside `gradeF`, reusing
+`durFix` verbatim. Evaluations: beside the grade, replacing the grid filler.
+Solo flights: its own `rgrid2` under the instructor. `refreshDurFix` is
+table-cell shaped and was deliberately **NOT widened** — a labelled row is
+redrawn whole, and only when the row's SHAPE changed (the conversion offer
+appearing or going, or the slot crossing between empty and flown), so the caret
+is never taken mid-value.
+
+**THE ARITHMETIC SEAMS, every one:** `WA.derivedSlots` gains `dur` on both
+sources (`WA.evalRows` carries `duration` through); **`WA.stateCounts` counts
+the derived hours** and the rounding moved to AFTER the derived loop — round 22's
+reason («counting it here would count one flight's hours twice») was right about
+`n` and **wrong about `hours`**, because this table stores no row for that
+sortie and there is no second copy to double; `n` still leaves them alone. The
+block summaries, the rail and `WA.stateLine` follow for free; `cntHTML` gains
+`· N h` for the two fixed sections (a total belongs where the field is entered);
+the admin drill-down's and the student's derived rows print the number with the
+tooltip *«Read from the row that owns this flight, in the ⟨section⟩ section —
+the one place it is stored»*; the printed brief's per-band line **dropped its own
+ad-hoc `hrs` reduce and reads `cn.hours`**, which removed a second copy of the
+arithmetic *and* made the brief agree with the table (it was the one surface
+that would still have under-reported); the printed brief's derived row prints
+it; `exportEntriesCSV` passes it in the Hours position for both sections;
+`admin_export` needs **no change** (it emits `wa.migrate_record(r.data)` whole
+and the registered key rides along free — stamp stays `wa-export-v1`, the
+§4x·7 reasoning verbatim). The **instructor logbook** gains an **Hours** column
+between Band and Student: `wa.instructor_logbook` sends
+`'duration', e->'duration'` on the SP lane and `'duration', null` on `self_rows`,
+and the client mirror does the same — *«a currency row records what was flown,
+not for how long»*.
+
+**JUDGEMENT, RECORDED (open item):** the logbook's SP lane is **not** extended to
+solo / evaluation rows in this round — §4y·11·9 (b).
+
+#### 4y·11·4. EXTRAS AND THE FAIL SEAM
+
+**WHAT THE FAIL / ALMOST GOOD SECTIONS ACTUALLY STORE** (read, not assumed):
+`{date, category, flight_code, items[], instructor, grade, legacy, entered_by}`.
+`category` is the track, `flight_code` comes from a picker over `WA.sorties(cat)`
+(all bands and checkrides, plus free text), `items[]` are syllabus gradesheet
+items only (round 6), and a new row opens at grade **40** (FAIL) / **50**
+(ALMOST GOOD) — the ΠΔ 151/13 bands Ε and ΣΚ. **Nothing linked a FAIL row to a
+Flights position**: `flight_code` on a fail row was read by nothing but the CSV
+and `WA.rowLabel`.
+
+**THE DECISION: (ii) CROSS-INFORMING, NOT (i) GRADE STATES ON THE ROW.** A
+FAIL/ALMOST-GOOD *state* stored on the flights row is **refused**, for three
+reasons. (1) It would be a **third source of truth** beside `grade` and
+`mission` — precisely the defect round 11 removed from the FPC and 12b removed
+with `verdict`; the grade already carries the band and `mission` already carries
+the no-percentage case. (2) **The ruling's four outcomes on an extra are already
+representable with nothing new stored**: a PERCENTAGE (whose printed band *is*
+fail / almost good / pass); **FAIL** = a percentage in Ε *and/or* a FAIL row
+naming the sortie; **ALMOST GOOD** = a percentage in ΣΚ *and/or* an ALMOST GOOD
+row; **non graded** = `ng: true` — «nobody was in a position to score it», which
+is exactly what non-graded means here. **That is what «non graded on an extra»
+means, and it needs no code.** (3) What the log row genuinely does NOT hold is
+the FAIL section's own content — the ITEMS that missed the desired performance,
+the instructor and the track. That is what the squadron reads. **So the seam is a
+LINK, not a duplicated verdict.**
+
+**THE MECHANISM: `WA.slotAttention(sec, rec)`** — derived, nothing stored, the
+`derivedSlots` shape one section over. For every `fail` / `almost_good` row the
+normalised code, its band and its track give the position key; rows naming no
+known code contribute nothing (presence before membership). It shows as a
+`.dchip` (the READING chip, not the warning chip) reading **`FAIL recorded`** /
+**`ALMOST GOOD recorded`** (`N×` when more than one) with the sentence *«A FAIL
+is recorded against C4602 in the FAIL section — 12/08/2026, 3 items,
+⟨instructor⟩. The flight itself is recorded here; what missed the desired
+performance is recorded there. This position is not complete until an attempt at
+C4602 is Mission Complete.»* and a **↗** to the fail row (the jump handler was
+already section-generic). Rendered on **all three surfaces** and on paper as
+`(FAIL recorded)`.
+
+**THE STATE PROMOTION, TIGHTLY BOUNDED**: a position whose state would be
+**`owed`** and which `slotAttention` names reads **`started`** instead. Nothing
+else moves — a `done` position keeps its green (§4y·11·9 a), a `started` one is
+already started, an `extra` is not a position, and `ck` / `so` positions are
+**excluded** (their state belongs to Evaluations / Solo flights) though they
+still get the chip. It is applied in the three functions that already take
+`rec` — `WA.slotRows`, `WA.stateCounts` and the student form's `rowMeta` — and
+**never inside `WA.rowState`**, which must keep answering the
+payload/placeholder question or the sparse rule breaks. **`WA.slotOwed` is NOT
+touched**, so the seeded placeholder is still dropped from the payload and
+**nothing is stored**. The state WORD stays one of the four (no fifth
+vocabulary); the SENTENCE is the row's, through a new flights/fs branch of
+`WA.rowStateTip` — the `WA.debriefWord` precedent.
+
+#### 4y·11·5. MISSION COMPLETE WINS THE POSITION
+
+**THE RULE, IN ONE SENTENCE:** *a flow-chart position is held by the OPERATIVE
+ATTEMPT among the rows that name it — the latest Mission-Complete one, or the
+first in stored order while none is complete — and every other attempt is an
+EXTRA, rendered under it.*
+
+Until this round `WA.slotKey` granted a flights key only for
+`kind === 'syllabus' && seq === 1`, so **a Mission-Incomplete first attempt
+claimed the position for ever and a later complete re-fly could never take it**.
+That is the half of the ruling that was untrue. (The other half — that an
+incomplete row does not read *done* — was already true: `WA.rowDone` requires
+`WA.rowMission(e) === 'complete'`.) The fix is **the exams doctrine applied to
+the two flight logs**:
+
+- **`WA.slotHome(sec, e)`** — *which position this row is ABOUT* (never a
+  claim): null for the ground sections and for an off-catalogue KIND (an
+  fcf / cef / other names no syllabus position; its flight box is free text).
+- **`WA.slotKey`** for flights/fs becomes `slotHome` minus the positions this
+  table does not own — the `seq === 1` and `kind === 'syllabus'` gates are
+  **gone**. A repeat and a same-day re-fly are **attempts at the same position**,
+  exactly as the three trials of IN190 are three attempts at one exam. `ck` / `so`
+  are still denied, so **the WA-22b hole does not re-open**.
+- **`WA.flightCompleted(e)`** = `ng || rowMission(e) === 'complete'` — «the
+  sortie was completed», independent of whether the row is fully filled in.
+- **`WA.logOperativeIx(list, idxs)`** — the mirror of `WA.examOperativeIx` and
+  `WA.evalOperativeOf`: the LATEST completed attempt (tiebreak date → seq →
+  stored index), else `idxs[0]` — round 13's first-in-stored-order, unchanged,
+  so nothing churns while no attempt has completed.
+- **`WA.claims`, the `holder` line** — one line, now three doctrines.
+- **`WA.rowMinted`** gains a flights/fs branch (`kind !== 'syllabus' || seq > 1`),
+  and it is **load-bearing**: without it a blank Repeat row with a sortie chosen
+  would satisfy `slotUntouched` and be **silently dropped from the payload**;
+  with it such a row is a REPORT (somebody chose Repeat, or pressed ↻ — both
+  affordances, the round-14 doctrine), it is stored, and it is refused by name
+  («the date is required»). It also keeps a blank re-fly from taking the position
+  off a written row. **`WA.rowPlanned` is NOT touched**, so `WA.rowState` keeps
+  returning **`extra`** for every non-operative attempt — the ruling's own word
+  («θα μπαίνει ως έξτρα γραμμή»).
+- **`WA.slotRows`** files an unclaimed row under its `slotHome`, so it renders as
+  an **`alt` row immediately beneath the position it is about** (date → seq →
+  stored index). Only rows with **no** home go to the bottom extras block.
+  Consequence, and it is the point: the suspect rows and the failed attempts now
+  sit **under the sortie they are about** rather than at the foot of the table.
+- **`student.js` `logRow`** gains `plannedPass(e)`; the read-only slot flight
+  cell and the hard-coded «Syllabus» Kind cell are gated on it, so **a claiming
+  repeat / re-fly keeps both pickers and its ✕**. The Kind cell's old tooltip
+  («a slot of the printed flow chart is a SYLLABUS sortie by definition») is
+  rewritten — it stopped being true the moment a repeat could hold a position.
+
+#### 4y·11·6. VALIDATE BEFORE CONFIRM
+
+**THE DEFECT (pre-existing, found by the 22b verify):** `confirmedSave()` showed
+the «Save N changes?» dialog and only THEN called `save()`, which built the
+payload and refused. **A student confirmed a save that did not happen** — one
+act, two positions on the screen. **THE FIX:** `buildPayload()` moves ABOVE the
+dialog and its result is **threaded** into `save(built)`, so it still runs
+exactly **once per save act**; the refusal reporting is extracted verbatim into
+`reportProblems(b)`, which both the pre-check and `save()`'s belt-to-braces
+guard call, so they cannot drift. **What the dialog shows on a refusal is
+nothing — it never opens**: the refusal takes its place, same status line, same
+toast, same scroll-to-row, same 4-second `.is-problem` wash, only BEFORE the
+question instead of after the answer. **The same defect on the INSTRUCTOR
+door** (`confirmedSaveAll` → `saveAll` → `saveCurrency` → `curIncomplete`) is
+fixed in the same commit: `curIncomplete()` runs before `WA.confirmSave`, marks
+the row and returns, and `saveCurrency()` keeps its own guard. *Leaving one door
+confirm-then-refusing while the other validates first is exactly the drift the
+house rejects.*
+
+#### 4y·11·7. DELTA · BUSTERS · GATE
+
+- **`db/schema.sql`** — `wa.entry_keys` (+`duration` ×2), `wa.slot_empty`
+  (+`duration` ×2), three `drop function if exists`, three `wa.chk` removed, two
+  `wa.chk_duration` added, `wa.instructor_logbook` (+`duration` ×2), the r22
+  notice reworded, the tier / pair / audit comment blocks made true.
+- **Client** — `app.js` (`SUSPECT_WORD` / `SUSPECT_TAIL`, the four sentence
+  builders renamed and re-worded, `soloHolderOf`, `logRowFlag`, `soloRowFlag`,
+  `slotHome`, `flightCompleted`, `logOperativeIx`, `slotAttention` +
+  `attentionTag` / `attentionTip` / `attentionJump` / `attentionPromotes`,
+  `ENTRY_KEYS`, `slotEmpty`, `slotKey`, `rowMinted`, `claims`, `derivedSlots`,
+  `evalRows`, `stateCounts`, `slotRows`, `rowStateTip`); `student.js` (`durF`,
+  the two form placements, `attChip`, `plannedPass`, `rowMeta`, `cntHTML`,
+  `derivedSig`, `reportProblems` / `confirmedSave` / `save`, `buildPayload`'s
+  `durOK` + the two new branches + the two refusals removed);
+  `admin.js` (`cflagOf`, `attChip`, `stateCell`, the three `logRows` branches,
+  `soloRows`, the brief's `cn.hours`, the printed rows, the CSV);
+  `instructor.js` (the Hours column, `logSelfRows`, `confirmedSaveAll`).
+- **Busters, touched-only** → `?v=20260828d` on `app.js`, `student.js`,
+  `admin.js`, `instructor.js`. **`styles.css` is byte-identical** and stays at
+  `20260828b` — the round reuses `.cflag` and `.dchip` and adds no colour
+  (tokens-only rule). `config.js`, `items-catalog.js`, `currency-catalog.js`
+  unbumped.
+- **Gate**: schema first, then the app. Committed, **not pushed** — the branch
+  stands **four ahead** of `origin/main`, and **ONE §4φ MCP gate covers all
+  four**.
+
+#### 4y·11·8. SELF-VERIFICATION — RUN LIVE ON THE LOCAL STACK
+
+1. **Schema applied ×2**, `ON_ERROR_STOP=1`, exit 0 both, **zero** ERROR/FATAL
+   lines, every audit block firing (`r20: search_path pinned on all 116 wa
+   functions` — three fewer, the three dropped predicates — `r22: withsp_markers
+   ⊆ flight_kinds`, the three r22 solo assertions and the reworded notice).
+   `wa.solo_holder` / `wa.solo_twin` / `wa.solo_row_name`: **0 rows** in
+   `pg_proc`.
+2. **The three former refusals ACCEPT** through `wa.validate_record`: a C4791
+   flights row, a same-day C4802 beside its flown solo, and two solo rows naming
+   F4302. **The four that stay REFUSE, verbatim**: a checkride in a solo slot, a
+   checkride in `flights`, the track mismatch, and the letter rule.
+3. **Round-trip through the real RPC** (`public.save_student_record`): the whole
+   round-23 shape saves — suspect carrier, same-day duplicate, solo pair,
+   incomplete + repeat, durations on both fixed sections, a FAIL on C4602 — and
+   reads back with `solo_flights[0].duration = 1.3` and
+   `evaluations[0].duration = 1.1` (**the R19 destruction test**). `duration: 0`
+   and `duration: 25` are refused by name on both sides; `slot_empty` is `false`
+   on a duration-only row and `true` on the bare slot, on an explicit null and
+   on an absent key.
+4. **On the student's form**: the C4791 carrier renders `frow st-extra` with the
+   `.cflag` **suspect** and sentence (A); the C4791 position renders read-only,
+   **owed**; filling the solo turns the position **derived · done** on the
+   keystroke with **1.2 h** in its Hours cell and leaves the carrier a suspect
+   extra **directly beneath it**. The same-day C4802 wears (B) with the `fmtD`
+   date; **both** F4302 solo rows wear (C) **at rest**, word for word. `C4202`
+   Mission Incomplete alone reads **started**; adding a Mission-Complete
+   **repeat** hands it the position, **green**, with the incomplete rendered as
+   an extra directly beneath and `owed` unchanged; a later incomplete repeat
+   leaves the complete in place. `C4602` wears **`FAIL recorded`** and reads
+   **started**, one lower on `owed` and one higher on `started`, **with nothing
+   stored**. Block header, rail, `cntHTML`, drill-down, brief line, both printed
+   tables and the CSV all report **3.9 h**.
+5. **Ordering**: with a refusal on the record, Save shows the refusal FIRST —
+   status line, toast, scroll, `.is-problem` — and `WA.confirmSave` is **not
+   called at all**; a clean save opens it, lists *«Solo flights · F4302 ·
+   10/08/2026 — duration — → 1.3 h»*, and writes. **`buildPayload` runs exactly
+   once** per save act (instrumented: 1 at the dialog, still 1 at the write).
+   The instructor door refuses before the dialog too.
+6. **The admin drill-down** shows the same `.cflag` **suspect** on the same rows
+   with the same sentences, the pair on both solo rows, the `FAIL recorded` chip
+   and the **started** state on C4602, and the derived hours; the printed brief
+   prints `(suspect)`, `(FAIL recorded)` and the numbers.
+7. **The instructor logbook** shows the **Hours** column: an SP row carries the
+   student's `1.4`, an ungraded SP row and every Self row carry `—`.
+8. `node --check` clean on all seven client files; **zero console errors** on
+   the student form, the admin's four tabs and both instructor doors; the local
+   demo left **exactly as found**; privacy grep over all tracked files: **0
+   real-person hits**.
+
+#### 4y·11·9. OPEN ITEMS
+
+- **(a) THE FAIL-AFTER-COMPLETE DEMOTION — AWAITING RATIFICATION.** If a
+  position already holds a Mission Complete and a LATER fail / incomplete
+  arrives (a repeat gone wrong), the position **KEEPS the complete** — the
+  operative-attempt mirror of Evaluations (§4k, «two successful attempts resolve
+  to the later one»). The fail stays visible as a marked extra beneath the
+  position and the chip stays on the position (a fail that happened is history
+  and is never hidden). **This is the implementer's default, not a ruling.** If
+  the squadron wants the position DEMOTED by a later failure it is one predicate
+  in `WA.logOperativeIx`, and it should be an ΑΠΟΦΑΝΣΗ, because it would paint a
+  sortie the student demonstrably completed as not completed.
+- **(b) THE LOGBOOK'S SP LANE AND THE SOLO / CHECKRIDE ROWS.** Not extended this
+  round. A solo names an *authorising* instructor (who may not have flown) and a
+  checkride names an *evaluator*; folding either into «My Flight Logbook»
+  changes what the table means. A ruling, not an inference.
+- **(c) «FLIGHT COMMANDER»** — the squadron's own word for the person the WA
+  vocabulary calls `WA.ADMIN_BODY` («the squadron administration»).
+  `WA.SUSPECT_TAIL` is now the one place it would change, and it is a ruling.
+- **(d) §4y·10's first-letter Training Section test** still stands as written.
+
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -7419,6 +7866,14 @@ three**, schema first, then the app.
    which holds the fact. They store nothing, are never editable, never enter a
    payload or an export, and never count as entries — but they are **not owed**,
    so the four counts, the block headers and the nav rails follow them.
+   **Round 23 (§4y·11):** those derived rows now show **HOURS** too — the solo
+   slots and the checkrides gained an optional `duration`, and every block
+   total, rail, brief line and export includes them — and a stored row for a
+   sortie that is recorded elsewhere is **kept and marked «suspect»** rather
+   than refused, with a sentence saying why it may be a double record and that
+   it will be untangled with the squadron administration. A FAIL recorded
+   against a sortie shows **on that sortie's position**, and a flow-chart
+   position is held by the **operative attempt** — the latest Mission Complete.
    The same form, bound to somebody else, is what
    **the admin** fills in on a student's behalf (§4s·4 — the admin is the flight
    commander and the developer, **not** the squadron CO).
@@ -7624,6 +8079,85 @@ three**, schema first, then the app.
    button. That rename lives in the database and **only** there.
 
 ## 7. Open items
+
+- **ΑΠΟΦΑΝΣΗ 2026-08-28, βράδυ (Γύρος 23, §4y·11) — ΜΑΡΚΑΡΙΣΜΑ, ΟΧΙ ΑΡΝΗΣΗ.**
+  «*Δεν υπάρχει διπλότυπο για την ίδια πτήση. Μια έξοδος (π.χ. C4202) μπορεί να
+  πεταχτεί Mission Incomplete — δεν παίρνει βαθμολογία και δεν μετράει στη ροή
+  του syllabus· θα μετρήσει μόνο όταν είναι Mission Complete. Ένα solo που δεν
+  πετάχτηκε σε μια ενότητα (λόγω καιρού) συνήθως πετιέται σε κάποιο repeat. Όπως
+  είναι με το which-sortie που μπορούμε να κάνουμε type είναι μια χαρά — θα
+  μπαίνει ως έξτρα γραμμή. Για να μην το πνίξουμε: ΜΑΡΚΑΡΙΣΜΑ ως ύποπτο, και το
+  ξεδιαλύνουμε μετά και μαζί.*» · «*Να βάλουμε και το duration στις παράγωγες
+  γραμμές. Προσοχή: οι cef, fcf, repeat, mission incomplete είναι έξτρα γραμμές.
+  Μπορεί να βαθμολογηθούν και με fail, almost good, αλλά και non graded. Όμως αν
+  κάποιος περάσει ένα fail στην C4602 επάνω, πρέπει τότε να ενημερώνεται το
+  flight.*»
+
+  1. **ΥΠΟΠΤΟ, ΟΧΙ ΑΡΝΗΣΗ.** Οι ΤΡΕΙΣ αρνήσεις των γύρων 22/22b — ΒΑΘΜΙΔΑ 1
+     (C4791 πάντα), ΒΑΘΜΙΔΑ 2 (ίδιο sortie ΤΗΝ ΙΔΙΑ ΜΕΡΑ με flown solo) και το
+     ΖΕΥΓΟΣ (δύο solo της ίδιας εξόδου) — γίνονται ΜΑΡΚΑΡΙΣΜΑΤΑ: η γραμμή
+     αποθηκεύεται ΟΠΩΣ ΕΙΝΑΙ, εμφανίζεται ως EXTRA και φοράει ένα ορατό
+     `.cflag` **suspect** που λέει γιατί ΜΠΟΡΕΙ να είναι διπλή εγγραφή και ότι
+     θα ξεδιαλυνθεί ΜΑΖΙ με τη διοίκηση της μοίρας. **Τίποτα δεν καταστρέφεται
+     και τίποτα δεν μπλοκάρεται.** Ο ΠΥΡΗΝΑΣ ΤΗΣ ΜΙΑΣ ΑΛΗΘΕΙΑΣ ΜΕΝΕΙ: ένα
+     συμπληρωμένο solo εξακολουθεί να ΠΑΡΑΓΕΙ τη θέση του στα Flights και η
+     παραγόμενη γραμμή εξακολουθεί να την ΚΕΡΔΙΖΕΙ. **ΤΙ ΜΕΝΕΙ ΑΡΝΗΣΗ** (δομικά
+     αδύνατα — καμία αληθινή πτήση δεν τα ταιριάζει): R12 checkride στα flights,
+     το φράγμα 22b του checkride σε solo slot, οι κανόνες γράμματος/track και οι
+     κανόνες σειράς του syllabus. Οι `wa.solo_holder` / `wa.solo_twin` /
+     `wa.solo_row_name` **δια­γράφονται** (ένα κατηγόρημα χωρίς καλούντα είναι
+     κανόνας που κανείς δεν επιβάλλει, φορώντας τα ρούχα κανόνα).
+     **Η C4791 ΔΕΝ επιστρέφει στο dropdown** — κρίση, καταγεγραμμένη: μια λίστα
+     που προσφέρει κωδικό τον οποίο ο πίνακας δεν μπορεί ΠΟΤΕ να κρατήσει
+     κατασκευάζει ακριβώς τη διπλή εγγραφή που το μαρκάρισμα υπάρχει για να
+     πιάνει· το ελεύθερο κείμενο τον γράφει πάντα, και η πληκτρολόγηση είναι
+     ΣΥΝΕΙΔΗΤΗ πράξη που συναντά το μαρκάρισμα στο ίδιο πλήκτρο.
+  2. **ΟΙ ΤΡΕΙΣ ΔΙΑΠΙΣΤΩΣΕΙΣ ΤΟΥ WA-22b ΚΛΕΙΝΟΥΝ ΜΕ ΤΟΝ ΤΡΟΠΟ ΤΟΥ
+     ΜΑΡΚΑΡΙΣΜΑΤΟΣ** (§4y·11·2): το ζεύγος μαρκάρεται σε ΚΑΙ ΤΙΣ ΔΥΟ γραμμές
+     **σε ηρεμία** (όχι μόνο στο save) και το αρχείο αποθηκεύεται κανονικά· ένα
+     γνήσιο δεύτερο solo της C4791 καταγράφεται ξανά· και **η οθόνη ελέγχου του
+     admin δείχνει τα ίδια chips με του μαθητή** — *η επιφάνεια που ελέγχει δεν
+     επιτρέπεται να είναι πιο τυφλή από την επιφάνεια που ελέγχεται*.
+  3. **DURATION ΣΤΙΣ ΠΑΡΑΓΩΓΕΣ ΓΡΑΜΜΕΣ** (§4y·11·3): τα solo slots και οι
+     αξιολογήσεις αποκτούν ΠΡΟΑΙΡΕΤΙΚΟ `duration` — το ΙΔΙΟ κλειδί με τις
+     γραμμές του log, ώστε ο έλεγχος, η μετατροπή 1:20→1.3, το CSV και η λίστα
+     αλλαγών να δουλεύουν χωρίς νέα γραμμή κώδικα. Δηλώνεται και στα ΔΥΟ μητρώα
+     (`WA.ENTRY_KEYS` + `wa.entry_keys`) και στα ΔΥΟ `slot_empty` **στο ίδιο
+     commit** — αδήλωτο κλειδί ΚΑΤΑΣΤΡΕΦΕΤΑΙ στην ανάγνωση (το μάθημα του R19).
+     Κανένα αποθηκευμένο αρχείο δεν αλλάζει κατάσταση στο deploy, και το πεδίο
+     ΠΟΤΕ δεν αποφασίζει κατάσταση («να βάλουμε», όχι «να απαιτούμε»). Όλα τα
+     αθροίσματα ωρών — κεφαλίδες, ράγα, drill-down, brief, δύο εκτυπώσεις, CSV —
+     λένε τον ΙΔΙΟ αριθμό, και το brief έπαψε να υπολογίζει δικό του.
+  4. **ΤΑ EXTRA ΚΑΙ Η ΡΑΦΗ ΤΟΥ FAIL** (§4y·11·4): αποφασίστηκε το **(ii)** —
+     οι υπάρχουσες ενότητες FAIL / ALMOST GOOD **ΕΝΗΜΕΡΩΝΟΥΝ** τη θέση, ΟΧΙ
+     αποθηκευμένη κατάσταση βαθμού πάνω στη γραμμή (θα ήταν ΤΡΙΤΗ πηγή αλήθειας
+     δίπλα στο `grade` και το `mission` — το ελάττωμα που έφυγε δύο φορές, με το
+     `result` του FPC και το `verdict`). Τα τέσσερα αποτελέσματα του ρύθμισης
+     εκφράζονται ΗΔΗ χωρίς τίποτα νέο: ποσοστό, FAIL (ποσοστό στο Ε ή/και γραμμή
+     FAIL), ALMOST GOOD (ΣΚ ή/και γραμμή), και **non graded = `ng`**. Ένα FAIL
+     στην C4602 βάζει chip **«FAIL recorded»** πάνω στη θέση της C4602, με ↗ στη
+     γραμμή που το κρατά, και η θέση διαβάζεται **started** αντί για owed — ΧΩΡΙΣ
+     να αποθηκεύεται τίποτα.
+  5. **MISSION COMPLETE ΚΕΡΔΙΖΕΙ ΤΗ ΘΕΣΗ** (§4y·11·5): μια θέση του flow chart
+     την κρατά η **ΛΕΙΤΟΥΡΓΙΚΗ ΠΡΟΣΠΑΘΕΙΑ** — η τελευταία Mission Complete, ή η
+     πρώτη σε σειρά αποθήκευσης όσο καμία δεν έχει ολοκληρωθεί — και κάθε άλλη
+     προσπάθεια είναι EXTRA, **σχεδιασμένη ΑΠΟ ΚΑΤΩ ΤΗΣ**. Το δόγμα των
+     εξετάσεων, μία ενότητα παραδίπλα.
+  6. **ΕΛΕΓΧΟΣ ΠΡΙΝ ΤΗΝ ΕΠΙΒΕΒΑΙΩΣΗ** (§4y·11·6): ο διάλογος «Save N changes?»
+     ΔΕΝ ανοίγει πια πάνω σε save που θα απορριφθεί — ούτε στη φόρμα του μαθητή
+     ούτε στην πόρτα του εκπαιδευτή. Η άρνηση παίρνει τη θέση του διαλόγου, με
+     τα ίδια λόγια και το ίδιο scroll στη γραμμή που ονομάζει.
+
+  **ΑΝΟΙΧΤΑ** (§4y·11·9): **(α)** αν μια θέση κρατά ήδη Mission Complete και
+  έρθει ΑΡΓΟΤΕΡΑ fail / incomplete, η θέση **ΚΡΑΤΑΕΙ** το complete — αυτό είναι
+  **η προεπιλογή του υλοποιητή, ΟΧΙ απόφανση**, και η υποβάθμιση θέλει ΑΠΟΦΑΝΣΗ
+  γιατί θα έβαφε ως μη ολοκληρωμένη μια έξοδο που ο μαθητής αποδεδειγμένα
+  ολοκλήρωσε· **(β)** η λωρίδα SP του logbook ΔΕΝ επεκτάθηκε σε solo /
+  αξιολογήσεις (το solo ονομάζει τον ΕΓΚΡΙΝΟΝΤΑ, το checkride τον ΑΞΙΟΛΟΓΗΤΗ —
+  απόφανση, όχι συμπέρασμα)· **(γ)** «**Flight Commander**» — η λέξη της μοίρας
+  για το πρόσωπο που το λεξιλόγιο του WA λέει `WA.ADMIN_BODY`: το
+  `WA.SUSPECT_TAIL` είναι πλέον το ΕΝΑ σημείο που θα άλλαζε, και είναι απόφανση·
+  **(δ)** το πρώτο-γράμμα τεστ της Training Section του §4y·10 μένει ως έχει.
 
 - **ΑΠΟΦΑΝΣΕΙΣ 2026-08-28 (Γύρος 22, §4y) — ΜΙΑ ΠΤΗΣΗ, ΕΝΑ ΑΡΧΕΙΟ.**
   1. «*Έβαλα την C4791 και έκανα save. Γιατί δεν ανανεώνεται στον πίνακα

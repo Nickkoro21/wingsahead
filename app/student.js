@@ -256,6 +256,20 @@ WA.renderStudent = async function (view, me, opts) {
   let DERIVED_SIG = null;
   function claimsDirty(secId) {
     if (secId) delete CLAIM[secId]; else for (const k of Object.keys(CLAIM)) delete CLAIM[k];
+    /* ROUND 23 — the FAIL seam is derived from two OTHER sections, so it can
+       never be scoped to one: a fail typed three cards away changes what a
+       flights position says. The whole map goes on every claim invalidation,
+       which is exactly the sweep the derived map already rides on. */
+    for (const k of Object.keys(ATT)) delete ATT[k];
+  }
+  /* ROUND 23 — «Αν κάποιος περάσει ένα fail στην C4602 επάνω, πρέπει τότε να
+     ενημερώνεται το flight.» Which positions of this log a FAIL / ALMOST GOOD
+     row names — derived at render, stored nowhere, and read from the same
+     WA.slotAttention the admin's drill-down and the printed brief read. */
+  const ATT = {};
+  function attOf(secId) {
+    if (!ATT[secId]) ATT[secId] = WA.slotAttention(secId, S.data);
+    return ATT[secId];
   }
   function claimsOf(secId) {
     /* ROUND 22 — the WHOLE record, not the section's list: a position of the
@@ -294,6 +308,19 @@ WA.renderStudent = async function (view, me, opts) {
         m.alt = true;
         m.slot = WA.slotIndex("exams")[e.exam] || null;
       }
+    }
+    /* ROUND 23 — THE FAIL SEAM, and the ONE bounded state promotion it makes.
+       The identical rule as WA.slotRows, because the student's form takes its
+       row state from HERE and the counters take theirs from there: an OWED
+       position that a FAIL / ALMOST GOOD row names reads STARTED — something
+       was attempted at it — and nothing else moves. A `done` position keeps
+       its green, a `ck`/`so` position is left to its own section, and NOTHING
+       IS STORED (WA.slotOwed is untouched, so the placeholder is still dropped
+       from the payload). */
+    if (secId === "flights" || secId === "fs") {
+      const a = (m.slot && m.claimed) ? attOf(secId) : null;
+      m.att = a ? (a[m.slot.key] || null) : null;
+      if (m.state === "owed" && WA.attentionPromotes(m.slot, a)) m.state = "started";
     }
     return m;
   }
@@ -358,6 +385,22 @@ WA.renderStudent = async function (view, me, opts) {
              ${F(sec, i, field)}${off(lock)}>
       ${fx ? `<span class="fixnote">${fx}</span>` : ""}</label>`;
   };
+
+  /* ── ROUND 23 — A DURATION BOX WITH A LABEL ───────────────────────────────
+     «Να βάλουμε και το duration στις παράγωγες γραμμές» (2026-08-28, evening).
+     The two fixed sections are CARD-shaped, not table-shaped, so the log's
+     `durCell` (a bare cell) cannot be reused — but everything BEHIND it can:
+     the key is `duration`, the same one the log rows use, so durParse / durFix
+     and the section-generic [data-dur] handler work here with no new code.
+     OPTIONAL, and it never decides a state: the ruling says «να βάλουμε», not
+     «να απαιτούμε», and requiring it would turn every already-green solo and
+     checkride amber on deploy for a field nobody has filled yet. */
+  const durF = (sec, i, val, label) => `
+    <label class="f"><span>${esc(label)}</span>
+      <input type="text" class="in c-num" inputmode="decimal"
+             value="${val === null || val === undefined ? "" : esc(val)}" placeholder="1.3"
+             title="${esc("Decimal hours, one decimal — 0.1 h is 6 minutes. 1:20 may be typed and the row offers the conversion. Optional: a solo / checkride is complete without it.")}"
+             ${F(sec, i, "duration")}>${durFix(sec, i, val)}</label>`;
 
   /* ── ONE PICKER, five uses (round 5) ──────────────────────────────────────
      A real <select> over a CLOSED list, with an "Other…" option that reveals
@@ -822,67 +865,16 @@ WA.renderStudent = async function (view, me, opts) {
   const cflag = (label, tip) =>
     ` <span class="cflag" title="${esc(tip)}">${esc(label)}</span>`;
 
-  /* ROUND 22 — does THIS record's solo section already hold that sortie? The
-     row that does is the one the Flights position is derived from, so the
-     answer is read off the same rows every other surface reads.
-     `date` narrows it to the PROVABLE duplicate — the same sortie on the same
-     day, which is one flight in two books and is refused on save. Called
-     without a date it answers the softer question the form also has to ask:
-     is this sortie's flow-chart position already held by a solo? That one is
-     not a refusal, it is a warning — the row is real and it will render as an
-     extra. MIRROR: db/schema.sql → wa.solo_holder. */
-  function soloHolder(code, date) {
-    const c = WA.normCode(code);
-    if (!c) return null;
-    return (S.data.solo_flights || []).find((x) =>
-      x && !WA.slotEmpty("solo_flights", x) && WA.normCode(x.sortie) === c &&
-      (date === undefined || (!!x.date && x.date === date))) || null;
-  }
-
-  /* the live verdict on a TYPED flight code — the same four answers the server
-     gives, said on the keystroke instead of after the save. An fcf / cef /
-     other row is off-catalogue BY NATURE, so it is never marked as a surprise. */
+  /* ROUND 23 — THE ROW FLAG IS NO LONGER THIS FILE'S. `soloHolder` and the
+     whole body of `logSortieFlag` moved to app/app.js as WA.soloHolderOf and
+     WA.logRowFlag, so the ADMIN'S drill-down and the printed brief can draw
+     the same chip, from the same rules, in the same words — 22b verify item 13
+     («the review surface must not be blinder than the surface being
+     reviewed»). What is left here is the SHAPE: this file knows what a `.cflag`
+     looks like, app.js knows what it says. */
   function logSortieFlag(sec, e) {
-    const code = WA.normCode(e.sortie);
-    if (!code) return "";
-    const t = WA.codeTrack(code);
-    if (t && e.track && t !== e.track) {
-      return cflag(WA.itemCatLabel(t) + " table",
-        code + " belongs to the " + WA.itemCatLabel(t) + " table — the letter of a Phase II sortie code names its track, so this pair contradicts itself and is refused on save");
-    }
-    const b = WA.sortieBand(code);
-    if (b && b !== sec) {
-      return cflag(b === "fs" ? "simulator" : "aircraft",
-        code + " is " + (b === "fs" ? "a SIMULATOR sortie — record it under F/S"
-                                    : "an AIRCRAFT sortie — record it under Flights") +
-        ". Nothing derives the aircraft/simulator split from a code — the generated flow-chart catalogue is the only authority, and where it knows the code it is a fact.");
-    }
-    if (WA.EVAL_ORDER.indexOf(code) >= 0) {
-      return cflag("checkride",
-        code + " is a checkride — record it in the Evaluations section, where the syllabus order and the pass rule apply to it. Two rows for one flight would be two grades that can disagree.");
-    }
-    /* ROUND 22 — the two SOLO refusals, said on the keystroke. The first is a
-       property of the syllabus (a code nobody flies dual); the second is a
-       property of THIS record (the solo section already holds that sortie).
-       Both are refused by name on save — MIRROR: db/schema.sql. */
-    if (WA.isSoloOnlyCode(code)) return cflag("solo", WA.soloOnlyRefusal(code));
-    const same = soloHolder(code, e.date || "");
-    if (same) return cflag("solo", WA.soloTakenRefusal(code, same.slot, e.date));
-    const held = soloHolder(code);
-    if (held) {
-      return cflag("solo flown", code + " was flown SOLO on " + fmtD(held.date) +
-        " and is recorded in the Solo flights section (" + WA.soloSlotLabel(held.slot) +
-        "), which holds its place in the flow chart. This row is a SECOND, later " +
-        "sortie of the same code: it is stored and it counts, and it is shown as an " +
-        "EXTRA — the planned pass is the solo. Nothing is refused.");
-    }
-    if (WA.kindOffCatalogue(e.kind)) return "";
-    if (!WA.logSortieKnown(sec, e.track, code)) {
-      return cflag("off-catalogue",
-        "Not in the generated syllabus catalogue — " + WA.OFFCAT_SAVED +
-        " If it was an FCF, a CEF or something else outside the flow chart, say so in the Kind column and this mark goes away.");
-    }
-    return "";
+    const f = WA.logRowFlag(sec, e, S.data);
+    return f ? cflag(f.label, f.tip) : "";
   }
 
   /* DURATION — DECIMAL HOURS, ONE DECIMAL (0.1 h = 6 min). The box is text and
@@ -1034,10 +1026,24 @@ WA.renderStudent = async function (view, me, opts) {
      ROUND 14b (verify finding 3) — THE WORD IS GENERIC, THE SENTENCE IS THE
      ROW'S: a Weekly exam and a minted re-sit are grey for a reason that is not
      «the printed flow chart prescribes it», and WA.rowStateTip says which. */
-  function stateChip(st, sec, e) {
+  function stateChip(st, sec, e, att) {
     if (!st) return "";
     const d = WA.rowStateDef(st);
-    return `<span class="stchip st-${esc(st)}" title="${esc(WA.rowStateTip(sec, e, st))}">${esc(d.label)}</span>`;
+    return `<span class="stchip st-${esc(st)}" title="${esc(WA.rowStateTip(sec, e, st, att))}">${esc(d.label)}</span>`;
+  }
+  /* ROUND 23 — THE FAIL CHIP. It is the READING chip (.dchip), not the warning
+     one: a FAIL recorded against this sortie is not a problem with THIS row —
+     it is a fact recorded in another section that this position has to tell
+     the truth about. The ↗ lands on the fail row itself, because «where is
+     it» must be one click from the question. */
+  function attChip(att, code) {
+    if (!att || !(att.fails || []).length) return "";
+    return ` <span class="dchip" title="${esc(WA.attentionTip(att, code))}"
+        >${esc(WA.attentionTag(att))}</span>
+      <button type="button" class="cbtn" data-jump="${esc(WA.attentionJump(att))}"
+        title="${esc("Go to the row that records it — " + WA.secLabel(att.fails[0].sec) +
+          ". That is where the items that missed the desired performance are kept.")}"
+        aria-label="Go to the ${esc(WA.secLabel(att.fails[0].sec))} row">&#8599;</button>`;
   }
 
   /* ── ONE FLIGHT, ONE ROW ──────────────────────────────────────────────────
@@ -1075,14 +1081,26 @@ WA.renderStudent = async function (view, me, opts) {
   function logActs(sec, i, e, m) {
     const slot = m && m.slot;
     const owed = m && m.state === "owed";
-    return `${rowFlags(sec, i, e)}${seqBadge(e)}${stateChip(m ? m.state : null, sec, e)}
+    return `${rowFlags(sec, i, e)}${seqBadge(e)}${stateChip(m ? m.state : null, sec, e, m && m.att)}
         <button type="button" class="cbtn" data-refly2="${esc(sec)}:${i}"
           title="A second turn on the same sortie on the SAME DAY. It is a real thing and it is not a duplicate, so it is a deliberate act: the new row opens with the same flight and date and the next sequence number — and it is an EXTRA, because the slot is the syllabus's one planned pass."
           aria-label="Add a same-day re-fly of this sortie">&#8635;</button>
         ${slot ? (owed ? "" : clearCell(sec, i)) : rmCell(sec, i)}`;
   }
+  /* ROUND 23 — IS THIS ROW THE SYLLABUS'S PLANNED PASS? Until this round a
+     claiming row could only ever be one (WA.slotKey demanded kind `syllabus`
+     and seq 1), so the two read-only cells below could be gated on «does it
+     hold a slot» alone. A REPEAT and a same-day RE-FLY can now hold a position
+     — «θα μετρήσει μόνο όταν είναι Mission Complete» — and such a row must
+     keep BOTH its pickers: its kind is a fact somebody chose, and freezing it
+     would make the row unable to say what it is. */
+  const plannedPass = (e) =>
+    (e.kind || "syllabus") === "syllabus" && (Number(e.seq) || 1) === 1;
   function logRow(sec, i, e, m) {
-    const meta = m || rowMeta(sec, i);
+    const meta0 = m || rowMeta(sec, i);
+    /* a claiming REPEAT / re-fly keeps its pickers AND its ✕: it is a row
+       somebody added, so it is removed, never "cleared back to a slot" */
+    const meta = plannedPass(e) ? meta0 : { ...meta0, slot: null };
     const slot = meta.slot;
     const track = e.track || "";
     const list = track ? WA.logPickList(sec, track) : [];
@@ -1094,15 +1112,22 @@ WA.renderStudent = async function (view, me, opts) {
           { free: true, aria: "Flight",
             ph: off ? "— type it —" : "— which sortie? —",
             otherLabel: "Other… (type the code)",
-            freePh: off ? "e.g. FCF profile 2" : "e.g. C4302" }) + logSortieFlag(sec, e)}</td>
+            freePh: off ? "e.g. FCF profile 2" : "e.g. C4302" }) + logSortieFlag(sec, e)}${
+          attChip(meta0.att, meta0.slot ? meta0.slot.code : WA.normCode(e.sortie))}</td>
       <td class="c-dt">${cellDate(sec, i, "date", e.date, "Date")}</td>
       <td class="c-in">${cellText(sec, i, "instructor", e.instructor, "Instructor",
           INS.length ? "choose or type" : "surname", "dl-ins")}</td>
       <td class="c-du">${durCell(sec, i, e)}</td>
       <td class="c-gr">${gradeCell(sec, i, e)}</td>
       <td class="c-ms">${missionCell(sec, i, e)}</td>
+      ${/* ROUND 23 — THE SENTENCE HERE WAS NO LONGER TRUE. It said a slot row
+           is a syllabus sortie BY DEFINITION, which stopped being so the
+           moment a repeat could hold a position («θα μετρήσει μόνο όταν είναι
+           Mission Complete»). This cell is now drawn read-only ONLY on the
+           planned pass — every other attempt keeps its picker — so what it
+           says is what it is: this row IS the planned pass. */ ""}
       <td class="c-kd">${slot
-          ? `<span class="slotc k" title="${esc("A slot of the printed flow chart is a SYLLABUS sortie by definition — that is what makes it the planned pass. A repeat, an FCF, a CEF or anything else is an EXTRA row: use ↻ for a same-day re-fly, or “+ Add an extra flight” below the table.")}">Syllabus</span>`
+          ? `<span class="slotc k" title="${esc("This row is the syllabus's PLANNED PASS at this position — kind Syllabus, first flight of the day. Any other attempt at the same sortie (a repeat, a same-day re-fly) is an EXTRA row and keeps its own Kind picker: use ↻ for a same-day re-fly, or “+ Add an extra flight” below the table.")}">Syllabus</span>`
           : cellPick(sec, i, e, "kind",
           WA.FLIGHT_KINDS.map((x) => ({ v: x.id, t: x.label, tip: x.tip })),
           { aria: "Kind", noEmpty: true })}</td>
@@ -1487,7 +1512,10 @@ WA.renderStudent = async function (view, me, opts) {
           ${insF("evaluations", i, "with", e.with, "With (evaluator)", lock)}
           ${dateF("evaluations", i, "date", e.date, "Date", flown, lock)}
         </div>
-        <div class="rgrid2">${gradeF("evaluations", i, "grade", e.grade, "Grade (%)", false, lock)}<div></div></div>
+        ${/* ROUND 23 — the checkride's own HOURS, beside its grade. The
+             filler <div> that squared the grid is what it replaces. */ ""}
+        <div class="rgrid2">${gradeF("evaluations", i, "grade", e.grade, "Grade (%)", false, lock)}${
+          durF("evaluations", i, e.duration, "Dur (h)")}</div>
         ${m.slot ? reflyButton(e, opIx) : ""}`;
       } },
 
@@ -1513,6 +1541,13 @@ WA.renderStudent = async function (view, me, opts) {
         return `
         <div class="slot-h">
           <span class="slot-nm" title="${esc(WA.soloSlotTip(e.slot))}">${esc(WA.soloSlotLabel(e.slot))}</span>
+          ${/* ROUND 23 — THE PAIR, MARKED ON BOTH ROWS AND AT REST (22b verify
+               item 11). Two solos of one sortie may be one flight in two books
+               — or a solo the weather pushed into a repeat, which is a real
+               second flight — so the record SAVES and both rows wear the word.
+               The chip is the same `.cflag` the flight log draws. */ ""}
+          ${(() => { const sf = WA.soloRowFlag(S.data, i);
+             return sf ? cflag(sf.label, sf.tip) : ""; })()}
           ${slot ? slotBadge("solo_flights", i, flown) : ""}
           ${slot && slot.req ? `<span class="badge badge-warn" title="The syllabus REQUIRES this solo">required</span>` : ""}
           ${slot ? "" : rmB("solo_flights", i)}
@@ -1542,6 +1577,9 @@ WA.renderStudent = async function (view, me, opts) {
           ${insF("solo_flights", i, "instructor", e.instructor,
                  "Authorised by" + (flown ? " *" : ""))}
         </div>
+        ${/* ROUND 23 — the solo's own HOURS. Optional: a solo is complete on
+             its date, its authorising instructor and either NG or a grade. */ ""}
+        <div class="rgrid2">${durF("solo_flights", i, e.duration, "Dur (h)")}<div></div></div>
         ${ng ? `<p class="hint">${e.ng
           ? "He may not have flown along — he authorised the solo, and the squadron records who did."
           : esc(WA.SOLO_NG_DEFAULT_TIP)}</p>` : ""}`;
@@ -1760,9 +1798,13 @@ WA.renderStudent = async function (view, me, opts) {
                  said «every one of them is a row here» and named only the
                  checkrides, while one more position was read-only for exactly
                  the same reason. */
+              /* ROUND 23 — «cannot be added to» stays true (no row of this
+                 table ever HOLDS such a position); what changed is that a row
+                 naming one is no longer refused — it is kept and marked
+                 suspect. */
               (nSo ? " " + nSo + " of them " + (nSo === 1 ? "is a SOLO BY DEFINITION" : "are SOLOS BY DEFINITION") +
                      " — nobody ever flies " + (nSo === 1 ? "it" : "them") + " dual: " +
-                     (nSo === 1 ? "that row is" : "those rows are") + " READ from the Solo flights section, where who authorised the flight and the NG rule live, and cannot be edited or added to from this table." : ""))}">${esc(nCat)} in the syllabus</span>
+                     (nSo === 1 ? "that row is" : "those rows are") + " READ from the Solo flights section, where who authorised the flight and the NG rule live, and cannot be edited or added to from this table. A row typed here for one of them is kept and marked suspect, never refused." : ""))}">${esc(nCat)} in the syllabus</span>
           </summary>
           ${tblHTML(sec, sec.id + ":" + t, rows,
             "Nothing recorded in this track yet &mdash; use &ldquo;+ Add an extra flight&rdquo;.")}
@@ -1794,12 +1836,17 @@ WA.renderStudent = async function (view, me, opts) {
           WA.logSortieLabel(sec.id, def.track, def.code, "syllabus") +
           (sd.g ? " · Training Section " + sd.g : "") +
           (sd.h ? " · syllabus " + sd.h + " h" : "") + (sd.nt ? " · night" : ""))}"
-        ><b>${esc(def.code)}</b></span></td>
+        ><b>${esc(def.code)}</b></span>${attChip(r.att, def.code)}</td>
       <td class="c-dt">${esc(fmtD(d.date))}</td>
       <td class="c-in">${esc(d.who || "—")}</td>
+      ${/* ROUND 23 — THE HOURS, at last. «Να βάλουμε και το duration στις
+           παράγωγες γραμμές»: the owning section now carries the field, so the
+           cell reads it from the ONE row that stores it instead of printing a
+           dash and an apology (§4y·9 item 2, closed). */ ""}
       <td class="c-du"><span class="k" title="${esc(
-        "The time flown is recorded on the row that owns this flight, in the " +
-        WA.secLabel(d.sec) + " section — a second copy here could disagree with it.")}">&mdash;</span></td>
+        "Read from the row that owns this flight, in the " + WA.secLabel(d.sec) +
+        " section — the one place it is stored.")}">${
+        d.dur === null || d.dur === undefined || d.dur === "" ? "&mdash;" : esc(d.dur)}</span></td>
       <td class="c-gr">${esc(WA.derivedGradeText(d))}</td>
       <td class="c-ms">${derivedMissionCell(d)}</td>
       <td class="c-kd"><span class="dchip" title="${esc(tip)}">${esc(WA.derivedTag(d))}</span></td>
@@ -1829,10 +1876,13 @@ WA.renderStudent = async function (view, me, opts) {
      to another section, so this is not a slot that can be typed into here.
      ROUND 22b — THE SECOND SOURCE JOINS THE FIRST, WITH NO SECOND FUNCTION.
      The C4791 position used to be seeded as an editable owed slot: five boxes
-     that led to a refusal on save, and — the defect this round closes — five
-     boxes a legacy row could claim silently and render as a planned pass. The
-     arrow lands on the very solo row that fills it, because «why can I not
-     type here» must be one click from its answer. */
+     that led to a refusal on save, and — the defect 22b closed — five boxes a
+     legacy row could claim silently and render as a planned pass. The arrow
+     lands on the very solo row that fills it, because «why can I not type
+     here» must be one click from its answer.
+     ROUND 23 — the SAVE no longer refuses such a row (it is kept and marked
+     suspect, §4y·11·1); the POSITION is still not this table's to hold, which
+     is why this read-only row is unchanged. */
   function ownedOwedTrHTML(sec, r) {
     const def = r.def, sd = def.sortie || {};
     const src = WA.slotOwner(def);
@@ -1847,7 +1897,8 @@ WA.renderStudent = async function (view, me, opts) {
       <td class="c-fl"><span class="slotc" title="${esc(
           WA.logSortieLabel(sec.id, def.track, def.code, "syllabus") +
           (sd.g ? " · Training Section " + sd.g : "") +
-          (sd.h ? " · syllabus " + sd.h + " h" : ""))}"><b>${esc(def.code)}</b></span></td>
+          (sd.h ? " · syllabus " + sd.h + " h" : ""))}"><b>${esc(def.code)}</b></span>${
+        attChip(r.att, def.code)}</td>
       <td class="c-dt"><span class="k">&mdash;</span></td>
       <td class="c-in"><span class="k">&mdash;</span></td>
       <td class="c-du"><span class="k">&mdash;</span></td>
@@ -2008,8 +2059,17 @@ WA.renderStudent = async function (view, me, opts) {
       });
       const done = Object.keys(seen).length;
       const extra = n - done;
+      /* ROUND 23 — AND THE HOURS. The two fixed sections now carry a
+         `duration`, and the place a total belongs is the place the field is
+         ENTERED: the flights tables show these same hours on the derived rows,
+         but nothing there says «the solos of this stage came to 4.2 h». */
+      const h = Math.round(WA.filled(id, list).reduce((a, e) => {
+        const v = Number(e.duration);
+        return a + (isFinite(v) ? v : 0);
+      }, 0) * 10) / 10;
       return `${Math.min(done, slots)} of ${slots} flown` +
-        (extra > 0 ? ` · ${extra} extra` : "");
+        (extra > 0 ? ` · ${extra} extra` : "") +
+        (h > 0 ? ` · ${h} h` : "");
     }
     /* ROUND 12 counted rows, hours and the debrief LAG. ROUND 13 counts the
        FOUR STATES instead — «done X · started Y · owed Z · extra N» — because
@@ -2616,9 +2676,17 @@ WA.renderStudent = async function (view, me, opts) {
   function derivedSig() {
     return WA.LOG_BANDS.map((b) => {
       const d = WA.derivedSlots(b.id, S.data);
+      /* ROUND 23 — `dur` joins the fingerprint (a duration typed on a solo
+         must reach the derived row's Hours cell on that keystroke), and so
+         does the FAIL seam: a FAIL typed three cards away changes what a
+         flights position says, and nothing else in this file would notice. */
+      const a = WA.slotAttention(b.id, S.data);
       return Object.keys(d).sort().map((k) =>
         k + "=" + d[k].state + "@" + d[k].date + "/" + d[k].grade + "/" +
-        (d[k].ng ? "ng" : "") + "/" + d[k].who).join(",");
+        (d[k].ng ? "ng" : "") + "/" + d[k].who + "/" + d[k].dur).join(",") +
+        ";" + Object.keys(a).sort().map((k) => k + "*" +
+          a[k].fails.map((x) => x.sec + x.i + "@" + x.date + "/" + x.items.length +
+                                "/" + x.instructor).join("+")).join(",");
     }).join("|");
   }
   function syncDerived() {
@@ -3208,6 +3276,18 @@ WA.renderStudent = async function (view, me, opts) {
       if ((sec === "flights" || sec === "fs") && key === "kind") {
         redrawRow(sec, i, `[data-field="@kind"]`);
       }
+      /* ROUND 23 — THE PAIR MARK IS A PROPERTY OF TWO ROWS, so choosing a solo
+         sortie changes the OTHER row's chip as well as this one's: the whole
+         section is redrawn, and the box the student is in keeps the focus. */
+      if (sec === "solo_flights" && key === "sortie") {
+        const at1 = document.activeElement;
+        const back1 = at1 && at1.dataset ? at1.dataset.field : null;
+        redraw(sec);
+        if (back1) {
+          const el3 = form.querySelector(`.rrow[data-row="solo_flights:${i}"] [data-field="${back1}"]`);
+          if (el3) el3.focus();
+        }
+      }
       /* a group change re-lists the courses, and a course chosen under the old
          group cannot survive it — the (group, course) pair is the join key */
       if (sec === "lessons" && key === "group") {
@@ -3249,6 +3329,12 @@ WA.renderStudent = async function (view, me, opts) {
        applied to a pair of cells. */
     const isLog = sec === "flights" || sec === "fs";
     const isTbl = isLog || sec === "lessons" || sec === "exams";
+    /* ROUND 23 — a duration typed in a CARD row (the two fixed sections). Both
+       readings are taken BEFORE the keystroke is applied, so the branch below
+       can tell a shape change from an ordinary character. */
+    let durLabelled = false;
+    const wasDur = entry.duration;
+    const wasSlotEmpty = !isTbl && WA.slotEmpty(sec, entry);
     const hadGrade = isLog && entry.grade !== null && entry.grade !== undefined &&
                      entry.grade !== "" && isFinite(Number(entry.grade));
 
@@ -3264,7 +3350,23 @@ WA.renderStudent = async function (view, me, opts) {
          it does the conversion (nothing is converted silently). */
       const p = durParse(el.value);
       entry.duration = p.empty ? null : (p.hm || p.bad ? el.value : p.dec);
-      refreshDurFix(sec, i);
+      /* ROUND 23 — the two FIXED sections carry the same key in a LABELLED
+         field, not a table cell, so refreshDurFix (which addresses td.c-du)
+         cannot reach them and is deliberately NOT widened: a labelled row is
+         redrawn whole, which is the path every other labelled field already
+         takes. The redraw is deferred to the branch chain below so that
+         soloFirstFill / soloEmptyReset run FIRST — typing a duration into an
+         empty solo slot makes the row flown, and the NG default belongs to
+         that transition. */
+      if (isTbl) refreshDurFix(sec, i);
+      else {
+        /* AND ONLY WHEN THE ROW'S SHAPE ACTUALLY CHANGED — the conversion
+           offer appearing or going, or the slot crossing between empty and
+           flown. Redrawing on every character would take the caret with it;
+           the count below follows every keystroke either way. */
+        durLabelled = durFix(sec, i, wasDur) !== durFix(sec, i, entry.duration) ||
+                      wasSlotEmpty !== WA.slotEmpty(sec, entry);
+      }
     } else {
       entry[f] = el.value;
     }
@@ -3308,9 +3410,12 @@ WA.renderStudent = async function (view, me, opts) {
       ensureSlots();
       redraw(sec);
       showLegacyNote();
-    } else if (ngDefaulted) {
+    } else if (ngDefaulted || durLabelled) {
       /* the row has just taken its slot's opening grading — the chips, the
-         grade box and the hint all change together, so the row is redrawn */
+         grade box and the hint all change together, so the row is redrawn.
+         ROUND 23 — and a duration typed into a labelled row lands here too:
+         the conversion offer beside the box, the row's own completeness and
+         the section's «N of 8 flown · 4.2 h» all follow the keystroke. */
       const at0 = document.activeElement;
       const back0 = at0 && at0.dataset ? at0.dataset.field : null;
       redrawRow(sec, i, back0 ? `[data-field="${back0}"]` : null);
@@ -3381,6 +3486,12 @@ WA.renderStudent = async function (view, me, opts) {
         const line = form.querySelector(`.rrow[data-row="${sec}:${i}"] .rfoot .hint`);
         if (line) line.innerHTML = WA.checkLineHTML(sec, entry);
       }
+    }
+    /* ROUND 23 — the section's own «5 of 8 flown · 4.2 h» follows every
+       duration keystroke, whether or not the row itself had to be redrawn */
+    if (!isTbl && f === "duration" && !durLabelled) {
+      const cnt = document.getElementById("cnt-" + sec);
+      if (cnt) cnt.textContent = cntHTML(sec);
     }
     if (wasLegacy !== !!entry.legacy) showLegacyNote();
     /* a row that has just stopped being a leftover (or become one) wears that
@@ -3474,6 +3585,34 @@ WA.renderStudent = async function (view, me, opts) {
       need(sec, i, what + " must be a whole number — " + v +
         " is not (use the “Round to " + Math.round(n) + "%” button on the row)");
       return false;
+    };
+    /* ROUND 23 — THE DURATION RULE, EXTRACTED SO THREE BRANCHES SAY IT ONCE.
+       The flight logs have carried these five clauses since round 12; the
+       ruling of 2026-08-28 gave the same `duration` key to the solo slots and
+       the checkrides, and a second copy of the sentences is a second place for
+       them to drift from wa.chk_duration. The box is TEXT so 1:20 can be typed
+       at all — an unconverted value is refused here, with the row's own button
+       as the answer. Returns TRUE when the row may go on.
+       → the parsed value rides on `.dp` so the caller can push it. */
+    const durOK = (sec, i, e) => {
+      const dp = durParse(e.duration);
+      durOK.dp = dp;
+      if (dp.bad || dp.hm || (!dp.empty && !dp.exact)) {
+        need(sec, i, dp.hm
+          ? "the log is kept in DECIMAL HOURS — press “Use " + dp.dec + "” on the row to convert " + e.duration
+          : dp.bad
+            ? "“" + e.duration + "” is not a duration — type decimal hours (1.3) or h:mm (1:20)"
+            : "duration is recorded to one decimal (6-minute steps) — " + dp.dec +
+              " is not (use the button on the row)");
+        return false;
+      }
+      if (!dp.empty && (dp.dec <= 0 || dp.dec > 24)) {
+        need(sec, i, dp.dec > 24
+          ? "duration is DECIMAL HOURS, not minutes — 1.3 is one hour and eighteen minutes"
+          : "a flown sortie lasted longer than nothing — leave the box empty while the time is not known yet");
+        return false;
+      }
+      return true;
     };
 
     for (const sec of SECTIONS) clean[sec.id] = [];
@@ -3585,9 +3724,14 @@ WA.renderStudent = async function (view, me, opts) {
         return;
       }
       if (!intOK("evaluations", i, e, "grade", "the grade")) return;
+      /* ROUND 23 — the checkride's own hours, under the same rule and the same
+         sentences as a flight-log row (wa.chk_duration, both mirrors) */
+      if (!durOK("evaluations", i, e)) return;
+      const evDur = durOK.dp;
       push("evaluations", {
         date: e.date || null, evaluation: WA.evalById(e.evaluation) ? e.evaluation : null,
-        with: WA.normLine(e.with) || null, grade: gr(e.grade) }, e);
+        with: WA.normLine(e.with) || null, grade: gr(e.grade),
+        duration: evDur.empty ? null : evDur.dec }, e);
     });
     /* THE SOLO SLOTS — same rule, plus the sortie that was flown solo */
     d.solo_flights.forEach((e, i) => {
@@ -3613,38 +3757,35 @@ WA.renderStudent = async function (view, me, opts) {
         need("solo_flights", i, "sortie " + sortie + " does not belong to Training Section " + slot.sec);
         return;
       }
-      /* ══ ROUND 22b — THE TWO REFUSALS THIS SECTION OWED (verify finding 2) ══
-         PRESENCE BEFORE MEMBERSHIP (the round-20b rule): both checks ask first
+      /* ══ ROUND 22b — THE FENCE THIS SECTION OWED (verify finding 2b) ═══════
+         PRESENCE BEFORE MEMBERSHIP (the round-20b rule): the check asks first
          whether this row NAMES a sortie at all. An unflown slot names none, so
-         it can neither be caught by them nor disarm them — eight empty slots
-         are not eight rows of one sortie.
-         (a) TWO SOLOS OF ONE SORTIE. One flight is one record: the pair would
-             derive ONE position of the flight log between them (the later row
-             wins) while both are stored, counted and exported. The row is kept
-             and named — nothing is destroyed — and the way out is the row's own
-             picker (a slot) or its ✕ (an additional solo).
-         (b) A CHECKRIDE IN A SOLO SLOT. The picker's free text could put C4590
-             in a solo slot: stored, counted, exported, and shown NOWHERE in the
-             Flights table, because that position belongs to Evaluations.
-         MIRROR: db/schema.sql → the solo_flights branch of wa.validate_record. */
-      if (sortie) {
-        if (WA.EVAL_ORDER.indexOf(sortie) >= 0) {
-          need("solo_flights", i, WA.soloIsCheckrideRefusal(sortie));
-          return;
-        }
-        const twin = d.solo_flights.findIndex((x, j) =>
-          j !== i && x && typeof x === "object" && WA.normCode(x.sortie) === sortie);
-        if (twin >= 0) {
-          need("solo_flights", i, WA.soloPairRefusal(sortie,
-            d.solo_flights[Math.min(i, twin)].slot, d.solo_flights[Math.max(i, twin)].slot));
-          return;
-        }
+         it can neither be caught by it nor disarm it.
+         A CHECKRIDE IN A SOLO SLOT. The picker's free text could put C4590 in a
+         solo slot: stored, counted, exported, and shown NOWHERE in the Flights
+         table, because that position belongs to Evaluations. A checkride is
+         flown WITH an evaluator; it can never be a solo, whoever typed it.
+         ROUND 23 — AND THE PAIR IS GONE FROM HERE. 22b refused two solo rows
+         naming one sortie; the ruling of 2026-08-28 (evening) makes it a MARK
+         on BOTH rows instead (WA.soloPairSuspect, rendered at rest in the
+         section itself): «ένα solo που δεν πετάχτηκε σε μια ενότητα (λόγω
+         καιρού) συνήθως πετιέται σε κάποιο repeat» — a genuine second solo is a
+         flight that happened, and this refusal refused it.
+         MIRROR: db/schema.sql → the solo_flights branch of wa.validate_record,
+         which keeps the checkride fence and lost the pair in the same commit. */
+      if (sortie && WA.EVAL_ORDER.indexOf(sortie) >= 0) {
+        need("solo_flights", i, WA.soloIsCheckrideRefusal(sortie));
+        return;
       }
+      /* ROUND 23 — the solo's own hours, under the flight log's own rule */
+      if (!durOK("solo_flights", i, e)) return;
+      const soDur = durOK.dp;
       push("solo_flights", {
         slot: slot ? slot.id : null,
         sortie: sortie || null,
         date: e.date || null, ng: !!e.ng,
         grade: e.ng ? null : gr(e.grade),
+        duration: soDur.empty ? null : soDur.dec,
         /* NG drops the grade and NOTHING ELSE — the instructor rides on every
            flown solo row, because somebody authorised it (round 6) */
         instructor: WA.normLine(e.instructor) || null }, e);
@@ -3677,7 +3818,12 @@ WA.renderStudent = async function (view, me, opts) {
        The one rule that is NOT here: a missing grade. «δεκτο το null, γιατι
        καποιες φορες αργει το debriefing» — a row without a grade is complete,
        saves, and says on screen that it is waiting. Everything the server
-       refuses is refused here first, in the same words. */
+       refuses is refused here first, in the same words.
+       ROUND 23 — AND THE TWO SOLO SENTENCES ARE NO LONGER SAID HERE AT ALL:
+       they are MARKS, not refusals (§4y·11·1). The promise above is intact,
+       because the server refuses NEITHER — the tier-1, tier-2 and pair checks
+       left wa.validate_record in the same commit that took them out of this
+       function. */
     /* ══ ROUND 13 — THE SPARSE RULE, WHICH IS WHERE IT LIVES ═════════════════
        The form draws 125 flight slots, 47 course slots and 8 exam slots; the
        record stores none of them until somebody writes in one. THIS is the
@@ -3714,21 +3860,16 @@ WA.renderStudent = async function (view, me, opts) {
             "flight would be two grades that can disagree.");
           return;
         }
-        /* ROUND 22b — THE TWO SOLO REFUSALS, SAID BEFORE THE SERVER HAS TO.
-           «Everything the server refuses is refused here first, in the same
-           words» was true of the checkride above and of nothing round 22 added:
-           a record carrying a legacy C4791 row was refused on EVERY save — a
-           duration edit three sections away included — by a server sentence the
-           student met only after the save had failed, with no row named and
-           nothing to scroll to. Now the form says it, names the row and takes
-           the reader to it; the way out is the row's own ✕. */
-        if (WA.isSoloOnlyCode(code)) { need(k, i, WA.soloOnlyRefusal(code)); return; }
-        const soloSame = soloHolder(code, e.date || "");
-        if (soloSame) {
-          need(k, i, WA.soloTakenRefusal(code, soloSame.slot, e.date));
-          return;
-        }
-        /* the round-6 solo doctrine, on every sortie */
+        /* ROUND 23 — AND THE TWO SOLO SENTENCES ARE NO LONGER SAID HERE AT
+           ALL. Round 22b put them here as refusals, so that «everything the
+           server refuses is refused here first, in the same words» stayed
+           true. The ruling of 2026-08-28 (evening) turned both into MARKS
+           (§4y·11·1): the row saves exactly as it stands and wears the word
+           (WA.logRowFlag → WA.soloOnlySuspect / WA.soloSameDaySuspect). The
+           form's promise is INTACT, because the server refuses NEITHER — what
+           is gone from this branch is gone from wa.validate_record in the same
+           commit. The checkride refusal above stays on both sides.
+           the round-6 solo doctrine, on every sortie: */
         if (!txt(e.instructor)) {
           need(k, i, "every flown sortie names the instructor — a student never launches alone " +
             "on their own authority, and an ungraded row still had somebody in the other seat " +
@@ -3738,23 +3879,11 @@ WA.renderStudent = async function (view, me, opts) {
         if (!WA.flightKind(e.kind)) { need(k, i, "choose what kind of flight it was"); return; }
         if (!intOK(k, i, e, "grade", "the grade")) return;
         /* the duration box is TEXT so 1:20 can be typed — an unconverted value
-           is refused here, with the row's own button as the answer */
-        const dp = durParse(e.duration);
-        if (dp.bad || dp.hm || (!dp.empty && !dp.exact)) {
-          need(k, i, dp.hm
-            ? "the log is kept in DECIMAL HOURS — press “Use " + dp.dec + "” on the row to convert " + e.duration
-            : dp.bad
-              ? "“" + e.duration + "” is not a duration — type decimal hours (1.3) or h:mm (1:20)"
-              : "duration is recorded to one decimal (6-minute steps) — " + dp.dec +
-                " is not (use the button on the row)");
-          return;
-        }
-        if (!dp.empty && (dp.dec <= 0 || dp.dec > 24)) {
-          need(k, i, dp.dec > 24
-            ? "duration is DECIMAL HOURS, not minutes — 1.3 is one hour and eighteen minutes"
-            : "a flown sortie lasted longer than nothing — leave the box empty while the time is not known yet");
-          return;
-        }
+           is refused here, with the row's own button as the answer. ROUND 23:
+           the five clauses are extracted (durOK), because the solo slots and
+           the checkrides now say them too. */
+        if (!durOK(k, i, e)) return;
+        const dp = durOK.dp;
         const hasGrade = gr(e.grade) !== null;
         /* the two contradictions. The form cannot produce either — the mission
            cell only takes a choice where there is no grade, and NG clears both
@@ -3953,12 +4082,45 @@ WA.renderStudent = async function (view, me, opts) {
     showCoNote();
     markDirty();
   }
+  /* ── ROUND 23 — THE REFUSAL COMES FIRST, AND THE DIALOG NEVER OPENS ───────
+     THE DEFECT (pre-existing, found by the 22b verify): confirmedSave showed
+     «Save N changes?» and only THEN called save(), which built the payload and
+     refused. A student CONFIRMED A SAVE THAT DID NOT HAPPEN — one act, two
+     positions on the screen.
+     THE FIX: buildPayload moves ABOVE the dialog and its result is THREADED
+     into save(), so it still runs exactly ONCE per save act. What the dialog
+     shows on a refusal is nothing — it never opens; the refusal takes its
+     place, in the same words and the same four gestures as before (status
+     line, toast, scroll to the named row, the 4-second wash), only BEFORE the
+     question instead of after the answer. Extracted so the pre-check and
+     save()'s own belt-to-braces guard cannot drift apart. */
+  function reportProblems(b) {
+    const st = $("stu-status");
+    const { problems, problemAt } = b;
+    st.className = "st err";
+    st.textContent = problems[0] + (problems.length > 1 ? " (+" + (problems.length - 1) + " more)" : "");
+    toast(problems[0], true);
+    /* 12b verify finding 2 — take the user TO the row the sentence names:
+       both the table rows (tr) and the card rows carry data-row="sec:idx" */
+    if (problemAt) {
+      const row = form.querySelector(`[data-row="${problemAt}"]`);
+      if (row) {
+        row.scrollIntoView({ block: "center" });
+        row.classList.add("is-problem");
+        setTimeout(() => row.classList.remove("is-problem"), 4000);
+      }
+    }
+  }
   async function confirmedSave() {
+    /* BEFORE THE DIALOG. buildPayload is pure — it reads S.data and writes
+       nothing — so asking it here costs one pass and buys the ordering. */
+    const built = buildPayload();
+    if (built.problems.length) return reportProblems(built);
     const changes = WA.recordChanges(SAVED_REC, S.data, SECTIONS.map((s) => s.id));
     if (!changes.length) {
       /* the fingerprint says the form differs but no change list can be built —
          a normalisation, not an edit. Save it without asking about nothing. */
-      return save();
+      return save(built);
     }
     const ans = await WA.confirmSave({
       who: WA.personRankName(WA.me || {}),
@@ -3976,28 +4138,18 @@ WA.renderStudent = async function (view, me, opts) {
       toast(changes.length + " change" + (changes.length === 1 ? "" : "s") + " discarded — the form is back to the last saved record");
       return;
     }
-    return save();
+    return save(built);
   }
 
-  async function save() {
+  /* `built` is the payload confirmedSave already asked for, THREADED through so
+     buildPayload runs exactly once per save act. The guard below is the belt to
+     that braces — for a caller that did not pre-build — and it cannot drift,
+     because it calls the SAME extracted reportProblems. */
+  async function save(built) {
     const st = $("stu-status");
-    const { clean, rows, problems, leftovers, problemAt } = buildPayload();
-    if (problems.length) {
-      st.className = "st err";
-      st.textContent = problems[0] + (problems.length > 1 ? " (+" + (problems.length - 1) + " more)" : "");
-      toast(problems[0], true);
-      /* 12b verify finding 2 — take the user TO the row the sentence names:
-         both the table rows (tr) and the card rows carry data-row="sec:idx" */
-      if (problemAt) {
-        const row = form.querySelector(`[data-row="${problemAt}"]`);
-        if (row) {
-          row.scrollIntoView({ block: "center" });
-          row.classList.add("is-problem");
-          setTimeout(() => row.classList.remove("is-problem"), 4000);
-        }
-      }
-      return;
-    }
+    const b = built || buildPayload();
+    if (b.problems.length) return reportProblems(b);
+    const { clean, rows, leftovers } = b;
     const btns = [$("stu-save"), document.getElementById("stu-float-save")].filter(Boolean);
     btns.forEach((b) => { b.disabled = true; });
     st.className = "st";
