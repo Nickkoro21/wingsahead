@@ -8550,7 +8550,20 @@ stale `prev` → `unchanged`**, `flights` md5 `7b91cf5a…` and whole-record md5
 identical twin at the target → `exists_fdms`, **two rows, nothing merged**; a
 target that is *not* what the op writes (one grade apart) → `exists_fdms`.
 
-#### 4z·10·2. F2 — two different `rid`s cannot silently share one handle
+#### 4z·10·2. F2 — an upsert that does not claim a replacement cannot overwrite one
+
+> **THIS SECTION'S TITLE WAS «two different `rid`s cannot silently share one
+> handle», AND THAT WAS OVER-CLAIMED.** The verify of P45-WAb proved the bypass
+> live: `prev` was a CLAIM and nothing else, so the identity refused here got a
+> silent `updated` by copying three fields out of its own `row` — and the
+> refusal's own advice told it to. The title above is what the code below
+> actually did. The other half — **`prev` must PROVE knowledge** — is
+> **§4z·11·1**, and «WHAT THIS DOES NOT CLOSE» at the foot of this section is
+> superseded by **§4z·11·2**. Nothing in this section is withdrawn; it is
+> narrowed to what it proves. (The standard is this project's own, written one
+> section further down for F5: *a comment that disagrees with the spec is worth
+> exactly as much as a comment that disagrees with the code* — and a headline
+> that disagrees with its own verify is worth less than either.)
 
 **The hole,** and it is the missing half of a verdict the critique asked for.
 §4z·3·4 tests the slot a MOVE is aiming at — but for an upsert with no `prev`
@@ -8582,16 +8595,23 @@ under rid A → `removed` + one tombstone; rid A's auto re-push → `tombstoned`
 nothing written. The original bug sequence replayed end to end no longer
 produces the overwrite or the ping-pong.
 
-**WHAT THIS DOES NOT CLOSE, NAMED.** The `remove` verb has the same blind spot
-from the other side: it matches on the handle, so a remove sent under rid B
-against a handle whose row was written by rid A **deletes A's row and tombstones
-B**, and A re-creates it at its next push. Proven live in this round. It is far
-narrower than it was — B can only be in that state by ignoring the
-`exists_fdms` it was just answered — and every step is in the audit. It is not
-closed here because it **cannot** be from this side: the row carries no rid, and
-the only WA-side memory of who wrote what is `wa.bridge_audit`, which §4z·5·4
-deliberately made a **LOG and not a GATE** (promoting it would make trimming a
-log change behaviour). The real cure is FDMS-side pairing — evId first, `seq`
+**WHAT THIS DOES NOT CLOSE, NAMED — AND SUPERSEDED BY §4z·11·2.** As written in
+P45-WAb this read: *the `remove` verb has the same blind spot from the other
+side — it matches on the handle, so a remove sent under rid B against a handle
+whose row was written by rid A deletes A's row and tombstones B, and A re-creates
+it at its next push. Proven live. It is not closed here because it CANNOT be from
+this side: the row carries no rid, and the only WA-side memory of who wrote what
+is `wa.bridge_audit`, which §4z·5·4 deliberately made a LOG and not a GATE.*
+
+**Two of those three sentences stood; the third did not.** The blind spot was
+real and was proven again. But «it cannot be closed from this side» was wrong,
+and the P45-WAb verify said so in the same breath as it proved the bypass: the
+cure needs no `rid` at all. A removal — like a replacement — can be made to
+**prove knowledge of the row it destroys**, and an identity that never wrote the
+row cannot produce its facts. That is **§4z·11·1**, which closes the `remove`
+half by the same test. What is left after it is written out at **§4z·11·2**, and
+it is genuinely smaller: byte-identical twins, and a caller that reads the record
+first. The real cure for those two remains FDMS-side pairing — evId first, `seq`
 minted once and frozen — and it is **P45-FDMS's**.
 
 #### 4z·10·3. F3 — the GET verb was a live-token oracle
@@ -8699,6 +8719,256 @@ advisor prediction of §4z·8 is unchanged** — no table, no policy, no RPC and
 `wa` function is added or removed by this round: `function_search_path_mutable`
 **0**, `rls_enabled_no_policy` **6 → 9**, `security_definer_executable`
 **42 → 47**, the last two accepted by design for the reasons already recorded.
+(**Superseded for the stack by §4z·11·6** — P45-WAc adds two `wa` helpers, which
+moves none of those three numbers and is why it is a footnote and not a section.)
+
+### 4z·11. P45-WAc — THE LAST PRE-GATE ROUND: `prev` LEARNS TO PROVE ITSELF
+
+The verify of P45-WAb passed ten of thirteen items and left **three** worth a
+round: one BYPASS it walked through live, one assertion that tested the wrong
+thing, and one pre-existing raise that killed innocent operations. All three are
+closed here, before the §4φ gate, so **one gate covers three commits**. No client
+file is touched: every change is in `db/schema.sql` and in this document.
+
+#### 4z·11·1. F1 — `prev` must PROVE KNOWLEDGE, and so must a removal
+
+**The hole, proven live by the verifier and replayed verbatim here.** §4z·10·2
+made an upsert *without* `prev` a create, and a create onto an occupied bridge
+handle `exists_fdms`. But `prev` itself was read **only through
+`wa.log_handle`** — sortie ∥ date ∥ seq, the same three fields the operation was
+already sending in `row`. Its CONTENT was never compared with anything. So rid B,
+answered `exists_fdms` a moment earlier, obtained a silent **`updated`** over rid
+A's flight by adding a two-line `prev` copied out of its own `row` — and the new
+refusal's own advice, *«send the change with `prev` naming the row it
+replaces»*, **told it to**. The `remove` verb was worse: it needed no claim at
+all, so a removal under rid B deleted rid A's row and tombstoned only B.
+
+**The cure — one test, in three places.** On an upsert that carries a `prev`, on
+a move, and on a removal, the block that NAMES the standing row (`prev`, or `row`
+for a removal that sends none) is read by the same reader the stored rows went
+through and compared with what actually stands at the handle:
+
+```sql
+elsif hit >= 0 and wa.entry_core(pcand) is distinct from wa.entry_core(arr->hit)
+  then vd := 'exists_fdms';           -- and NOTHING is written
+```
+
+`pcand` is `wa.bridge_row(sec, claim)` — a **new one-line `wa` helper** that puts
+a wire block through `wa.migrate_record` exactly as `cand` is put through it, so
+that the two sides of the comparison are read by ONE function. An honest `prev`
+that omits a key whose default this database writes (`seq` 1, `kind` 'syllabus',
+`ng` false, the track resolved from the syllabus code) still matches; a `prev`
+that is only the handle does not, because the migration flags it `legacy`.
+
+**THE JUDGEMENT: the FULL core, not a chosen subset** — recorded, because the
+brief asked for the ruling and not just the code.
+
+- **The handle proves nothing.** It is how the row was found: asking the claimant
+  to repeat the three fields he is standing on is asking him to repeat himself.
+- **Every subset short of the core has to NAME the proof-bearing fields**, and
+  every such list is guessable on some row — a flight whose debrief has not
+  landed carries little beyond the instructor and three defaults. The core
+  degrades by itself to «the strongest proof this particular row can offer».
+- **One test, one spelling.** `wa.entry_core` already decides *is this the same
+  entry?* for the admin path, the owner path and the two `unchanged` verdicts. A
+  second, weaker notion of it beside the first is exactly the drift
+  `wa.admin_lock_msg` and `wa.bridge_reasons()` were made functions to prevent.
+
+**The wire contract therefore changes, and it is the round's one such change**
+(the FDMS side is unbuilt, so nothing shipped is broken): **`prev` is the ROW as
+the bridge last wrote it**, not the three fields that name it. It costs an honest
+caller nothing it does not already hold — to know a change is worth pushing, the
+queue must already hold the row it last pushed — but it does demand ORDER: a
+ledger takes its `prev` from the **last acknowledged push**, so a second change
+sent with the first change's `prev` is refused as a report line instead of being
+applied on top of a row the caller has not seen. That is this lane's retry
+doctrine written as a rule instead of a hope.
+
+**And the refusal does not describe the row.** `exists_fdms` **stopped returning
+the standing row** in both of its branches. Every other `exists_*` still returns
+it in full and that is still right: the bridge can never write over a HUMAN's row
+whatever it sends, so knowing its facts buys nothing, and the FDMS report needs
+both versions. A bridge row is the opposite case — since the way to replace one
+is now to DESCRIBE it, an answer that handed back its facts would have made the
+refusal the shortest route to the overwrite it exists to prevent. The verdict
+names only the handle, which the caller sent.
+
+**The verdict is `exists_fdms` and not a twelfth word**, deliberately: to the
+caller both halves are one fact — *the row at this handle is not yours to write,
+settle it* — they take the same route on the FDMS report, and
+`wa.bridge_verdicts()` stays the **eleven** the acceptance sweep counts. The NOTE
+is what separates «you claimed nothing» from «your claim is wrong».
+
+**Proven live, one rolled-back transaction, the P45-WAb bypass replayed
+verbatim:** rid A creates (`created`, record md5 `37595bd8…`) → **rid B with the
+copied-handle `prev` → `exists_fdms`, record md5 `37595bd8…` unchanged, the
+stored instructor and grade still A's** → rid B with a fabricated FULL `prev` →
+`exists_fdms` → **rid B's remove with the handle-only `prev` → `exists_fdms`**
+(before this round: `removed`) → rid B's remove with a fabricated full `prev` →
+`exists_fdms`, **tombstones 0, the row still standing**. And no regression on the
+legitimate path: rid A's own update with a true `prev` → `updated`; its replay →
+`unchanged`; a date correction → `moved`; its replay → `unchanged`; its removal →
+`removed`; the replayed removal → `unchanged`; the re-push → `tombstoned`, and
+with `clear_tombstone` → `created`. The audit tail reads
+`A:created | B:exists_fdms ×4 | A:updated | A:unchanged | A:moved | A:unchanged |
+A:removed | A:unchanged | A:tombstoned | A:created` — the P45-WAb ping-pong
+(`A:created | B:updated | B:removed | A:created`) is gone. All four `exists_fdms`
+answers carry `"row": null`; an admin-stamped row at the same handle still
+answers `exists_admin` **with the row in full**.
+
+**And the tolerance is proven, not asserted.** Against a row created from the
+bare minimum (`date`, `sortie`, `instructor`) and stored as
+`{ng:false, seq:1, kind:'syllabus', track:'contact', …}`: a `prev` that omits
+**every key the migration writes** → `updated`; a `prev` carrying a **retired
+key** the whitelist drops → `updated`; the **handle alone** → `exists_fdms`; a
+**one-grade-stale** `prev` → `exists_fdms` while the true one → `updated`; a
+removal whose `prev` omits the same defaults → `removed`. An honest caller is
+not asked for keys this database invents — only for the facts it sent.
+
+#### 4z·11·2. F2 — the honest claim, and what is still open
+
+The P45-WAb headline, the schema comment and §4z·10·2's title all said **«two
+`rid`s CANNOT silently share one handle»**. After this round the true sentence is
+stronger than what P45-WAb could prove and still **not** absolute, and it is now
+written in both places in exactly these words:
+
+> **An upsert that does not claim a replacement cannot overwrite one. A claimed
+> replacement must prove knowledge of the row it replaces. A removal must prove
+> the same. Byte-identical twins remain FDMS's to dedup.**
+
+**WHAT IS STILL OPEN, stated so that no reader has to find out the hard way.**
+
+1. **Byte-identical twins are indistinguishable, and always will be from here.**
+   If two identities describe the same flight with the same facts, the second
+   one's `prev` genuinely matches and its `row` is genuinely already standing
+   there (`unchanged`). There is nothing on this side to separate — they ARE one
+   row to this database. The dedup belongs to **P45-FDMS**: evId-first pairing,
+   with `seq` minted once and frozen.
+2. **This is an INTEGRITY GATE, not an AUTHORISATION BOUNDARY.** One bridge
+   credential serves the whole FDMS instance and `bridge_pull` returns the
+   records, so a caller that **reads first** can always compose a `prev` that
+   matches. What the gate stops is the failure this lane actually suffers: a
+   queue that has lost track of which identity holds a handle, pushing a change
+   it never had the facts for. Calling it more than that would be the same
+   over-claim this section exists to correct.
+
+Both are named in the schema at the branch itself, not only here.
+
+#### 4z·11·3. F3 — the fifth r24 assertion was a substring test
+
+`position('transaction_read_only' in def) = 0` read the **whole function body,
+comments included**. Its stated job is to survive a later round *«tidying»* — and
+the way rounds tidy is by **commenting out**. The assertion now strips the line
+comments and requires the SHAPE of a running guard:
+
+```sql
+if regexp_replace(def, '--[^\n]*', '', 'g')
+     !~ 'if[^;]*current_setting\s*\(\s*''transaction_read_only''[^;]*then[^;]*raise'
+```
+
+`[^;]*` is what ties the three together — there is no statement terminator
+between an `if` and the `raise` that is its first statement — so the **wording**
+of the comparison stays free to change while the **mechanism** may not disappear.
+
+**Proven both halves, five doctorings, each rolled back:** the guard **commented
+out** with the word left in the comment → *the old substring test passes* (proven
+in the same transaction) and **the new one fails the deployment by name**; the
+guard **deleted** → fails; `current_setting` **read into a variable but never
+raised** → fails (a guard that guards nothing); the guard **reworded**
+(`coalesce(…) <> 'off'`) but still executable → **passes**; the undoctored
+control → passes. `wa.auth_bridge` is md5 `c86d4bf5…` before and after every
+doctoring — the function itself is **not** touched by this round.
+
+#### 4z·11·4. F4 — an op's bad shape is a refusal, never a raise
+
+**Pre-existing, inherited unchanged from round 24 and charged to this one.** Every
+op — refused ones included — is filed in `wa.bridge_audit` (`seq int`) at the foot
+of the per-op loop, and the cast lived **in the INSERT**. So an op carrying
+`"seq": "not-a-number"` did not get a verdict: it raised the whole call with a raw
+Postgres error and **voided its nine well-formed siblings**, against the lane's own
+promise that *only the ENVELOPE raises*.
+
+- **`wa.log_seq(e jsonb)`** — the second new helper — reads that field as what it
+  is: a whole number **1..20** (the bounds `wa.validate_section` already asks of
+  every flight row and `bridge_tombstones_seq_chk` repeats), or NULL. Both
+  inserts now use it, so **neither can raise at all**.
+- The op-shape chain gained two refusals with house sentences: a `seq` in `row`
+  or `prev` that is not one of those numbers, and a `date` that is not a string.
+- **THE SWEEP, RECORDED.** Only two wire fields ever reach a typed column or a
+  cast — `seq` and `date` — and only `seq` cast. Everything else is read with
+  `->>` into a text column or handed to `wa.migrate_record` /
+  `wa.validate_section`, which answer with a **verdict**. Re-proved live: a sortie
+  that is an object, a five-thousand-character sortie, a nested object, `kind` as
+  an array, `grade: "abc"`, `ng: "maybe"`, `instructor` as an array, `mission` as
+  a number, `track` as a number, an op with no `rid` — **ten hostile shapes, ten
+  verdicts, zero raises, every sibling landed**.
+
+**Proven live, the verifier's own case first:** `seq: "not-a-number"` beside a
+good sibling → the bad op `refused` with the house sentence and **the sibling
+`created` and standing on the record**. Then the whole family — `"x"`, `1.5`,
+`0`, `"01"`, `21`, `99999999999999`, an object, an array → all `refused`; `null`,
+`""` and `2` still behave exactly as before (`created` / `unchanged` /
+`created`). The same seq in `prev` on a removal → `refused`. Six bad `date`
+types → `refused`, siblings landed every time. Every verdict emitted across the
+whole sweep is in `wa.bridge_verdicts()`.
+
+#### 4z·11·5. The standing acceptance, re-run
+
+**Schema applied twice**, `ON_ERROR_STOP=1`, **exit 0 both times**, every audit
+firing both times (r18 · r24 seed · r20 now *pinned on all **128*** · r22 withsp
+subset · r22 17 solo candidates · r24 bridge lane naming the read-only guard),
+with the token-echo SELECT still the **last** statement of the file · **pull**
+200 / 38 327 bytes twice, **zero** occurrences of `token` or `token_sha256` in
+the body · **push** through REST answering `{"ok": true}` with zero ops and
+writing nothing · **the GET oracle still dead**: `bridge_pull` and `bridge_push`
+with the LIVE, a wrong, a 3-char and an empty credential → **400 and the same
+211-byte body, md5 `c02d1b2a…`, all eight**, and the same for a **REVOKED** and a
+**never-minted** one · **blast radius 21 + 1 + 1 + 2 = 25**, the 21 refusals all
+**one distinct sentence** · **the surgeon on the real failing record**: still
+refused by its own SMS sentence before the push, `created` then `updated`
+through the new `prev` gate, `md5(data − flights)` and `md5(sms)` **identical**
+either side, still refused by the **same** sentence after · `node --check` clean
+on all seven `app/*.js` · **zero console messages of any level** on
+`http://localhost:8124/app/` · **privacy**: 110 roster tokens grepped
+word-boundary → **zero hits in this round's diff** (across all tracked files the
+single standing hit is the one NATO-alphabet word that is a deliberate fixture).
+
+**The DB blast radius is exactly three functions**, established by hashing every
+function body in the file at `d327f73` and in the working tree: **added**
+`wa.log_seq`, `wa.bridge_row`; **changed** `public.bridge_push`; **149 byte-identical**,
+`wa.auth_bridge` among them (`c86d4bf5…`, unchanged by this round even though F3
+is about the assertion over it). **No client byte is touched, so no cache-buster
+is bumped** — the touched-only rule.
+
+**Hygiene, byte-exact.** Every verdict probe ran inside a transaction that rolled
+back; the REST probes armed a scratch credential **whose value this round chose**
+(no human credential was read or typed) and disarmed it. All seven fingerprints
+are byte-identical to the pre-round capture — `people 9038cb66…`,
+`student_records 9811753…`, `instructor_records 34939e72…`, `proposals
+581f5eef…`, `wa.migrations a6fec2e6…`, `wa.settings 8cb95b1a…`,
+`wa.bridge_access a894ea7a…` (the seeded never-minted tuple) — with tombstones
+and audit empty.
+
+#### 4z·11·6. §4φ GATE — THE STACK IS NOW THREE
+
+This round changes `db/schema.sql`, so §4z·8 stands **verbatim and unweakened**,
+with one number moved again: the repo is **committed and NOT pushed**, the branch
+stands **three ahead** of `origin/main` (`44ea8ce`), and **one §4φ gate covers
+all three commits**. Deploy `db/schema.sql` through the Supabase MCP **without**
+the final echo statement, with **no** command ever returning a `token` or
+`token_sha256` column, from the **main session only** and with the user's
+explicit word per execution; `get_advisors` immediately afterwards.
+
+**THE ADVISOR PREDICTION IS UNCHANGED, AND HERE IS WHY IT SURVIVES TWO NEW
+FUNCTIONS.** `function_search_path_mutable` **0** — `wa.log_seq` and
+`wa.bridge_row` both carry the pin, and the r20 block now counts **128** and says
+so out loud; `rls_enabled_no_policy` **6 → 9** — no table, no policy added;
+`anon/authenticated_security_definer_function_executable` **42 → 47** — the two
+new helpers live in schema `wa`, are **not** `security definer` and are granted
+to nobody, so the advisor cannot see them. No RPC is added or removed: the public
+surface is still the same **25**. The file is now **7 470 lines**; the batch
+splitter that strips the final token-echo statement must still be seen to cover
+it — that statement is, and must remain, the **last** of the file.
 
 
 

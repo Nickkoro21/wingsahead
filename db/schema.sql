@@ -4596,6 +4596,56 @@ language sql immutable set search_path = public, wa, pg_temp as $$
       || U&'\2237' || coalesce(nullif(e->>'seq', ''), '1')
 $$;
 
+-- ── THE SAME ROW'S SEQ, READ AS A NUMBER (P45-WAc, F4) ────────────────────
+-- wa.log_handle spells the seq as TEXT, because a handle is a string. This is
+-- the same field read as what it actually is — which flight of that sortie on
+-- that day — and it answers NULL for anything that is not one.
+--
+-- IT EXISTS BECAUSE A CAST INSIDE AN INSERT IS A RAISE. public.bridge_push
+-- files EVERY operation in wa.bridge_audit (`seq int`) and every removal in
+-- wa.bridge_tombstones (`seq int`, CHECK 1..20), and it does both INSIDE the
+-- per-op loop. So `(op->'row'->>'seq')::int` on an op carrying `"seq": "x"`
+-- did not refuse that op — it raised the WHOLE call with a raw Postgres error
+-- («invalid input syntax for type integer») and took the nine well-formed
+-- operations standing beside it, against this lane's own contract that only
+-- the ENVELOPE raises. Read once, as an int or as nothing, and the two inserts
+-- stop being able to raise at all.
+--
+-- THE BOUNDS ARE THE ONES THAT ALREADY EXIST, not a third opinion:
+-- wa.validate_section asks wa.chk_int(e->'seq', …, 1, 20) of every flight row
+-- and bridge_tombstones_seq_chk repeats them in its own CHECK. A leading zero
+-- ('01') is NOT a seq here on purpose — wa.log_handle would spell it '01' and
+-- match no stored row, so accepting it as 1 would make the number that files
+-- the tombstone disagree with the handle that found the row.
+create or replace function wa.log_seq(e jsonb) returns int
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select case when jsonb_typeof(e) <> 'object' then null
+              when e->>'seq' ~ '^[1-9][0-9]?$' and (e->>'seq')::int between 1 and 20
+                then (e->>'seq')::int end
+$$;
+
+-- ── ONE BLOCK OF THE WIRE, READ EXACTLY AS A STORED ROW IS READ (P45-WAc) ──
+-- public.bridge_push holds TWO wire blocks that have to be compared with rows
+-- in the record: `row` (what this operation would write) and, since P45-WAc,
+-- `prev` (the row it CLAIMS to be replacing — see F1 there). Both are read by
+-- this one function, and that is the whole point of it being one.
+--
+-- WHY THE READ MIGRATION AND NOT A HAND-BUILT OBJECT. The stored rows both
+-- blocks are matched against have all been through wa.migrate_record: it
+-- normalises every string (the round-5b boundary), writes the three authored
+-- defaults (seq 1, kind 'syllabus', ng false), resolves the track from a
+-- syllabus code, drops a mission that a grade already implies and strips every
+-- key the section has retired. Reading a wire block any other way would make an
+-- UNCHANGED row look changed, and an HONEST `prev` look like a lie, purely
+-- because FDMS did not send a key whose default this database writes.
+-- One function, both sides, and the same one the storage went through.
+create or replace function wa.bridge_row(p_sec text, e jsonb) returns jsonb
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select case when jsonb_typeof(e) <> 'object' then null else
+    wa.migrate_record(jsonb_build_object(p_sec, jsonb_build_array(
+      e || jsonb_build_object('entered_by', 'fdms'))))->p_sec->0 end
+$$;
+
 -- ── THE BRIDGE ROW'S SURVIVAL CLAUSE — THE SENTENCE (round 24 / B.4) ──────
 -- The mirror of wa.admin_lock_msg one notch SOFTER, and the difference is the
 -- whole ruling: an admin row is LOCKED (it may not be edited at all), an FDMS
@@ -6198,11 +6248,19 @@ end $$;
 --   p_ops = [ { "op": "upsert" | "remove",
 --               "section": "flights" | "fs",
 --               "rid": "<the FDMS date-free identity>",
---               "prev": { "sortie": …, "date": …, "seq": 1 } | null,
+--               "prev": <the row AS THE BRIDGE LAST WROTE IT> | null,
 --               "row":  { date, track, sortie, seq, kind, instructor,
 --                         instructor_oid, grade, ng, mission },   -- upsert only
 --               "clear_tombstone": false,
 --               "reason": "undo" | "source_removed" | "developer" } ]  -- remove
+--
+-- `prev` CHANGED SHAPE IN P45-WAc, AND IT IS THE ONE WIRE CHANGE OF THAT ROUND.
+-- It used to be the three fields that NAME the row — sortie, date, seq — and a
+-- name is not a proof: the caller is standing on that handle already, so
+-- repeating it says nothing an identity that never wrote the row could not also
+-- say. `prev` is now the ROW, the same facts in the same keys as `row`, and it
+-- is compared with what actually stands at the handle (F1 below). A removal
+-- names its row the same way — `prev`, or `row` when it sends no `prev`.
 --
 -- WHY A SURGEON AND NOT A COURIER (design decision #3). The study's first shape
 -- had the client READ the record, modify it and send the whole thing back. That
@@ -6225,14 +6283,37 @@ end $$;
 --     student's row or an admin's row is answered `exists_student` /
 --     `exists_admin`, the row is RETURNED IN FULL so the FDMS report can show
 --     both versions, and nothing is written.
---   · It never overwrites a row it owns but was not TOLD about (P45-WAb, F2).
---     `prev` is what says «I am replacing the row standing here»; an upsert
---     without one is a CREATE, and a create landing on a handle that already
---     holds a BRIDGE row is `exists_fdms` — not `updated`. The stored row
---     carries no rid by design, so Wings Ahead can see THAT another FDMS
---     identity holds the handle and never WHICH; overwriting on a guess is how
---     one flight silently becomes another and an undo stops sticking. The
---     audit tail carries both rids at the handle for the cross-check.
+--   · It never overwrites a row it owns but was not TOLD about (P45-WAb F2,
+--     P45-WAc F1), and here is EXACTLY what that is worth, in the two
+--     sentences the code can actually stand behind:
+--       — AN UPSERT THAT DOES NOT CLAIM A REPLACEMENT CANNOT OVERWRITE ONE.
+--         `prev` is what says «I am replacing the row standing here»; an upsert
+--         without one is a CREATE, and a create landing on a handle that
+--         already holds a BRIDGE row is `exists_fdms` — not `updated`.
+--       — A CLAIMED REPLACEMENT MUST PROVE KNOWLEDGE OF THE ROW IT REPLACES.
+--         `prev` is compared, fact for fact, with the row standing at the
+--         handle (wa.entry_core, through wa.bridge_row); a `prev` that does not
+--         match is `exists_fdms` and nothing is written. The same test guards
+--         the `remove` verb, which used to need no proof at all.
+--     The stored row carries no rid by design, so Wings Ahead can see THAT
+--     another FDMS identity holds the handle and never WHICH; overwriting on a
+--     guess is how one flight silently becomes another and an undo stops
+--     sticking. The audit tail carries both rids at the handle for the
+--     cross-check.
+--     WHAT IT IS NOT, said in the same breath, because the P45-WAb headline
+--     («two rids CANNOT silently share one handle») over-claimed and a claim
+--     this file cannot prove is worth less than no claim at all:
+--       — BYTE-IDENTICAL TWINS REMAIN INDISTINGUISHABLE. If two identities
+--         describe the same flight with the same facts, the second one's `prev`
+--         genuinely matches and its `row` is genuinely already there — to this
+--         database they are one row, and no test written HERE can separate
+--         them. That dedup is P45-FDMS's, by pairing on evId.
+--       — AND THIS IS AN INTEGRITY GATE, NOT AN AUTHORISATION BOUNDARY. One
+--         bridge credential serves the whole FDMS instance and public.bridge_pull
+--         returns the records, so a caller that reads first can always compose a
+--         `prev` that matches. What the gate stops is the failure this lane
+--         actually suffers: a queue that has lost track of which identity holds
+--         a handle, pushing a change it never had the facts for.
 --   · It never accepts provenance from the wire. `entered_by` is set HERE, to
 --     'fdms', on every row it writes; a client that sends one is refused by
 --     name. Provenance is a property of which function was called, exactly as
@@ -6264,9 +6345,15 @@ end $$;
 -- and write nothing: a create or an update because the stored row already
 -- matches the candidate; a remove because the tombstone is already lying on the
 -- identity; and a MOVE because the row is standing at the handle the op was
--- moving it to, fact for fact. Before this round the move alone answered
+-- moving it to, fact for fact. Before that round the move alone answered
 -- `exists_fdms` — a CONFLICT verdict for an operation that had succeeded, on
 -- the one path the whole retry story runs through.
+-- THE REPLAY IS THE IDENTICAL OPERATION, AND THAT IS NOW A RULE AND NOT A
+-- HABIT (P45-WAc). Since `prev` is compared with the row it claims to replace,
+-- a ledger must take its `prev` from the LAST ACKNOWLEDGED push: re-sending the
+-- same op is always safe, and sending a SECOND change with the first change's
+-- `prev` is refused — a report line — instead of being applied on top of a row
+-- the caller has not seen. Which is what an ordered queue does anyway.
 create or replace function public.bridge_push(p_token text, p_student_oid text,
                                               p_ops jsonb)
 returns jsonb
@@ -6284,6 +6371,8 @@ declare
   o_op text; sec text; v_rid text; prv jsonb; row_in jsonb; v_reason text;
   clear_tomb boolean;
   arr jsonb; cand jsonb; outrec jsonb;
+  claim jsonb;        -- the block this op says the standing row IS (P45-WAc F1)
+  pcand jsonb;        -- that block read exactly as a stored row is read
   hit int; tgt int; j int; ix int;
   stamp text; tgt_stamp text;
   vd text; note text; found jsonb; changed boolean := false;
@@ -6358,6 +6447,34 @@ begin
     elsif nullif(trim(coalesce(v_rid, '')), '') is null then
       vd := 'refused';
       note := 'every operation names the FDMS identity it is about (rid) — it is what the tombstones and the audit are keyed to';
+    -- ── P45-WAc F4 — A BAD FIELD TYPE IS A REFUSAL, NEVER A RAISE ───────────
+    -- THE HOLE THIS CLOSES (pre-existing, inherited unchanged from round 24).
+    -- Every op — refused ones included — is filed in wa.bridge_audit at the
+    -- foot of this loop, and that table takes `seq` as an INT. The cast used to
+    -- live in the INSERT itself, so an op carrying `"seq": "not-a-number"`
+    -- raised the WHOLE CALL with a raw Postgres error and voided the nine
+    -- well-formed ops beside it — the exact failure the header promises cannot
+    -- happen («only the ENVELOPE raises»), and it could not be answered by a
+    -- verdict because the raise came AFTER the verdict was decided.
+    -- THE SWEEP, RECORDED: only TWO wire fields ever reach a typed column or a
+    -- cast — `seq` (int, in the audit and in the tombstone) and `date` (text in
+    -- the audit, but CHECK-constrained to the ISO pattern in the tombstone).
+    -- Every other field of `row` / `prev` is read with `->>` into a text column
+    -- or handed to wa.migrate_record / wa.validate_section, which answer with a
+    -- VERDICT: a sortie that is an object, a grade of "abc", a kind that is an
+    -- array, `ng: "maybe"`, a five-thousand-character sortie — all of them are
+    -- already refusals and were re-proved as such this round. So the class is
+    -- closed by guarding these two, and by wa.log_seq taking the cast out of
+    -- both inserts so that the guard is a courtesy and not the only thing
+    -- standing between a typo and nine lost operations.
+    elsif (nullif(row_in->>'seq', '') is not null and wa.log_seq(row_in) is null)
+       or (nullif(prv->>'seq', '')    is not null and wa.log_seq(prv)    is null) then
+      vd := 'refused';
+      note := 'the same-day sequence number of a flight is a whole number from 1 to 20 — the bounds every flight row of this record is validated against, written without a leading zero. THIS operation is refused for it and the ones sent beside it are not: an operation whose shape the parser cannot read is its own problem, never its siblings''.';
+    elsif not (coalesce(jsonb_typeof(row_in->'date'), 'null') = any(array['string','null']))
+       or not (coalesce(jsonb_typeof(prv->'date'),    'null') = any(array['string','null'])) then
+      vd := 'refused';
+      note := 'a date crosses this wire as a calendar day written out — "2026-09-01" — and this operation sent something that is not a string at all. It is refused by its SHAPE, before anything is matched, so that the answer names the real fault instead of reporting that no row stands at a handle nobody could have built.';
     elsif o_op = 'remove' and (v_reason is null
                                or not (v_reason = any(wa.bridge_reasons()))) then
       vd := 'refused';
@@ -6408,25 +6525,31 @@ begin
       stamp := case when hit >= 0 then arr->hit->>'entered_by' end;
       tgt_stamp := case when tgt >= 0 then arr->tgt->>'entered_by' end;
 
-      if o_op = 'upsert' then
-        -- THE CANDIDATE IS BUILT BY THE READ MIGRATION, not by hand, and it is
-        -- built HERE — before the first verdict, not inside the write branch —
-        -- because two of the verdicts below have to ask «is the row that is
-        -- standing in the way the one I was about to write?» (P45-WAb F1).
-        -- The stored rows it is about to be compared with have all been through
-        -- wa.migrate_record — which normalises every string (the round-5b
-        -- boundary), writes the three authored defaults (seq 1, kind
-        -- 'syllabus', ng false), resolves the track from a syllabus code and
-        -- strips any key the section has retired. Building the candidate any
-        -- other way would make an UNCHANGED row look changed on every push,
-        -- purely because FDMS did not send a key whose default this database
-        -- writes: permanent churn, and a report the developer would learn to
-        -- ignore. One function, both sides — and it is also where must-fix 6
-        -- (the normalisation boundary) is honoured, by the same call the stored
-        -- rows go through.
-        cand := wa.migrate_record(jsonb_build_object(sec, jsonb_build_array(
-                  row_in || jsonb_build_object('entered_by', 'fdms'))))->sec->0;
+      -- ── THE TWO CANDIDATES, AND ONE FUNCTION READS BOTH ────────────────────
+      -- `cand` is what this op would WRITE; `pcand` is what it CLAIMS is
+      -- standing there already (`prev`, or — for a removal that sends none —
+      -- `row`). Both are built by the READ MIGRATION and not by hand, both
+      -- BEFORE the first verdict, because four of the verdicts below have to
+      -- ask one of two questions: «is the row that is standing in the way the
+      -- one I was about to write?» (P45-WAb F1) and «is the row standing here
+      -- the one this operation says it is replacing?» (P45-WAc F1).
+      -- WHY THE MIGRATION IS THE ONLY HONEST READER: the stored rows both are
+      -- compared with have been through wa.migrate_record, which normalises
+      -- every string (the round-5b boundary), writes the three authored
+      -- defaults (seq 1, kind 'syllabus', ng false), resolves the track from a
+      -- syllabus code and strips any key the section has retired. Reading a
+      -- wire block any other way would make an UNCHANGED row look changed on
+      -- every push and an HONEST `prev` look like a lie, purely because FDMS
+      -- did not send a key whose default this database writes: permanent churn,
+      -- and a report the developer would learn to ignore. One function
+      -- (wa.bridge_row), both blocks, the same call the stored rows went
+      -- through — which is also where must-fix 6, the normalisation boundary,
+      -- is honoured.
+      cand  := wa.bridge_row(sec, row_in);
+      claim := case when o_op = 'upsert' then prv else coalesce(prv, row_in) end;
+      pcand := wa.bridge_row(sec, claim);
 
+      if o_op = 'upsert' then
         -- 1. THE TOMBSTONE GATE. An identity somebody undid does not come back
         --    on its own; only an explicit, confirmed re-push clears it.
         if exists (select 1 from wa.bridge_tombstones tb
@@ -6473,9 +6596,19 @@ begin
             vd := 'unchanged';
             note := 'this operation had already landed — the row it moves is standing at its new flight, date and seq, fact for fact, and the `prev` it carries is the handle the row left. A retry after an answer that never arrived is absorbed here, exactly as a replayed create, update or remove is.';
           else
+            -- P45-WAc F1 — AND THE ROW IS NOT HANDED BACK. Every other
+            -- `exists_*` returns the standing row in full so the FDMS report can
+            -- show both versions, and for a HUMAN's row that is right: the
+            -- bridge can never write over one whatever it sends, so knowing its
+            -- facts buys nothing. An `exists_fdms` row is the opposite case —
+            -- since P45-WAc the way to overwrite a bridge row is to DESCRIBE it
+            -- in `prev`, so answering the refusal with the row's own facts would
+            -- have made this refusal the shortest route to the overwrite it
+            -- exists to prevent. The verdict names the HANDLE (which the caller
+            -- sent) and nothing else; the developer reads the rest from his own
+            -- report and from the audit tail's two rids.
             vd := 'exists_fdms';
-            found := arr->tgt;
-            note := 'that flight, date and seq is already taken on this record — the move would have made two rows one flight';
+            note := 'that flight, date and seq is already taken on this record by a row the bridge itself wrote — the move would have made two rows one flight. What stands there is not described back to you: since a `prev` that describes a row is what authorises replacing it, an answer that handed over the facts would be a way around the rule it is enforcing.';
           end if;
         else
           -- 4. THE WRITE ITSELF.
@@ -6524,31 +6657,102 @@ begin
             -- which is why a replay still costs nothing) — and anything else is
             -- a conflict somebody has to settle. A CHANGE carries `prev`.
             --
-            -- WHAT THIS DOES NOT CLOSE, SAID OUT LOUD. The REMOVE verb has the
-            -- same blind spot from the other side: it matches on the handle, so
-            -- a remove sent under rid B, aimed at a handle whose row was
-            -- written by rid A, deletes A's row and tombstones B — and A, which
-            -- is not tombstoned, re-creates it at its next push. Proven live in
-            -- this round. It is now much narrower than it was, because B can
-            -- only be in that state by IGNORING the `exists_fdms` this branch
-            -- just answered it, and every step of it is in the audit. It is not
-            -- closed HERE because it cannot be: a stored row carries no rid (B.2
-            -- — the record is the squadron's document, not FDMS's mirror), and
-            -- the only WA-side memory of which identity wrote which row is
-            -- wa.bridge_audit, which §4z·5·4 deliberately made a LOG and not a
-            -- GATE. Promoting it would make trimming a log change behaviour.
-            -- The real cure is FDMS-side pairing (evId first, seq minted once
-            -- and frozen), which is P45-FDMS's work; until it exists this is a
-            -- REPORT LINE with both rids on it, which is the lane's whole
-            -- doctrine for a disagreement it cannot settle alone.
+            -- WHAT THIS HALF DOES NOT CLOSE ON ITS OWN — and P45-WAc's F1,
+            -- immediately below, is the other half. A `prev` was a CLAIM and
+            -- nothing else: this function read it only through wa.log_handle,
+            -- i.e. the same sortie / date / seq the operation was already
+            -- sending in `row`. So the identity refused HERE obtained a silent
+            -- `updated` by adding a two-line `prev` block copied out of its own
+            -- `row` — and this refusal's own advice used to tell it to. The
+            -- branch below now makes `prev` prove knowledge. The REMOVE verb had
+            -- the same blind spot from the other side (it matched on the handle
+            -- alone, so a remove under rid B deleted rid A's row and tombstoned
+            -- only B); it is guarded by the same test now, in its own branch.
             vd := 'exists_fdms';
-            found := arr->hit;
-            note := format('a flight already stands at %s of %s (#%s) on this record and the bridge itself put it there — and this operation did not say which row it was replacing. A pushed row carries no FDMS identity, so Wings Ahead can see THAT another identity holds this flight, date and seq but not WHICH, and writing over it would lose a flight with nobody told. Send the change with `prev` naming the row it replaces, or remove the identity holding the handle first; the audit tail carries both rids at this handle for the cross-check.',
+            note := format('a flight already stands at %s of %s (#%s) on this record and the bridge itself put it there — and this operation did not say which row it was replacing. A pushed row carries no FDMS identity, so Wings Ahead can see THAT another identity holds this flight, date and seq but not WHICH, and writing over it would lose a flight with nobody told. Send the change with `prev` CARRYING the row it replaces — the row as the bridge last wrote it, fact for fact, because `prev` is checked against what actually stands here — or remove the identity holding the handle first; the audit tail carries both rids at this handle for the cross-check.',
                            coalesce(nullif(upper(coalesce(cand->>'sortie', '')), ''), 'this flight'),
                            case when wa.is_iso_date(cand->>'date')
                                 then to_char((cand->>'date')::date, 'DD/MM/YYYY')
                                 else 'an unrecorded date' end,
                            coalesce(nullif(cand->>'seq', ''), '1'));
+          elsif hit >= 0 and wa.entry_core(pcand) is distinct from wa.entry_core(arr->hit) then
+            -- ── P45-WAc F1 — `prev` MUST PROVE KNOWLEDGE ────────────────────
+            -- THE HOLE THIS CLOSES, and it is the bypass the P45-WAb verify
+            -- walked through live. The branch above refuses an upsert that does
+            -- not CLAIM a replacement; it did nothing about a FALSE claim,
+            -- because the claim's content was never compared with anything.
+            -- rid B, answered `exists_fdms` a moment earlier, copied the three
+            -- handle fields out of its own `row` into a `prev` and got a silent
+            -- `updated` over rid A's flight. The audit recorded it; nothing
+            -- refused it.
+            --
+            -- THE TEST IS THE ONE THIS FILE ALREADY OWNS, asked of the third
+            -- slot: is the row standing at the handle byte-identical (by
+            -- wa.entry_core — stamp excluded, null-valued keys dropped) to the
+            -- row `prev` describes, both read through wa.bridge_row? If it is
+            -- not, the operation does not know what it is replacing, and an
+            -- identity that never wrote the row CANNOT produce its facts out of
+            -- the handle it is standing on. That is why the proof is the FULL
+            -- core and not a chosen subset — the judgement, recorded:
+            --   · the handle proves nothing: it is how the row was found, so
+            --     asking for it back is asking the claimant to repeat himself;
+            --   · any subset short of the core has to NAME the proof-bearing
+            --     fields, and every such list is guessable on some row (a flight
+            --     whose debrief has not landed carries little beyond the
+            --     instructor and three defaults). The core degrades by itself to
+            --     «the strongest proof this particular row can offer»;
+            --   · and it is ONE test with one spelling. A second, weaker notion
+            --     of «is this the row?» beside wa.entry_core is exactly the drift
+            --     wa.admin_lock_msg and wa.bridge_reasons() were made functions
+            --     to prevent.
+            -- IT COSTS THE HONEST CALLER NOTHING IT DOES NOT ALREADY HOLD: to
+            -- know a change is worth pushing, the queue must already hold the row
+            -- it last pushed. `prev` becomes that row instead of three of its
+            -- fields. What it does demand is ORDER — the ledger must take its
+            -- `prev` from the LAST ACKNOWLEDGED push, so a second change sent
+            -- with the first change's `prev` is refused here rather than applied
+            -- twice. That is the retry doctrine of this lane written as a rule
+            -- instead of a hope, and it fails as a REPORT LINE, never silently.
+            --
+            -- THE VERDICT IS `exists_fdms` AND NOT A NEW WORD, deliberately. To
+            -- the caller both halves are one fact — «the row at this handle is
+            -- not yours to write, settle it» — they take the same route on the
+            -- FDMS report, and wa.bridge_verdicts() stays the eleven words the
+            -- acceptance sweep counts. The NOTE is what separates «you claimed
+            -- nothing» from «your claim is wrong».
+            --
+            -- WHAT IT REFUSES TO SAY. Not one fact of the standing row is echoed
+            -- back — not which field differs, not its value. The sentence names
+            -- only the handle, which the caller sent. An answer that said «the
+            -- grade is 5» would turn this refusal into the two-step overwrite it
+            -- exists to prevent: ask once, be told, claim correctly.
+            --
+            -- AND WHAT IT STILL DOES NOT CLOSE, so that no reader has to find
+            -- out the hard way:
+            --   · BYTE-IDENTICAL TWINS. Two identities describing the same
+            --     flight with the same facts are ONE ROW to this database: B's
+            --     `prev` genuinely matches, and its `row` is genuinely already
+            --     standing there (the `unchanged` branch above). No test written
+            --     on this side can separate them, because there is nothing to
+            --     separate. That dedup is P45-FDMS's, by pairing on evId with a
+            --     seq minted once and frozen.
+            --   · THIS IS AN INTEGRITY GATE, NOT AN AUTHORISATION BOUNDARY. One
+            --     bridge credential serves the whole FDMS instance, and
+            --     public.bridge_pull hands back the records — so a caller that
+            --     READS FIRST can always compose a `prev` that matches. The gate
+            --     is against the failure this lane actually suffers: a queue that
+            --     has lost track of which identity holds a handle and pushes a
+            --     change it never had the facts for.
+            -- The audit still records both rids at the handle either way, which
+            -- is the lane's whole doctrine for a disagreement it cannot settle
+            -- alone: a report line, never a silence.
+            vd := 'exists_fdms';
+            note := format('this operation says it is replacing the row at %s of %s (#%s), but the row standing there is not the row its `prev` describes. `prev` is a claim of KNOWLEDGE and is checked as one: it must be the row as the bridge last wrote it, fact for fact — which is precisely what an identity that never wrote the row cannot produce. WHICH facts differ is deliberately not answered: an answer that described the standing row would be a way of reading a flight somebody else wrote, and then of claiming it correctly. Take the `prev` from the last push this identity had acknowledged, or settle the collision on the FDMS side; the audit tail carries both rids at this handle.',
+                           coalesce(nullif(upper(coalesce(pcand->>'sortie', '')), ''), 'this flight'),
+                           case when wa.is_iso_date(pcand->>'date')
+                                then to_char((pcand->>'date')::date, 'DD/MM/YYYY')
+                                else 'an unrecorded date' end,
+                           coalesce(nullif(pcand->>'seq', ''), '1'));
           else
             if hit >= 0 then
               vd := case when h_prev is distinct from h_new then 'moved' else 'updated' end;
@@ -6584,6 +6788,30 @@ begin
           note := case when stamp = 'admin'
                        then 'the admin has taken this row over — only he removes it now'
                        else 'this row is no longer the bridge''s: somebody on this record corrected it, and a corrected row belongs to the person who corrected it' end;
+        elsif wa.entry_core(pcand) is distinct from wa.entry_core(arr->hit) then
+          -- ── P45-WAc F1, THE OTHER VERB ──────────────────────────────────
+          -- THE GAP §4z·10·2 DECLARED UNCLOSABLE, NARROWED. A removal used to
+          -- name its row by the HANDLE alone — so a remove sent under rid B,
+          -- aimed at a handle whose row rid A had written, deleted A's row and
+          -- laid a tombstone on B; A, untombstoned, re-created the row at its
+          -- next push and the undo did not stick. That was true whatever the
+          -- upsert side did, which is why the round that closed the upsert half
+          -- had to write the remove half down as still open.
+          -- IT IS THE SAME TEST, ASKED OF THE SAME BLOCK: the row a removal
+          -- names — `prev`, or `row` when it sends no `prev` — must BE the row
+          -- standing at the handle, fact for fact. A removal is the one verb
+          -- that destroys, so a claim it cannot back is the last place to be
+          -- generous. The known limits are the two written out at the upsert
+          -- branch above and they are the same two: byte-identical twins really
+          -- are one row here, and a caller that pulls first can describe
+          -- anything. Neither is closable on this side; both are P45-FDMS's.
+          vd := 'exists_fdms';
+          note := format('this removal names the row at %s of %s (#%s), but the row standing there is not the row it describes. A removal carries the row it removes — as the bridge last wrote it, fact for fact — because matching on the sortie, the date and the seq alone would let an identity delete a flight it never wrote, which is exactly how an undo stops sticking. WHICH facts differ is deliberately not answered here. Settle it from the report; the audit tail carries both rids at this handle.',
+                         coalesce(nullif(upper(coalesce(pcand->>'sortie', '')), ''), 'this flight'),
+                         case when wa.is_iso_date(pcand->>'date')
+                              then to_char((pcand->>'date')::date, 'DD/MM/YYYY')
+                              else 'an unrecorded date' end,
+                         coalesce(nullif(pcand->>'seq', ''), '1'));
         else
           vd := 'removed';
           arr := (select coalesce(jsonb_agg(x), '[]'::jsonb)
@@ -6615,7 +6843,7 @@ begin
         values (p_student_oid, s.id, sec,
                 coalesce(prv->>'sortie', row_in->>'sortie'),
                 coalesce(prv->>'date', row_in->>'date'),
-                coalesce(nullif(coalesce(prv->>'seq', row_in->>'seq'), '')::int, 1),
+                coalesce(wa.log_seq(prv), wa.log_seq(row_in), 1),
                 v_rid, v_reason)
         on conflict do nothing;
       elsif clear_tomb and vd in ('created', 'moved', 'updated', 'unchanged') then
@@ -6627,12 +6855,19 @@ begin
     end if;
 
     -- 7. THE AUDIT — one row per op, whatever it decided. No names, no grades.
+    --    THE SEQ IS READ, NOT CAST (P45-WAc F4). This insert runs for EVERY op,
+    --    including the ones already refused, so the `::int` that used to stand
+    --    here was the one expression in the loop that could still raise after a
+    --    verdict had been decided — and a raise here takes the whole call and
+    --    every sibling op with it. wa.log_seq answers NULL for a seq that is not
+    --    one, the column is nullable, and the op-shape guard above has already
+    --    said so in words.
     insert into wa.bridge_audit
       (student_id, student_oid, op, section, sortie, date, seq, rid, verdict, note)
     values (s.id, p_student_oid, coalesce(o_op, '(none)'), sec,
             coalesce(row_in->>'sortie', prv->>'sortie'),
             coalesce(row_in->>'date', prv->>'date'),
-            nullif(coalesce(row_in->>'seq', prv->>'seq', ''), '')::int,
+            coalesce(wa.log_seq(row_in), wa.log_seq(prv)),
             v_rid, vd, note);
 
     verdicts := verdicts || jsonb_build_array(jsonb_build_object(
@@ -7064,7 +7299,9 @@ end $$;
 --      a table constraint instead of to a pair of functions;
 --   5. wa.auth_bridge still refuses a READ ONLY transaction before it compares
 --      anything (P45-WAb F3) — the one line that stops PostgREST's GET verb
---      from separating a live credential from a dead one by status code.
+--      from separating a live credential from a dead one by status code — and
+--      the assertion is on the EXECUTABLE guard, not on the word appearing
+--      somewhere in the body, comments included (P45-WAc F3).
 do $$
 declare
   bad text[];
@@ -7188,15 +7425,33 @@ begin
   --     live credential from a dead one. The cure is a guard that raises before
   --     any comparison — and a guard nothing asserts is a guard a later round
   --     removes while tidying. This reads the CATALOG's own copy of the
-  --     function body, so it is true of the database and not of this file.
+  --     function body, so it is true of the database and not of this file —
+  --     and, since P45-WAc F3, it asserts a guard that RUNS rather than a word
+  --     that appears (see the block below the null check).
   select pg_get_functiondef(p.oid) into def
   from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
   where ns.nspname = 'wa' and p.proname = 'auth_bridge';
   if def is null then
     raise exception 'r24: wa.auth_bridge does not exist — it is the ONLY entrance to public.bridge_pull and public.bridge_push';
   end if;
-  if position('transaction_read_only' in def) = 0 then
-    raise exception 'r24: wa.auth_bridge has lost its read-only guard — without it PostgREST answers GET rpc/bridge_pull?p_token=… with 400 for a wrong token and 405 for a live one, and the status code alone becomes a live-credential oracle that wa.bridge_refusal_msg exists to make impossible';
+  -- P45-WAc F3 — AND IT ASSERTS AN EXECUTABLE GUARD, NOT A WORD IN A COMMENT.
+  -- The first spelling of this was `position('transaction_read_only' in def) = 0`,
+  -- a SUBSTRING test over the whole function body — and the body includes its
+  -- comments. Its stated job is to survive a later round «tidying», and the way
+  -- rounds tidy is by COMMENTING OUT: leave the guard behind a `--` with the
+  -- word still in the prose above it and the deployment went green while the
+  -- live-token oracle was fully back. Proven both ways in P45-WAc.
+  -- So the line comments come off first and what is asserted is the SHAPE of a
+  -- running guard: a conditional that reads current_setting('transaction_read_only')
+  -- and RAISES. `[^;]*` is what ties the three together — there is no statement
+  -- terminator between an `if` and the `raise` that is its first statement — so
+  -- the wording of the comparison stays free to change while the mechanism may
+  -- not disappear. (The strip is safe on THIS body: it carries no `--` inside a
+  -- string literal, and the assertion below would fail loudly, not quietly, if a
+  -- later round put one there.)
+  if regexp_replace(def, '--[^\n]*', '', 'g')
+       !~ 'if[^;]*current_setting\s*\(\s*''transaction_read_only''[^;]*then[^;]*raise' then
+    raise exception 'r24: wa.auth_bridge has lost its read-only guard — an EXECUTABLE «if current_setting(''transaction_read_only'' …) then raise» is not in the catalog''s copy of the body (a guard that is only mentioned in a comment is not a guard). Without it PostgREST answers GET rpc/bridge_pull?p_token=… with 400 for a wrong token and 405 for a live one, and the status code alone becomes a live-credential oracle that wa.bridge_refusal_msg exists to make impossible';
   end if;
 
   raise notice 'r24: bridge lane audited — 3 tables in schema wa, RLS on, 0 policies, 0 API grants; section (%) ≡ wa.log_bands(), reason (%) ≡ wa.bridge_reasons(); handle guards, the armed check and the read-only (GET) guard in place',
