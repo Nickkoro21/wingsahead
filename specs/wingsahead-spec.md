@@ -8076,11 +8076,13 @@ cannot drift from itself. The length test stays — it is what keeps a NULL out 
    PostgREST runs a STABLE function inside a **READ ONLY** transaction, so a
    `stable` pull would have failed on **every** call — including the setup Test,
    bricking onboarding with a Postgres error where the design promised the
-   server's own sentence. Cost: none. `volatile` is POST-only on PostgREST,
-   which is itself worth having: the token travels in the request **body**,
-   where no URL and no proxy log can smear it, and that is why the future
-   Cloudflare-Worker lift is a URL swap and not a contract change.
-   **Proven live: two pulls in a row, both 38 327 bytes, through REST.**
+   server's own sentence. Cost: none — the call is a POST either way, which is
+   why the future Cloudflare-Worker lift is a URL swap and not a contract
+   change. **Proven live: two pulls in a row, both 38 327 bytes, through REST.**
+   **CORRECTED IN P45-WAb (F3):** this entry also claimed `volatile` made the
+   door **POST-only**, so the token *«can never be smeared through a URL or a
+   proxy log»*. **It does not.** PostgREST routes a GET to a volatile function
+   too, and until F3 the two answers differed. See §4z·10·3.
 2. **The tombstones are unreachable from anon** — by ADDRESS, which is stronger
    than by permission. Kept from the fragment and now audited (§4z·1·1 #1).
 3. **The authored `seq` is stored and never re-derived.** WA has refused a
@@ -8306,7 +8308,31 @@ developer, not a re-creation.
    `keepalive()` takes none; `whoami` answers `{"role": null}` to a stranger
    rather than refusing. «Every other RPC refuses it» is therefore **21 refusals
    + 1 anonymous answer + 1 tokenless ping** — an acceptance test that says «25
-   refusals» fails on its own arithmetic.
+   refusals» fails on its own arithmetic. *(The schema comment that carries this
+   said «22» until P45-WAb F5 — it subtracted the two bridge doors from the 25
+   and then counted one of them back in. Fixed to agree with this line and with
+   the live sweep.)*
+9. **THERE ARE TWO DOORS INTO `public.student_records`, AND THE SECOND IS
+   NAMED** (P45-WAb F4; critique item 10·5 called amending this a blocker).
+   `wa.write_record` is the **human** path — `save_student_record` (the owner)
+   and `admin_save_student_record` (the admin on their behalf) — and its header
+   claimed to be *«the ONE student-record write path»* while `public.bridge_push`
+   wrote the table **directly**. The comment now says the narrower true thing
+   and names the second door beside it.
+   **Why the bridge does not come through `wa.write_record`:** that function
+   takes a WHOLE record and validates the whole of it, and one stored record
+   cannot pass `wa.validate_record` on its own migrated form — so a push routed
+   through it would be permanently refused for that student, over a section the
+   lane does not touch and could never fix. That is design decision #3 (§4z·3·4).
+   **Why the second door is safe:** it keeps the four things the first one does
+   — the same normalisation boundary (`wa.migrate_record` on a one-row section),
+   the same validator on the sections it touched (`wa.validate_section`, cap
+   included), the same registries and refusals, and a write-back that touches
+   only what it touched. **And the one thing it deliberately does NOT do is
+   recompute `record_stamp`**: `wa.record_stamp` counts the literal `'admin'`,
+   an fdms row is neither the owner's nor the admin's, and recomputing the
+   record-level stamp from the bridge would be the lane answering a custody
+   question nobody asked it. So an fdms row can never flip a record's stamp.
 
 ### 4z·6. SELF-VERIFICATION — RUN LIVE ON THE LOCAL STACK
 
@@ -8473,9 +8499,10 @@ lock on a door that has no handle; `anon/authenticated_security_definer_function
 moves **42 → 47** (the five new public RPCs), **ACCEPTED BY DESIGN** for the
 reason the other 42 are: the architecture is RPC-only with the credential as an
 argument, and each function authenticates itself.
-**AND ONE THING TO WATCH:** the file is now 6 986 lines. The batch splitter that
-strips the final token-echo statement must still be seen to cover it — the
-statement is, and must remain, the **last** statement of the file.
+**AND ONE THING TO WATCH:** the file is now 6 986 lines — **7 215 after
+P45-WAb** (§4z·10). The batch splitter that strips the final token-echo
+statement must still be seen to cover it — the statement is, and must remain,
+the **last** statement of the file.
 
 ### 4z·9. THE ONE THING THIS ROUND DELIBERATELY DID NOT DO
 
@@ -8488,6 +8515,190 @@ for is the developer's cross-check report on the FDMS side, which is P45-FDMS's
 whole subject, and a WA-side audit table drawn before the lane has a history
 would be an empty page pretending to be a feature. The data contract is
 delivered and named here so the next round can be judged against it.
+
+### 4z·10. P45-WAb — THE FIVE RESIDUALS OF THE ADVERSARIAL VERIFY, CLOSED
+
+The verify of §4z passed twenty items and left **five residuals**, none a
+build-breaker and none touching a human-authored row. This follow-up closes all
+five before the §4φ gate, so **one gate covers two commits**. No client file is
+touched: every change is in `db/schema.sql` and in this document.
+
+#### 4z·10·1. F1 — a `moved` op is replay-safe
+
+**The hole.** A move is `prev` (where the row was) + `row` (where it goes). Once
+it lands the source handle is empty and the target holds the row — so the RETRY
+of that same op, which is what a caller sends when the ANSWER never arrived and
+which still carries the now-stale `prev`, read as *source gone, target held by
+another bridge row* → **`exists_fdms`**. A **conflict verdict for an operation
+that had already succeeded**, on the one path the whole retry story runs
+through, while a replayed create, update and remove all answered `unchanged`.
+
+**The cure** is one condition in the target-occupied branch, and it is the test
+that was already there asked of the other slot: if the row standing at the
+target is byte-identical (`wa.entry_core` — stamp excluded, nulls dropped) to
+what this op would have written, **this op is what put it there** → `unchanged`.
+`hit < 0` is the other half of the condition and is not a convenience: if the
+SOURCE row is still standing the move has **not** landed, and an identical twin
+at the target is a genuine collision that must stay `exists_fdms` — answering
+`unchanged` there would leave two rows for one flight and report success.
+
+**Proven live**, one rolled-back transaction: create → `created`; move to a new
+date with `prev` → `moved`, still one row; **the identical op with the identical
+stale `prev` → `unchanged`**, `flights` md5 `7b91cf5a…` and whole-record md5
+`95650ee4…` identical before and after, `last_update` untouched; a second retry
+→ `unchanged` again. And both guards hold: source row still standing beside an
+identical twin at the target → `exists_fdms`, **two rows, nothing merged**; a
+target that is *not* what the op writes (one grade apart) → `exists_fdms`.
+
+#### 4z·10·2. F2 — two different `rid`s cannot silently share one handle
+
+**The hole,** and it is the missing half of a verdict the critique asked for.
+§4z·3·4 tests the slot a MOVE is aiming at — but for an upsert with no `prev`
+the two handles are the same string, so `tgt` and `hit` are the same index and
+`tgt <> hit` is never true. That upsert fell through to the write, found a row
+it was allowed to touch, and answered **`updated`** — overwriting a flight
+belonging to a **different FDMS identity**. Both ledgers then read as landed,
+and a remove under rid B tombstoned only B, so rid A re-created the row at the
+next auto-push: **the undo did not stick**.
+
+**The ruling: an upsert without `prev` is a CREATE and is judged as one.** It
+may land on an empty handle (`created`); it may find its own row already there
+fact-for-fact (`unchanged`, so a replay still costs nothing); anything else is
+**`exists_fdms`**, with the occupied-slot sentence naming the flight, the date
+and the seq and saying what to do. **A change carries `prev`.** A create onto a
+**student-authored** row keeps its existing `exists_student` verdict, untouched.
+
+What Wings Ahead can and cannot know is the whole shape of this: the stored row
+carries **no `rid`**, by design (B.2 — the record is the squadron's document,
+not FDMS's mirror), so WA can know THAT a bridge row holds the handle and never
+WHICH. That is enough to refuse, and the audit records both rids at the handle
+for the post-hoc read.
+
+**Proven live:** rid A creates → `created`; rid B creates onto the same handle →
+**`exists_fdms`**, the row returned in full, rid A's row byte-identical
+(`dd08ded5…` before and after) and `last_update` untouched; rid A replays →
+`unchanged`; rid A changes it the honest way with `prev` → `updated`; remove
+under rid A → `removed` + one tombstone; rid A's auto re-push → `tombstoned`,
+nothing written. The original bug sequence replayed end to end no longer
+produces the overwrite or the ping-pong.
+
+**WHAT THIS DOES NOT CLOSE, NAMED.** The `remove` verb has the same blind spot
+from the other side: it matches on the handle, so a remove sent under rid B
+against a handle whose row was written by rid A **deletes A's row and tombstones
+B**, and A re-creates it at its next push. Proven live in this round. It is far
+narrower than it was — B can only be in that state by ignoring the
+`exists_fdms` it was just answered — and every step is in the audit. It is not
+closed here because it **cannot** be from this side: the row carries no rid, and
+the only WA-side memory of who wrote what is `wa.bridge_audit`, which §4z·5·4
+deliberately made a **LOG and not a GATE** (promoting it would make trimming a
+log change behaviour). The real cure is FDMS-side pairing — evId first, `seq`
+minted once and frozen — and it is **P45-FDMS's**.
+
+#### 4z·10·3. F3 — the GET verb was a live-token oracle
+
+**The hole.** PostgREST routes a GET to a **volatile** function too, inside a
+READ ONLY transaction. `wa.auth_bridge` raised the house sentence for a bad
+token **before** its `last_used_at` UPDATE (**HTTP 400**) and **reached** the
+UPDATE for a live one, dying on the transaction (**HTTP 405**, *«cannot execute
+UPDATE in a read-only transaction»*). **The status code alone separated a live
+credential from a wrong, a revoked or an absent one** — the exact distinction
+`wa.bridge_refusal_msg` exists to erase, defeated on one verb. And the token did
+reach the request line, so §4z·2 #1's sentence about proxy logs was false as
+written.
+
+**The cure.** `wa.auth_bridge` detects the read-only transaction
+(`current_setting('transaction_read_only', true) = 'on'`) and raises **one
+uniform house sentence** — *«WA: the bridge doors are POST-only — call
+rpc/bridge_pull and rpc/bridge_push with POST and the credential in the request
+BODY, never as a URL parameter»* — **before** the length test, before `digest()`
+and before `wa.bridge_access` is read. Nothing has been compared when it raises,
+so there is nothing for the answer to disclose.
+
+**The judgement — the guard lives at the entrance, not in the two doors.**
+`wa.auth_bridge` is the first statement of both, and it is the lane's only
+entrance; guarding it once means a third door opened later **inherits** the
+guard. Two spellings of one rule is what `wa.bridge_refusal_msg` was made a
+function to avoid. The POST-only sentence is a **literal and not a function**
+for the same reason inverted: it is said once, and a second caller of it would
+be the bug.
+
+**Proven live over REST:** `GET rpc/bridge_pull?p_token=…` with the **live**
+credential, a wrong 48-char token, a 3-char token and an empty token → **400 and
+byte-identical bodies, all four**; the same on `rpc/bridge_push` with its full
+signature. POST is untouched: two pulls, both **200 / 38 327 bytes**, a push
+answering `{"ok": true}`, and a wrong token still getting the house sentence.
+And the **before** was re-proved: with the pre-F3 body briefly restored, the
+live token got **405 / 25006** and the wrong token **400** — then the function
+was put back and its `pg_get_functiondef` md5 verified identical (`c86d4bf5…`).
+
+**Audited, so it cannot be tidied away.** The r24 block gained a fifth
+assertion: it reads `pg_get_functiondef(wa.auth_bridge)` out of the **catalog**
+and fails the deployment if `transaction_read_only` is not in it. Proven by
+doctoring the guard out — the deploy dies naming the oracle — with the
+undoctored control printing the green notice.
+
+**What it does not claim.** The same 400/405 split is **inherited** by every
+other volatile RPC in the file (`admin_regenerate_token` is the plainest and has
+behaved this way since round 1), so a GET of one still tells a good ADMIN token
+from a bad one. Closing that is a wider round; it is written down in the schema
+beside the guard rather than left implied. What P45-WAb closes is the **bridge**
+lane — the one lane whose headline discipline is «one sentence for every
+failure», and the only credential here that travels between two machines with no
+human and no browser in front of it.
+
+#### 4z·10·4 / 5. F4 and F5 — the two comments
+
+- **F4**, the second write door into `public.student_records`, is recorded as
+  **§4z·5·9** above and rewritten in the schema at `wa.write_record`'s header.
+- **F5**, the round's own arithmetic: the grants-list comment said *«22 refusals
+  + 1 anonymous answer + 1 tokenless ping»* where **21** is the truth, §4z·5·8's
+  number and the live sweep's count. Fixed, with the miscount explained where it
+  happened. **Re-swept live this round:** the bridge credential at all 25 public
+  RPCs → **21 refusals**, every one the identical `WA: invalid or revoked
+  token`; `whoami` → `{"role": null}`; `keepalive` → `ok`; `bridge_pull` and
+  `bridge_push` → 200.
+
+#### 4z·10·6. The standing acceptance, re-run
+
+Mint through the real door → pull **200 / 38 327 bytes**, twice, with **zero**
+occurrences of `token` or `token_sha256` in the body · create / update / replay
+→ `created` / `updated` / `unchanged` · remove / replayed remove →
+`removed` / `unchanged` (one tombstone, no exception) · `clear_tombstone`
+re-push → `created`, the tombstone cleared · **the surgeon on the real failing
+record**: it is still refused by its own SMS sentence **before** the push, the
+flights push lands `created` stamped `fdms`, everything outside `flights` is
+md5-identical in storage (`9103ed5f…`, sms `0b98a11d…`) and it is refused by the
+**same** sentence afterwards — the bridge added no lock · the four pre-existing
+r24 doctorings (anon grant · widened `wa.log_bands()` · RLS off · armed check
+dropped) all still fail the deployment by name · **schema applied twice**,
+`ON_ERROR_STOP=1`, **exit 0 both times**, every audit firing both times (r18,
+r24 seed, r20 *126/126 pinned*, r22 withsp subset, r22 solo candidates, r24
+bridge lane now naming the read-only guard), with the token-echo SELECT still
+the **last** statement of the file.
+
+**Hygiene, byte-exact.** Every verdict probe ran inside a transaction that
+**rolled back**; the two live REST pushes carried zero ops and wrote nothing.
+The scratch credential is deleted and `wa.bridge_access` is back to its seeded
+never-minted tuple `(1,,f,,,)`, fingerprint `a894ea7a…`; tombstones and audit
+empty and the audit sequence reset. **All seven fingerprints byte-identical to
+the pre-round capture** — `people 9038cb66…`, `student_records 9811753…`,
+`instructor_records 34939e72…`, `proposals 581f5eef…`, `wa.migrations
+a6fec2e6…`, `wa.settings 8cb95b1a…`, `wa.bridge_access a894ea7a…` — and 126 `wa`
+functions, unchanged (the POST-only sentence is a literal, not a new function).
+
+#### 4z·10·7. §4φ GATE — THE STACK IS NOW TWO
+
+This round changes `db/schema.sql`, so §4z·8 stands **verbatim and unweakened**,
+with one number moved: the repo is **committed and NOT pushed**, the branch
+stands **two ahead** of `origin/main` (`44ea8ce`), and **one §4φ gate covers
+both commits**. Deploy `db/schema.sql` through the Supabase MCP **without** the
+final echo statement, with **no** command ever returning a `token` or
+`token_sha256` column, from the **main session only** and with the user's
+explicit word per execution; `get_advisors` immediately afterwards. **The
+advisor prediction of §4z·8 is unchanged** — no table, no policy, no RPC and no
+`wa` function is added or removed by this round: `function_search_path_mutable`
+**0**, `rls_enabled_no_policy` **6 → 9**, `security_definer_executable`
+**42 → 47**, the last two accepted by design for the reasons already recorded.
 
 
 

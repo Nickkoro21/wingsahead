@@ -666,20 +666,62 @@ end $$;
 -- caller needs. The length test stays — it is what stops a null or a stray ""
 -- reaching digest() — it simply no longer speaks in its own voice.
 --
--- IT IS `volatile`, AND THAT IS LOAD-BEARING TWICE OVER (must-fix 1 of the
--- 2026-08-28 adversarial read). It touches last_used_at, and PostgREST runs a
--- STABLE function inside a READ ONLY transaction — a `stable` bridge_pull over
--- this would have failed with «cannot execute UPDATE in a read-only
--- transaction» on EVERY call, including the setup test, bricking onboarding
--- with a Postgres error where the design promised the server's own sentence.
--- And a volatile function is POST-only on PostgREST, so the token travels in
--- the request BODY and can never be smeared through a URL or a proxy log.
+-- IT IS `volatile`, AND THAT IS LOAD-BEARING (must-fix 1 of the 2026-08-28
+-- adversarial read). It touches last_used_at, and PostgREST runs a STABLE
+-- function inside a READ ONLY transaction — a `stable` bridge_pull over this
+-- would have failed with «cannot execute UPDATE in a read-only transaction» on
+-- EVERY call, including the setup test, bricking onboarding with a Postgres
+-- error where the design promised the server's own sentence.
+--
+-- ── THE READ-ONLY GUARD, AND THE CLAIM THAT USED TO STAND HERE (P45-WAb, F3)
+-- WHAT THESE TWO LINES ASSERTED AS FACT: «a volatile function is POST-only on
+-- PostgREST, so the token travels in the request BODY and can never be smeared
+-- through a URL or a proxy log.» THE ROUTER DOES NOT REFUSE THE GET. It accepts
+-- `GET /rest/v1/rpc/bridge_pull?p_token=…`, runs the volatile function inside a
+-- READ ONLY transaction — and the two outcomes DIFFERED, which is worse than
+-- the smear the sentence was worrying about:
+--   · a bad token raised the house sentence below BEFORE the last_used_at
+--     UPDATE was ever reached                                    → HTTP 400
+--   · a LIVE token passed the comparison, reached the UPDATE, and died on the
+--     transaction («cannot execute UPDATE in a read-only transaction»)
+--                                                                → HTTP 405
+-- THE STATUS CODE ALONE THEREFORE SEPARATED A LIVE CREDENTIAL FROM A WRONG, A
+-- REVOKED OR AN ABSENT ONE — the exact distinction wa.bridge_refusal_msg exists
+-- to erase, defeated on one verb by a router nobody asked. And the token did
+-- reach the request LINE, so the half of the sentence about proxy logs was
+-- false as written too.
+--
+-- SO THE FUNCTION REFUSES WHAT THE ROUTER WOULD NOT, AND IT REFUSES IT FIRST —
+-- before the length test, before digest(), before wa.bridge_access is read.
+-- Nothing has been compared when this raises, so there is nothing for the
+-- answer to disclose: every GET gets ONE sentence and ONE status, whatever it
+-- carries — live, dead, revoked, absent, empty. And the sentence says the one
+-- thing a legitimate caller who put his credential in a URL has to change.
+--
+-- WHY THE GUARD LIVES HERE AND NOT IN THE TWO DOORS (the judgement, recorded).
+-- wa.auth_bridge is the FIRST statement of public.bridge_pull and of
+-- public.bridge_push, and it is the lane's only entrance. Guarding it once means
+-- a third door opened by a later round INHERITS the guard instead of having to
+-- remember it; guarding it in each door would be two spellings of one rule, and
+-- two spellings of one rule is exactly what the sentence below was made a
+-- function to avoid. Same doctrine, one notch up.
+--
+-- WHAT IT DOES NOT CLAIM. The same 400/405 split is INHERITED by every other
+-- volatile RPC in this file — public.admin_regenerate_token is the plainest of
+-- them and has behaved this way since round 1 — so a GET of one still tells a
+-- good ADMIN token from a bad one. Closing that is a wider round than this one,
+-- and it is written down here rather than left implied. What P45-WAb closes is
+-- the BRIDGE lane: the one lane whose headline discipline is «one sentence for
+-- every failure», and the only credential in this application that travels
+-- between two machines with no human and no browser in front of it.
 --
 -- `extensions` on the path for digest(), the wa.gen_token precedent.
 -- THE SENTENCE ITSELF IS A FUNCTION, for the wa.admin_lock_msg reason exactly:
 -- it is said in more than one place (here, and by public.bridge_pull /
 -- bridge_push when they refuse a caller who never authenticated), and one
--- definition cannot drift from itself.
+-- definition cannot drift from itself. The POST-only sentence is NOT a function
+-- for the same reason inverted: it is said once, at the one entrance, and a
+-- second caller of it would be the bug.
 create or replace function wa.bridge_refusal_msg() returns text
 language sql immutable set search_path = public, wa, pg_temp as $$
   select 'WA: invalid or revoked bridge token — the bridge credential is minted by the admin on the People page, under Bridge, and it is shown exactly once'
@@ -688,6 +730,12 @@ $$;
 create or replace function wa.auth_bridge(p_token text) returns void
 language plpgsql volatile set search_path = public, wa, extensions, pg_temp as $$
 begin
+  -- THE VERB, BEFORE THE CREDENTIAL. A read-only transaction is how PostgREST
+  -- runs a GET, and answering a GET at all is what made the status code an
+  -- oracle. This raises with nothing compared and nothing read.
+  if current_setting('transaction_read_only', true) = 'on' then
+    raise exception '%', 'WA: the bridge doors are POST-only — call rpc/bridge_pull and rpc/bridge_push with POST and the credential in the request BODY, never as a URL parameter';
+  end if;
   if p_token is null or length(p_token) < 24
      or not exists (select 1 from wa.bridge_access
                      where active
@@ -4694,10 +4742,53 @@ begin
   return o;
 end $$;
 
--- ── the ONE student-record write path ─────────────────────────────────────
+-- ── the ONE HUMAN student-record write path — and it is not the only door ──
 -- Used by BOTH public.save_student_record (the owner) and
 -- public.admin_save_student_record (the admin on their behalf) — same validation,
 -- same legacy rule, same upsert. An admin typo is still a typo.
+--
+-- ── THE SECOND DOOR, NAMED (P45-WAb, F4; the critique's item 10·5) ─────────
+-- This header said «the ONE student-record write path», and it stopped being
+-- true the hour round 24 landed: public.bridge_push writes
+-- public.student_records DIRECTLY — its own update and its own insert, at the
+-- foot of the surgeon — and no comment anywhere said so. The claim above is now
+-- the narrower true one (this is the path a HUMAN's payload takes, from either
+-- of the two human doors), and the second door is written down HERE, which is
+-- where anybody reasoning about «what can change a student record» reads first.
+--
+-- WHY THE BRIDGE DOES NOT COME THROUGH THIS FUNCTION. This one takes a WHOLE
+-- RECORD and validates the whole of it. One of the four records on the local
+-- stack cannot pass wa.validate_record on its own migrated form — over an SMS
+-- entrance that names no ΚΕΠΕ condition, a section the bridge does not touch,
+-- cannot see and could never fix — so a push routed through here would be
+-- PERMANENTLY REFUSED for that student by a defect nobody in the lane is
+-- allowed to repair. public.bridge_push is a SURGEON for exactly that reason
+-- (design decision #3, spec §4z·3·4).
+--
+-- AND WHY THE SECOND DOOR IS SAFE: it keeps the four things this one does.
+--   · THE SAME NORMALISATION BOUNDARY. The candidate row is built by
+--     wa.migrate_record on a one-row section — the same call the stored rows go
+--     through — so nothing reaches storage unnormalised (round 5b).
+--   · THE SAME VALIDATOR, on the sections it touched. wa.validate_section is
+--     the extracted body of this file's own per-section loop and the cap
+--     (wa.section_cap) travelled with it, so «legal to the form» and «legal to
+--     the bridge» cannot drift: they are one function with two callers.
+--   · THE SAME REGISTRIES AND THE SAME REFUSALS — wa.log_bands, the syllabus
+--     tables, the (track, sortie, date, seq) fence. A push cannot write a band,
+--     a code, a duplicate handle or a four-hundred-and-first row that this door
+--     would have refused.
+--   · IT WRITES ONLY WHAT IT TOUCHED. `data = <stored, byte for byte> || {the
+--     touched sections}` — the eleven sections it cannot see are not
+--     re-validated, not re-normalised, not rewritten and not migrated into
+--     storage behind their owner's back.
+--
+-- THE ONE THING IT DELIBERATELY DOES NOT DO IS RECOMPUTE `record_stamp`, and
+-- that is a decision rather than an omission: wa.record_stamp counts the literal
+-- 'admin', an fdms row is neither the owner's nor the admin's, and recomputing
+-- the record-level stamp from the bridge would be the lane answering a question
+-- about CUSTODY that nobody asked it. So an fdms row can never flip a record's
+-- stamp — which is also why wa.carry_stamps, not this function, is where the
+-- bridge row's survival clause lives.
 create or replace function wa.write_record(p_student uuid, p_payload jsonb, p_as_admin boolean)
 returns jsonb
 language plpgsql volatile set search_path = public, wa, pg_temp as $$
@@ -6074,10 +6165,18 @@ end $$;
 -- have died with «cannot execute UPDATE in a read-only transaction» on EVERY
 -- call — including the setup Test, bricking onboarding with a Postgres error
 -- where the design promised the server's own sentence. `volatile` is the cure
--- and it costs nothing: the call is a POST either way, and being POST-only is
--- itself worth having, because it keeps the token in the request BODY where no
--- URL and no proxy log can smear it (design decision #15, and the whole reason
--- the Cloudflare-Worker lift of E.4 is a URL swap and not a contract change).
+-- and it costs nothing: the call is a POST either way (design decision #15, and
+-- the whole reason the Cloudflare-Worker lift of E.4 is a URL swap and not a
+-- contract change).
+--
+-- WHAT `volatile` DOES NOT BUY, corrected in P45-WAb (F3): it does NOT make the
+-- door POST-ONLY. PostgREST routes a GET here too, inside a READ ONLY
+-- transaction, and until F3 the status code of that GET told a live credential
+-- from a dead one — 400 for the house sentence raised before the last_used_at
+-- UPDATE, 405 for the UPDATE that a live token reached. The refusal is
+-- wa.auth_bridge's first act now, before any comparison, so the GET answers
+-- identically whatever it carries. Read it there; it is not repeated here,
+-- because the guard is not repeated here either.
 --
 -- IT RETURNS NO TOKEN COLUMN OF ANY KIND. wa.person_json has been tokenless by
 -- construction since round 1; `token_sha256` is not in the body either — the
@@ -6121,11 +6220,19 @@ end $$;
 -- applied. Only the ENVELOPE raises: a bad credential, an unknown or ambiguous
 -- OID, an inactive student, a p_ops that is not an array.
 --
--- THE THREE THINGS IT NEVER DOES.
+-- THE FOUR THINGS IT NEVER DOES.
 --   · It never overwrites a row it does not own. A handle occupied by a
 --     student's row or an admin's row is answered `exists_student` /
 --     `exists_admin`, the row is RETURNED IN FULL so the FDMS report can show
 --     both versions, and nothing is written.
+--   · It never overwrites a row it owns but was not TOLD about (P45-WAb, F2).
+--     `prev` is what says «I am replacing the row standing here»; an upsert
+--     without one is a CREATE, and a create landing on a handle that already
+--     holds a BRIDGE row is `exists_fdms` — not `updated`. The stored row
+--     carries no rid by design, so Wings Ahead can see THAT another FDMS
+--     identity holds the handle and never WHICH; overwriting on a guess is how
+--     one flight silently becomes another and an undo stops sticking. The
+--     audit tail carries both rids at the handle for the cross-check.
 --   · It never accepts provenance from the wire. `entered_by` is set HERE, to
 --     'fdms', on every row it writes; a client that sends one is refused by
 --     name. Provenance is a property of which function was called, exactly as
@@ -6148,6 +6255,18 @@ end $$;
 -- with no tab open, which the same design forbids in its own custody section.
 -- Every retry in this lane is therefore an explicit act, and there is nothing
 -- in this file that polls.
+--
+-- AND BECAUSE THE RETRY IS THE ONLY RECOVERY THERE IS, EVERY OP IS REPLAY-SAFE
+-- (P45-WAb, F1). The failure this lane actually has is the LOST ANSWER: the
+-- push landed, the response never arrived, and the caller sends the identical
+-- operation again — with the identical, now-stale `prev`, because that is what
+-- its ledger still holds. All four verbs answer `unchanged` in that situation
+-- and write nothing: a create or an update because the stored row already
+-- matches the candidate; a remove because the tombstone is already lying on the
+-- identity; and a MOVE because the row is standing at the handle the op was
+-- moving it to, fact for fact. Before this round the move alone answered
+-- `exists_fdms` — a CONFLICT verdict for an operation that had succeeded, on
+-- the one path the whole retry story runs through.
 create or replace function public.bridge_push(p_token text, p_student_oid text,
                                               p_ops jsonb)
 returns jsonb
@@ -6290,6 +6409,24 @@ begin
       tgt_stamp := case when tgt >= 0 then arr->tgt->>'entered_by' end;
 
       if o_op = 'upsert' then
+        -- THE CANDIDATE IS BUILT BY THE READ MIGRATION, not by hand, and it is
+        -- built HERE — before the first verdict, not inside the write branch —
+        -- because two of the verdicts below have to ask «is the row that is
+        -- standing in the way the one I was about to write?» (P45-WAb F1).
+        -- The stored rows it is about to be compared with have all been through
+        -- wa.migrate_record — which normalises every string (the round-5b
+        -- boundary), writes the three authored defaults (seq 1, kind
+        -- 'syllabus', ng false), resolves the track from a syllabus code and
+        -- strips any key the section has retired. Building the candidate any
+        -- other way would make an UNCHANGED row look changed on every push,
+        -- purely because FDMS did not send a key whose default this database
+        -- writes: permanent churn, and a report the developer would learn to
+        -- ignore. One function, both sides — and it is also where must-fix 6
+        -- (the normalisation boundary) is honoured, by the same call the stored
+        -- rows go through.
+        cand := wa.migrate_record(jsonb_build_object(sec, jsonb_build_array(
+                  row_in || jsonb_build_object('entered_by', 'fdms'))))->sec->0;
+
         -- 1. THE TOMBSTONE GATE. An identity somebody undid does not come back
         --    on its own; only an explicit, confirmed re-push clears it.
         if exists (select 1 from wa.bridge_tombstones tb
@@ -6309,11 +6446,37 @@ begin
         elsif tgt >= 0 and tgt <> hit then
           if tgt_stamp is distinct from 'fdms' then
             vd := case when tgt_stamp = 'admin' then 'exists_admin' else 'exists_student' end;
+            found := arr->tgt;
+            note := 'that flight, date and seq is already taken on this record — the move would have made two rows one flight';
+          elsif hit < 0 and wa.entry_core(arr->tgt) = wa.entry_core(cand) then
+            -- ── P45-WAb F1 — A `moved` OP IS REPLAY-SAFE TOO ────────────────
+            -- THE HOLE THIS CLOSES. A move is `prev` (where the row was) plus
+            -- `row` (where it goes). Once it lands, the source handle is empty
+            -- and the target holds the row — so the RETRY of that same op,
+            -- which is what a caller sends when the ANSWER never arrived and
+            -- which still carries the now-stale `prev`, used to read as: source
+            -- gone (hit < 0), target occupied by another bridge row (tgt >= 0),
+            -- i.e. `exists_fdms`. A CONFLICT VERDICT FOR AN OPERATION THAT HAD
+            -- ALREADY SUCCEEDED — and the one place the lane's own rule «a
+            -- replay is absorbed, never an exception» did not reach, while a
+            -- replayed create, update and remove all answer `unchanged`.
+            -- THE TEST IS THE ONE THAT WAS ALREADY THERE, ASKED OF THE OTHER
+            -- SLOT: is the row standing at the target byte-identical (by
+            -- wa.entry_core, stamp excluded, nulls dropped) to what this op
+            -- would have written? Then this op is what put it there and there
+            -- is nothing left to do. `hit < 0` is half the condition and not a
+            -- convenience: if the SOURCE row is still standing, the move has
+            -- NOT landed and an identical twin at the target is a genuine
+            -- collision — that stays `exists_fdms` below, because answering
+            -- `unchanged` there would leave two rows for one flight and tell
+            -- the caller everything was fine.
+            vd := 'unchanged';
+            note := 'this operation had already landed — the row it moves is standing at its new flight, date and seq, fact for fact, and the `prev` it carries is the handle the row left. A retry after an answer that never arrived is absorbed here, exactly as a replayed create, update or remove is.';
           else
             vd := 'exists_fdms';
+            found := arr->tgt;
+            note := 'that flight, date and seq is already taken on this record — the move would have made two rows one flight';
           end if;
-          found := arr->tgt;
-          note := 'that flight, date and seq is already taken on this record — the move would have made two rows one flight';
         else
           -- 4. THE WRITE ITSELF.
           if hit < 0 and prv is not null then
@@ -6322,41 +6485,77 @@ begin
             -- settles it from the report.
             vd := 'missing';
             note := 'the row this operation was going to change is no longer on the record — the admin removed it, and putting it back is a deliberate re-push';
+          elsif coalesce((case when jsonb_typeof(cand->'legacy') = 'boolean'
+                               then (cand->>'legacy')::boolean end), false) then
+            -- THE MIGRATION FLAGGED IT INCOMPLETE. That flag is a READ repair
+            -- for rows inherited from the previous form; a row arriving today
+            -- without a date, a sortie, a table or an instructor is not
+            -- inherited, it is unfinished — and writing it would put a row on
+            -- a student's record that only HE can be asked to complete, for a
+            -- flight he did not enter.
+            vd := 'refused';
+            note := 'an incomplete flight is not pushed — a row of the log names its DATE, its SORTIE, the TABLE it belongs to and the INSTRUCTOR who flew it or authorised it';
+          elsif hit >= 0 and wa.entry_core(arr->hit) = wa.entry_core(cand) then
+            vd := 'unchanged';
+          elsif hit >= 0 and prv is null then
+            -- ── P45-WAb F2 — TWO rids CANNOT SILENTLY SHARE ONE HANDLE ──────
+            -- THE HOLE THIS CLOSES, and it is the other half of a verdict the
+            -- critique asked for. Case 3 above tests the slot a move is aiming
+            -- AT — but for an upsert with no `prev` the two handles are the
+            -- same string, so `tgt` and `hit` are the same index and `tgt <>
+            -- hit` is never true. That upsert therefore fell straight through
+            -- to the write and, finding a row it was allowed to touch, answered
+            -- `updated` — OVERWRITING A FLIGHT THAT BELONGS TO A DIFFERENT
+            -- FDMS IDENTITY. Both ledgers then read as landed, and a later
+            -- remove under rid B tombstones only B, so rid A re-creates the row
+            -- at the next auto-push and the undo does not stick.
+            --
+            -- WHAT WINGS AHEAD CAN AND CANNOT KNOW. The stored row carries NO
+            -- rid, by design (B.2: the record is the squadron's document, not
+            -- FDMS's mirror), so this database cannot know WHICH identity holds
+            -- the handle. It can know THAT a bridge row holds it, and that this
+            -- operation did not claim to be replacing it — and that is enough
+            -- to refuse. The audit tail records both rids against the handle,
+            -- so the cross-check on the FDMS side reads which two collided.
+            --
+            -- SO AN UPSERT WITHOUT `prev` IS A CREATE, AND IS JUDGED AS ONE:
+            -- it may land on an empty handle (`created`), it may find its own
+            -- row already there fact-for-fact (`unchanged`, the branch above,
+            -- which is why a replay still costs nothing) — and anything else is
+            -- a conflict somebody has to settle. A CHANGE carries `prev`.
+            --
+            -- WHAT THIS DOES NOT CLOSE, SAID OUT LOUD. The REMOVE verb has the
+            -- same blind spot from the other side: it matches on the handle, so
+            -- a remove sent under rid B, aimed at a handle whose row was
+            -- written by rid A, deletes A's row and tombstones B — and A, which
+            -- is not tombstoned, re-creates it at its next push. Proven live in
+            -- this round. It is now much narrower than it was, because B can
+            -- only be in that state by IGNORING the `exists_fdms` this branch
+            -- just answered it, and every step of it is in the audit. It is not
+            -- closed HERE because it cannot be: a stored row carries no rid (B.2
+            -- — the record is the squadron's document, not FDMS's mirror), and
+            -- the only WA-side memory of which identity wrote which row is
+            -- wa.bridge_audit, which §4z·5·4 deliberately made a LOG and not a
+            -- GATE. Promoting it would make trimming a log change behaviour.
+            -- The real cure is FDMS-side pairing (evId first, seq minted once
+            -- and frozen), which is P45-FDMS's work; until it exists this is a
+            -- REPORT LINE with both rids on it, which is the lane's whole
+            -- doctrine for a disagreement it cannot settle alone.
+            vd := 'exists_fdms';
+            found := arr->hit;
+            note := format('a flight already stands at %s of %s (#%s) on this record and the bridge itself put it there — and this operation did not say which row it was replacing. A pushed row carries no FDMS identity, so Wings Ahead can see THAT another identity holds this flight, date and seq but not WHICH, and writing over it would lose a flight with nobody told. Send the change with `prev` naming the row it replaces, or remove the identity holding the handle first; the audit tail carries both rids at this handle for the cross-check.',
+                           coalesce(nullif(upper(coalesce(cand->>'sortie', '')), ''), 'this flight'),
+                           case when wa.is_iso_date(cand->>'date')
+                                then to_char((cand->>'date')::date, 'DD/MM/YYYY')
+                                else 'an unrecorded date' end,
+                           coalesce(nullif(cand->>'seq', ''), '1'));
           else
-            -- THE CANDIDATE IS BUILT BY THE READ MIGRATION, not by hand. The
-            -- stored rows it is about to be compared with have all been through
-            -- wa.migrate_record — which normalises every string (the round-5b
-            -- boundary), writes the three authored defaults (seq 1, kind
-            -- 'syllabus', ng false), resolves the track from a syllabus code
-            -- and strips any key the section has retired. Building the
-            -- candidate any other way would make an UNCHANGED row look changed
-            -- on every push, purely because FDMS did not send a key whose
-            -- default this database writes: permanent churn, and a report the
-            -- developer would learn to ignore. One function, both sides — and
-            -- it is also where must-fix 6 (the normalisation boundary) is
-            -- honoured, by the same call the stored rows go through.
-            cand := wa.migrate_record(jsonb_build_object(sec, jsonb_build_array(
-                      row_in || jsonb_build_object('entered_by', 'fdms'))))->sec->0;
-            if coalesce((case when jsonb_typeof(cand->'legacy') = 'boolean'
-                              then (cand->>'legacy')::boolean end), false) then
-              -- THE MIGRATION FLAGGED IT INCOMPLETE. That flag is a READ repair
-              -- for rows inherited from the previous form; a row arriving today
-              -- without a date, a sortie, a table or an instructor is not
-              -- inherited, it is unfinished — and writing it would put a row on
-              -- a student's record that only HE can be asked to complete, for a
-              -- flight he did not enter.
-              vd := 'refused';
-              note := 'an incomplete flight is not pushed — a row of the log names its DATE, its SORTIE, the TABLE it belongs to and the INSTRUCTOR who flew it or authorised it';
-            elsif hit >= 0 and wa.entry_core(arr->hit) = wa.entry_core(cand) then
-              vd := 'unchanged';
+            if hit >= 0 then
+              vd := case when h_prev is distinct from h_new then 'moved' else 'updated' end;
+              arr := jsonb_set(arr, array[hit::text], cand);
             else
-              if hit >= 0 then
-                vd := case when h_prev is distinct from h_new then 'moved' else 'updated' end;
-                arr := jsonb_set(arr, array[hit::text], cand);
-              else
-                vd := 'created';
-                arr := arr || jsonb_build_array(cand);
-              end if;
+              vd := 'created';
+              arr := arr || jsonb_build_array(cand);
             end if;
           end if;
         end if;
@@ -6516,11 +6715,17 @@ begin
     -- wa.auth_bridge, which looks the caller up in a table `public.people` is
     -- NOT — so being callable is not being answerable.
     -- NOTE for anybody counting refusals: this list is 25 entries, of which
-    -- keepalive() takes no credential at all and whoami answers {"role": null}
-    -- to a stranger rather than refusing. «Every other RPC refuses the bridge
-    -- token» is therefore 22 refusals + 1 anonymous answer + 1 tokenless ping,
-    -- and an acceptance test that says «25 refusals» fails on its own
-    -- arithmetic (the adversarial read's own nit, kept where the list is).
+    -- TWO (bridge_pull, bridge_push) ACCEPT the bridge credential, keepalive()
+    -- takes no credential at all, and whoami answers {"role": null} to a
+    -- stranger rather than refusing. «Every other RPC refuses the bridge token»
+    -- is therefore 21 refusals + 1 anonymous answer + 1 tokenless ping — and an
+    -- acceptance test that says «25 refusals» fails on its own arithmetic.
+    -- (P45-WAb F5: this comment was WRITTEN to fix an arithmetic nit and said
+    -- «22», because it subtracted the two bridge doors from the 25 and then
+    -- counted only one of them back out. 25 − 2 accepted − 1 tokenless − 1
+    -- anonymous = 21, which is what spec §4z·5·8 says and what the live blast-
+    -- radius sweep counted. A comment that disagrees with the spec is worth
+    -- exactly as much as a comment that disagrees with the code.)
     'admin_bridge_status(text)',
     'admin_bridge_mint(text)',
     'admin_bridge_revoke(text)',
@@ -6841,8 +7046,9 @@ end $$;
 -- the same one: not to soften the sentence, but to write the block.
 --
 -- IT READS THE CATALOG, NOT THIS FILE — pg_class, pg_namespace, pg_policy,
--- pg_constraint and the ACLs — so what it asserts is true of the DATABASE the
--- schema was just applied to. Four things, each failing with names:
+-- pg_constraint, pg_proc and the ACLs — so what it asserts is true of the
+-- DATABASE the schema was just applied to. Five things, each failing with
+-- names:
 --   1. all three tables are in schema `wa` (the unreachability argument IS
 --      their address: PostgREST is configured for `public` and
 --      `graphql_public` and reaches nothing else);
@@ -6855,7 +7061,10 @@ end $$;
 --      literals stay literals (a CHECK that called a function could be widened
 --      by redefining the function), and the AUDIT is what stops them drifting
 --      from the list they mirror — the r22 withsp_markers pattern, applied to
---      a table constraint instead of to a pair of functions.
+--      a table constraint instead of to a pair of functions;
+--   5. wa.auth_bridge still refuses a READ ONLY transaction before it compares
+--      anything (P45-WAb F3) — the one line that stops PostgREST's GET verb
+--      from separating a live credential from a dead one by status code.
 do $$
 declare
   bad text[];
@@ -6970,7 +7179,27 @@ begin
     raise exception 'r24: wa.bridge_access lost bridge_access_armed_chk — without it the table accepts active=true beside token_sha256=null, and the People page would print «active since …» for a credential that refuses every call';
   end if;
 
-  raise notice 'r24: bridge lane audited — 3 tables in schema wa, RLS on, 0 policies, 0 API grants; section (%) ≡ wa.log_bands(), reason (%) ≡ wa.bridge_reasons(); handle guards and the armed check in place',
+  -- 5 · THE READ-ONLY GUARD IS STILL THE FIRST THING wa.auth_bridge DOES
+  --     (P45-WAb, F3). The lane's headline discipline is that every failure
+  --     answers in ONE sentence, and PostgREST's GET defeated it: routed to a
+  --     volatile function inside a READ ONLY transaction, a bad token raised
+  --     the house sentence (400) while a LIVE one reached the last_used_at
+  --     UPDATE and died on the transaction (405), so the STATUS CODE told a
+  --     live credential from a dead one. The cure is a guard that raises before
+  --     any comparison — and a guard nothing asserts is a guard a later round
+  --     removes while tidying. This reads the CATALOG's own copy of the
+  --     function body, so it is true of the database and not of this file.
+  select pg_get_functiondef(p.oid) into def
+  from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+  where ns.nspname = 'wa' and p.proname = 'auth_bridge';
+  if def is null then
+    raise exception 'r24: wa.auth_bridge does not exist — it is the ONLY entrance to public.bridge_pull and public.bridge_push';
+  end if;
+  if position('transaction_read_only' in def) = 0 then
+    raise exception 'r24: wa.auth_bridge has lost its read-only guard — without it PostgREST answers GET rpc/bridge_pull?p_token=… with 400 for a wrong token and 405 for a live one, and the status code alone becomes a live-credential oracle that wa.bridge_refusal_msg exists to make impossible';
+  end if;
+
+  raise notice 'r24: bridge lane audited — 3 tables in schema wa, RLS on, 0 policies, 0 API grants; section (%) ≡ wa.log_bands(), reason (%) ≡ wa.bridge_reasons(); handle guards, the armed check and the read-only (GET) guard in place',
     array_to_string(wa.log_bands(), '/'), array_to_string(wa.bridge_reasons(), '/');
 end $$;
 
