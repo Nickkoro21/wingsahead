@@ -777,8 +777,19 @@ $$;
 --                                        a replay, absorbed, never an exception
 --   exists_student / exists_admin        a HUMAN's row stands at that handle —
 --                                        returned in full, and NOTHING written
---   exists_fdms                          another bridge row already occupies the
---                                        handle a move was aiming at
+--                                        (the bridge can never write over one
+--                                        whatever it sends, so its facts buy no
+--                                        route in and buy the report both
+--                                        versions)
+--   exists_fdms                          a row THE BRIDGE ITSELF wrote holds the
+--                                        handle and this op has not shown it may
+--                                        replace it: a move aiming at it, an
+--                                        upsert claiming nothing, or a `prev`
+--                                        whose facts are not the standing row's
+--                                        (P45-WAc F1). The row is NOT handed
+--                                        back — `"row": null` — because
+--                                        describing a bridge row is what
+--                                        authorises overwriting it
 --   missing                              `prev` named a bridge row that is gone
 --                                        (the admin deleted it — his custody)
 --   tombstoned                           the identity is tombstoned; only an
@@ -4613,14 +4624,48 @@ $$;
 --
 -- THE BOUNDS ARE THE ONES THAT ALREADY EXIST, not a third opinion:
 -- wa.validate_section asks wa.chk_int(e->'seq', …, 1, 20) of every flight row
--- and bridge_tombstones_seq_chk repeats them in its own CHECK. A leading zero
--- ('01') is NOT a seq here on purpose — wa.log_handle would spell it '01' and
--- match no stored row, so accepting it as 1 would make the number that files
--- the tombstone disagree with the handle that found the row.
+-- and bridge_tombstones_seq_chk repeats them in its own CHECK.
+--
+-- ── AND THE JSON TYPE IS PART OF THE READING (P45-WAd, F1) ─────────────────
+-- THE INVARIANT THIS FUNCTION SERVES, stated once and then defended in full:
+-- THE NUMBER THAT FILES THE TOMBSTONE MUST BE THE NUMBER IN THE HANDLE THAT
+-- FOUND THE ROW. Two readers stand on this one field and they read it
+-- differently — wa.log_handle spells it with `->>` (the TEXT form, so `2` and
+-- `"2"` are both '2'), while wa.migrate_record takes it only when
+-- `jsonb_typeof(e->'seq') = 'number'` and otherwise DISCARDS it and writes the
+-- authored default 1. So a seq that is not a JSON number is a value the two
+-- readers disagree about, and the previous spelling of this function — a regex
+-- over `e->>'seq'` — could not see the difference.
+--   · A LEADING ZERO ('01') was the half that was defended: the handle would
+--     spell it '01', match no stored row, and the migration would write 1.
+--   · A PLAIN STRING ("2") was the half that was not, and it is the WORSE half
+--     because both readers accept it and they accept DIFFERENT VALUES. The two
+--     faces of that, both proven live in P45-WAc:
+--       — on the WRITE side an op carrying `"seq":"2"` was `created` (the row
+--         landing at seq 1) and then REFUSED on its own identical replay, which
+--         is the LOST-ANSWER failure P45-WAb F1 exists to make impossible: the
+--         replay looks for its row at handle seq 2, finds nothing, appends a
+--         second row that migrates to 1, and wa.validate_section refuses the
+--         duplicate handle. Nothing is corrupted and the queue is stuck.
+--       — on the PROOF side (P45-WAc F1) a `prev` spelling its seq as a string
+--         silently failed the knowledge test on every seq >= 2 flight and
+--         passed on every seq-1 flight, because there the discarded value and
+--         the default coincide. The refusal then told the caller his CLAIM was
+--         wrong when what was wrong was the TYPE.
+-- THE CURE IS ONE PREDICATE, and it is here rather than a coercion in the
+-- migration for the reason this lane refuses everything else it cannot read
+-- exactly: a coercion would make `"2"` mean 2 on the bridge while the same
+-- record read through any other door still means 1, i.e. two answers for one
+-- stored byte. Refusing by SHAPE gives the caller one sentence naming the type.
+-- (`""`, JSON `null` and an ABSENT key stay «not sent» and are NOT refused:
+-- there both readers already agree on 1 — wa.log_handle coalesces the empty
+-- text to '1' and the migration writes 1 — so there is no disagreement to
+-- refuse, and «absent seq reads as 1» is the documented contract above.)
 create or replace function wa.log_seq(e jsonb) returns int
 language sql immutable set search_path = public, wa, pg_temp as $$
   select case when jsonb_typeof(e) <> 'object' then null
-              when e->>'seq' ~ '^[1-9][0-9]?$' and (e->>'seq')::int between 1 and 20
+              when jsonb_typeof(e->'seq') = 'number'
+               and e->>'seq' ~ '^[1-9][0-9]?$' and (e->>'seq')::int between 1 and 20
                 then (e->>'seq')::int end
 $$;
 
@@ -6325,6 +6370,28 @@ end $$;
 --     have replaced every stored record's raw form ~5 s after any training-log
 --     write, with no human in the loop. Today only a human save bakes it.)
 --
+-- AND A FIFTH, ADDED IN P45-WAd BECAUSE IT WAS THE ROUND'S WHOLE SUBJECT:
+--   · IT NEVER NORMALISES A VALUE IT CANNOT READ — IT REFUSES IT BY NAME.
+--     The migration this lane reads through is CHARITABLE by design: it writes
+--     'syllabus' over a kind the registry does not know, `false` over an `ng`
+--     that is not a boolean, `1` over a `seq` that is not a number, and that
+--     charity is right and load-bearing for a HUMAN's stored row — a record
+--     whose owner cannot save it is worse than a record read generously, and
+--     round 12's whole log-table migration exists to say so. It is WRONG on
+--     this wire. FDMS is a protocol peer: when it sends a word this lane does
+--     not speak, writing a DIFFERENT flight than the one it described and
+--     answering `created` is how two systems begin to disagree about what
+--     happened, with nobody told. So every field carrying an authored default
+--     (`seq`, `kind`, `ng`) is judged HERE, on the wire block, before the
+--     migration can be charitable at it — and the containers (`prev`, `row`,
+--     `rid`, `clear_tombstone`) are judged for their SHAPE for the same reason
+--     the `date` guard already was: an answer must name the real fault, never
+--     report that no row stands at a handle nobody could have built.
+--     THE RULE THAT GENERATES THE LIST, so a later round can apply it without
+--     re-deriving it: a field the MIGRATION rewrites cannot be defended by
+--     wa.validate_section downstream, because the validator judges the migrated
+--     candidate and never sees what the wire sent.
+--
 -- THERE IS NO RECORD-LEVEL OPTIMISTIC LOCK, and that is a DECISION (must-fix 4
 -- of the adversarial read). The design carried `p_if_last_update` from the
 -- courier era; with the surgery server-side, every op is judged against the
@@ -6379,6 +6446,10 @@ declare
   h_prev text; h_new text;
   t timestamptz;
   k text;
+  -- THE rid'S ONE BOUND, WRITTEN ONCE (P45-WAd F3). It is used by the guard and
+  -- by the guard's own sentence, and a number said twice is a number that can
+  -- disagree with itself — the wa.admin_lock_msg doctrine at local scale.
+  rid_max constant int := 200;
 begin
   -- ── THE ENVELOPE ────────────────────────────────────────────────────────
   perform wa.auth_bridge(p_token);
@@ -6447,6 +6518,74 @@ begin
     elsif nullif(trim(coalesce(v_rid, '')), '') is null then
       vd := 'refused';
       note := 'every operation names the FDMS identity it is about (rid) — it is what the tombstones and the audit are keyed to';
+    -- ── P45-WAd F3 — AND THE rid HAS A SHAPE, WHICH IT NEVER HAD ────────────
+    -- THE HOLE THIS CLOSES. The branch above tests whether the rid is BLANK,
+    -- through `op->>'rid'` — and `->>` renders ANY jsonb as text, so
+    -- `"rid": {"o":1}` came through as the literal string `{"o": 1}` and became
+    -- the key of a tombstone and of an audit row. That is the silent-coercion
+    -- class this lane refuses everywhere else: the caller believes it sent an
+    -- object, the database keyed a gate to a rendering of one, and the next
+    -- push under the same «rid» matches only if it renders identically.
+    --
+    -- AND THE LENGTH IS NOT COSMETIC — IT IS THE LAST RAW RAISE IN THIS LOOP.
+    -- wa.bridge_tombstones carries `bridge_tombstones_live`, a UNIQUE btree on
+    -- (student_oid, rid), and a btree index tuple cannot exceed 2704 bytes. A
+    -- removal under a 4 000-character rid therefore died INSIDE the per-op loop
+    -- with «index row size 4024 exceeds btree version 4 maximum 2704» — a raw
+    -- Postgres error that voids the whole call and every sibling op, which is
+    -- exactly what P45-WAc F4 was written to leave nowhere. (Proven live before
+    -- and after this guard. `on conflict do nothing` does not help: the index
+    -- tuple is built before any conflict is looked for.)
+    --
+    -- THE GRAMMAR, AND THE JUDGEMENT — WHY IT IS NOT ONE. The only rid grammar
+    -- this file has ever named is informational (`rid = oid ∷ sortie ∷ ord`, in
+    -- the tombstone table's own comment) and it is FDMS'S composition, not Wings
+    -- Ahead's: the design's own rule is that the rid is date-free and opaque
+    -- here (B.2 — the record is the squadron's document, not FDMS's mirror), so
+    -- a WA-side pattern would break the day FDMS re-composes its identity and
+    -- would be enforcing a foreign system's private key format. What this side
+    -- legitimately owns is the SHAPE it can store and index: a string, not
+    -- blank, and short enough that the gate it keys can be written. 200 is the
+    -- house's name-length cap (wa.chk_text of `instructor`, `with`, `evaluator`)
+    -- and it is ~13× under the btree ceiling, so the bound is generous by the
+    -- one measure that matters and familiar by the other.
+    elsif jsonb_typeof(op->'rid') <> 'string' or length(v_rid) > rid_max then
+      vd := 'refused';
+      -- TWO SENTENCES, BECAUSE THEY ARE TWO FAULTS. One refusal that said
+      -- «string of at most 200 characters» for both would tell the caller who
+      -- sent an object about a length he did not exceed, and the caller who
+      -- sent a long name about a type he got right. Each names its own fault
+      -- and the reason it is a fault here.
+      note := case when jsonb_typeof(op->'rid') <> 'string' then
+        format('the FDMS identity of an operation (rid) crosses this wire as a STRING, and this one sent a JSON %s. It is refused by its SHAPE: the rid is what the tombstone and the audit are KEYED to, and anything that is not a string is stored as a RENDERING of what you sent — here «%s» — so the next push under the same identity would match only by accident. What the rid MEANS is FDMS''s own business and nothing on this side reads into it; what it must BE is a name this record can key a gate to.',
+               jsonb_typeof(op->'rid'), left(v_rid, 40))
+      else
+        format('the FDMS identity of an operation (rid) is at most %s characters and this one sent %s. It is refused by its LENGTH, and not for tidiness: the live-tombstone gate is a UNIQUE index on (student oid, rid), a btree entry cannot exceed 2704 bytes, and a removal under a rid past that limit raised a RAW database error inside the per-op loop — voiding the whole call and every well-formed operation sent beside it, which is the one thing this lane promises cannot happen.',
+               rid_max, length(v_rid))
+      end;
+    -- ── P45-WAd F4 — THE CONTAINERS HAVE A SHAPE TOO ────────────────────────
+    -- `prev` and `row` are read at the head of this loop with «is it an object?
+    -- then read it, else NULL» — a silent downgrade that changed what the
+    -- operation MEANT. `"prev": "the row"` made a claimed replacement into a
+    -- CREATE (proven live: `exists_fdms`, i.e. the caller was told a row was in
+    -- his way when what was wrong was that his claim was not an object), and on
+    -- a removal `"row": "C4101"` was answered `missing` — «no row stands at that
+    -- flight, date and seq» about a handle that was never built. That is word
+    -- for word the fault the `date` guard below already refuses by SHAPE, and
+    -- the same sentence applies. JSON `null` and an ABSENT key are NOT this: the
+    -- wire contract in the header is `"prev": <the row> | null`, and an upsert
+    -- with no `row` at all keeps its own older, sharper refusal further down.
+    elsif not (coalesce(jsonb_typeof(op->'prev'), 'null') = any(array['object','null']))
+       or not (coalesce(jsonb_typeof(op->'row'),  'null') = any(array['object','null'])) then
+      vd := 'refused';
+      note := 'the `prev` and `row` of an operation are each a flight ROW — a JSON object — or absent. This one sent something else, and it is refused by its SHAPE rather than quietly read as «nothing sent»: a `prev` that is not an object would have turned a claimed replacement into a create, and a `row` that is not an object would have been answered «no row stands at that flight» about a handle nobody could have built.';
+    elsif not (coalesce(jsonb_typeof(op->'clear_tombstone'), 'null') = any(array['boolean','null'])) then
+      -- The same rule one field over: `"clear_tombstone": "yes"` used to be
+      -- COERCED to false, so a deliberate act — the one act that brings a
+      -- removed identity back — was silently not performed. The answer
+      -- (`tombstoned`) is a report line, but it reports the wrong fact.
+      vd := 'refused';
+      note := 'clear_tombstone is true or false — bringing a removed identity back is the one deliberate act in this lane, and a value that is not a boolean is refused rather than read as «no»';
     -- ── P45-WAc F4 — A BAD FIELD TYPE IS A REFUSAL, NEVER A RAISE ───────────
     -- THE HOLE THIS CLOSES (pre-existing, inherited unchanged from round 24).
     -- Every op — refused ones included — is filed in wa.bridge_audit at the
@@ -6456,21 +6595,69 @@ begin
     -- well-formed ops beside it — the exact failure the header promises cannot
     -- happen («only the ENVELOPE raises»), and it could not be answered by a
     -- verdict because the raise came AFTER the verdict was decided.
-    -- THE SWEEP, RECORDED: only TWO wire fields ever reach a typed column or a
-    -- cast — `seq` (int, in the audit and in the tombstone) and `date` (text in
-    -- the audit, but CHECK-constrained to the ISO pattern in the tombstone).
-    -- Every other field of `row` / `prev` is read with `->>` into a text column
-    -- or handed to wa.migrate_record / wa.validate_section, which answer with a
-    -- VERDICT: a sortie that is an object, a grade of "abc", a kind that is an
-    -- array, `ng: "maybe"`, a five-thousand-character sortie — all of them are
-    -- already refusals and were re-proved as such this round. So the class is
-    -- closed by guarding these two, and by wa.log_seq taking the cast out of
-    -- both inserts so that the guard is a courtesy and not the only thing
-    -- standing between a typo and nine lost operations.
+    -- THE SWEEP, RECORDED — AND CORRECTED IN P45-WAd, BECAUSE TWO THIRDS OF ITS
+    -- LAST SENTENCE WERE FALSE. Two wire fields reach a typed column or a cast:
+    -- `seq` (int, in the audit and in the tombstone) and `date` (text in the
+    -- audit, but CHECK-constrained to the ISO pattern in the tombstone). Every
+    -- other field of `row` / `prev` is read with `->>` into a text column or
+    -- handed to wa.migrate_record / wa.validate_section — but «handed to the
+    -- migration» is NOT the same as «answered with a verdict», and this comment
+    -- used to name three examples as refusals without asking the database:
+    --   · a sortie that is an object, a grade of "abc", a 5 000-character
+    --     sortie — TRUE, all three are refusals (wa.chk_text / wa.chk_grade see
+    --     the value unchanged, because the migration does not touch them);
+    --   · «a kind that is an array» and «`ng: "maybe"`» — FALSE, and provably
+    --     so: the migration REWRITES both before the validator ever sees them
+    --     (`kind` → 'syllabus', `ng` → false), so wa.validate_section validates
+    --     a value the caller never sent. Both were `created` in P45-WAd's
+    --     pre-fix probe. They are refused by the two branches below now, which
+    --     is what makes the sentence true again.
+    -- THE LESSON, WRITTEN DOWN RATHER THAN LEARNED TWICE: a field the migration
+    -- NORMALISES cannot be defended by the validator downstream of it, because
+    -- the validator judges the migrated candidate. Anything with an authored
+    -- default (`seq`, `kind`, `ng`) has to be judged HERE, on the wire block, or
+    -- it is not judged at all.
     elsif (nullif(row_in->>'seq', '') is not null and wa.log_seq(row_in) is null)
        or (nullif(prv->>'seq', '')    is not null and wa.log_seq(prv)    is null) then
       vd := 'refused';
-      note := 'the same-day sequence number of a flight is a whole number from 1 to 20 — the bounds every flight row of this record is validated against, written without a leading zero. THIS operation is refused for it and the ones sent beside it are not: an operation whose shape the parser cannot read is its own problem, never its siblings''.';
+      note := 'the same-day sequence number of a flight crosses this wire as a NUMBER — 2, never "2". A string is refused as one because this database reads that field TWICE and the two readers disagree about it: the handle that finds the row spells it as text, and the migration that writes the row takes only a JSON number and otherwise writes the default 1. A row would land at one sequence number and be looked for at another. It is a whole number from 1 to 20 — the bounds every flight row of this record is validated against — written without a leading zero. THIS operation is refused for it and the ones sent beside it are not: an operation whose shape the parser cannot read is its own problem, never its siblings''.';
+    -- ── P45-WAd F4 — AN UNKNOWN `kind` IS REFUSED, NOT NORMALISED ───────────
+    -- THE HOLE THIS CLOSES. wa.migrate_record writes 'syllabus' over any kind
+    -- the registry does not know — «banana», ["repeat"], "Repeat" with a capital
+    -- — and that is RIGHT for a stored row read through a human's form: the
+    -- catalogue may have retired a value, and a record whose owner cannot save
+    -- it is worse than a record read charitably. It is WRONG on this wire. FDMS
+    -- is a protocol peer, not a legacy row: it said something this lane does not
+    -- speak, and the honest answer is to say so by name rather than to write a
+    -- different flight than the one it described and answer `created`. (Proven
+    -- live in P45-WAd: `kind:"banana"` and `kind:["repeat"]` were both `created`
+    -- and both stored as 'syllabus'.)
+    -- IT IS ALSO A PROOF-SIDE TRAP, exactly the shape of the string seq above:
+    -- a `prev` carrying an unknown kind is migrated to 'syllabus' before the
+    -- knowledge test, so a false claim quietly PASSES against a syllabus row and
+    -- a true one is told «your claim is wrong» when what was wrong was the word.
+    -- Hence both blocks, as with `seq` and `date`.
+    -- ABSENT / `null` / "" ARE NOT THIS, and the judgement is the seq one: the
+    -- migration's authored default for a kind nobody sent is 'syllabus', both
+    -- readers agree on it, there is no disagreement to refuse — and refusing it
+    -- would make FDMS spell out a value it has no opinion about on every row.
+    elsif (nullif(row_in->>'kind', '') is not null
+           and not (row_in->>'kind' = any(wa.flight_kinds())))
+       or (nullif(prv->>'kind', '') is not null
+           and not (prv->>'kind' = any(wa.flight_kinds()))) then
+      vd := 'refused';
+      note := format('a pushed flight says which KIND of flight it was, and the lane speaks %s — this operation sent something else. It is refused by NAME instead of being read as ''syllabus'': a stored row may be read charitably, because a student must always be able to save his own record, but the bridge is a machine on the other end of a protocol and silently writing a different flight than the one it described is how the two systems start disagreeing about what happened.',
+                     array_to_string(wa.flight_kinds(), ' / '));
+    elsif not (coalesce(jsonb_typeof(row_in->'ng'), 'null') = any(array['boolean','null']))
+       or not (coalesce(jsonb_typeof(prv->'ng'),    'null') = any(array['boolean','null'])) then
+      -- The same fault at the field the lane cares most about. `ng: "maybe"` was
+      -- migrated to false and `created` — and the branch below that refuses
+      -- `ng: true` by name never fired, because it tests for a BOOLEAN true. So
+      -- the one field this lane welds shut could be addressed in a type it does
+      -- not read, and the answer was silence. It is a shape refusal now, and the
+      -- `ng: true` refusal below keeps its own sentence for the honest boolean.
+      vd := 'refused';
+      note := 'the NON-GRADED flag of a flight is true or false — this operation sent something else, and it is refused by its SHAPE rather than read as «no». NG is the one field the bridge never writes at all (see the refusal below), so a value it cannot read is the last thing it should guess at.';
     elsif not (coalesce(jsonb_typeof(row_in->'date'), 'null') = any(array['string','null']))
        or not (coalesce(jsonb_typeof(prv->'date'),    'null') = any(array['string','null'])) then
       vd := 'refused';
@@ -7301,13 +7488,16 @@ end $$;
 --      anything (P45-WAb F3) — the one line that stops PostgREST's GET verb
 --      from separating a live credential from a dead one by status code — and
 --      the assertion is on the EXECUTABLE guard, not on the word appearing
---      somewhere in the body, comments included (P45-WAc F3).
+--      somewhere in the body, comments included (P45-WAc F3), with BOTH SQL
+--      comment syntaxes stripped and the guard asserted to stand FIRST, before
+--      the credential is read at all (P45-WAd F2).
 do $$
 declare
   bad text[];
   want text[];
   got  text[];
   def  text;
+  body text;   -- `def` with BOTH kinds of SQL comment stripped (P45-WAd F2)
   n int;
 begin
   -- 1 · the address
@@ -7441,20 +7631,62 @@ begin
   -- rounds tidy is by COMMENTING OUT: leave the guard behind a `--` with the
   -- word still in the prose above it and the deployment went green while the
   -- live-token oracle was fully back. Proven both ways in P45-WAc.
-  -- So the line comments come off first and what is asserted is the SHAPE of a
+  -- So the COMMENTS COME OFF FIRST and what is asserted is the SHAPE of a
   -- running guard: a conditional that reads current_setting('transaction_read_only')
   -- and RAISES. `[^;]*` is what ties the three together — there is no statement
   -- terminator between an `if` and the `raise` that is its first statement — so
   -- the wording of the comparison stays free to change while the mechanism may
-  -- not disappear. (The strip is safe on THIS body: it carries no `--` inside a
-  -- string literal, and the assertion below would fail loudly, not quietly, if a
-  -- later round put one there.)
-  if regexp_replace(def, '--[^\n]*', '', 'g')
-       !~ 'if[^;]*current_setting\s*\(\s*''transaction_read_only''[^;]*then[^;]*raise' then
-    raise exception 'r24: wa.auth_bridge has lost its read-only guard — an EXECUTABLE «if current_setting(''transaction_read_only'' …) then raise» is not in the catalog''s copy of the body (a guard that is only mentioned in a comment is not a guard). Without it PostgREST answers GET rpc/bridge_pull?p_token=… with 400 for a wrong token and 405 for a live one, and the status code alone becomes a live-credential oracle that wa.bridge_refusal_msg exists to make impossible';
+  -- not disappear.
+  --
+  -- ── P45-WAd F2 — BOTH KINDS OF COMMENT, BECAUSE SQL HAS TWO ──────────────
+  -- The P45-WAc verify walked straight through the half that was missing: the
+  -- strip was `--[^\n]*` ONLY, so commenting the three-line guard out with
+  -- `/* … */` — the ordinary way a SQL round tidies a BLOCK — left the
+  -- deployment GREEN with the oracle fully back (proven live in that verify:
+  -- inside `SET LOCAL transaction_read_only = on` a live token reached the
+  -- UPDATE and died 25006/405 while a wrong token got the house sentence/400).
+  -- A guard-assertion that only knows one of SQL's two comment syntaxes is a
+  -- guard-assertion that knows neither. BLOCK COMMENTS COME OFF FIRST — a `--`
+  -- inside a `/* … */` is text, while a `/*` inside a `--` line is already dead
+  -- — and `.*?` is non-greedy so two separate blocks are not eaten as one.
+  -- (The strip is safe on THIS body: it carries neither `--` nor `/*` inside a
+  -- string literal, and the assertion would fail loudly, not quietly, if a later
+  -- round put one there.)
+  body := regexp_replace(regexp_replace(def, '/\*.*?\*/', '', 'g'),
+                         '--[^\n]*', '', 'g');
+  if body !~ 'if[^;]*current_setting\s*\(\s*''transaction_read_only''[^;]*then[^;]*raise' then
+    raise exception 'r24: wa.auth_bridge has lost its read-only guard — an EXECUTABLE «if current_setting(''transaction_read_only'' …) then raise» is not in the catalog''s copy of the body, with BOTH kinds of SQL comment stripped first (a guard that is only mentioned in a comment, of either syntax, is not a guard). Without it PostgREST answers GET rpc/bridge_pull?p_token=… with 400 for a wrong token and 405 for a live one, and the status code alone becomes a live-credential oracle that wa.bridge_refusal_msg exists to make impossible';
   end if;
 
-  raise notice 'r24: bridge lane audited — 3 tables in schema wa, RLS on, 0 policies, 0 API grants; section (%) ≡ wa.log_bands(), reason (%) ≡ wa.bridge_reasons(); handle guards, the armed check and the read-only (GET) guard in place',
+  -- ── P45-WAd F2, THE SECOND HALF — THE GUARD IS ALSO *FIRST* ──────────────
+  -- The assertion above tests EXISTENCE. The P45-WAc verify's other doctoring
+  -- moved the guard BELOW the credential lookup, executable and intact: the
+  -- assertion passed and the property broke anyway, because a live token now
+  -- reaches the lookup before the raise and the two 400 bodies differ again.
+  -- «Raises with nothing compared and nothing read» is the sentence the guard's
+  -- own comment makes, so it is assertable: in the comment-stripped body, the
+  -- guard must appear BEFORE the first mention of wa.bridge_access — the table
+  -- that holds the digest and the last_used_at both halves of the oracle came
+  -- from. Anchoring on the TABLE rather than on `token_sha256` survives a column
+  -- rename and still covers the `update`, which is what the 405 came from.
+  --
+  -- WHAT THIS DOES AND DOES NOT PROVE — the limit, stated instead of implied.
+  -- It proves TEXTUAL order in the executable body, which for this body (a
+  -- straight-line plpgsql block: guard, lookup, update) is execution order. It
+  -- does NOT read control flow: a guard sitting first but wrapped in a branch
+  -- that is never taken would still pass here, and nothing short of executing
+  -- the function can see that. Two assertions therefore stand where three would
+  -- be needed for a proof — shape (it runs) and position (it runs first) — and
+  -- the third is a LIVE test, which is where it is done: §4z·10·3's six-state
+  -- GET matrix, re-run every acceptance sweep, is what actually observes the
+  -- oracle being dead. Recorded again in §4z·10·3 so the limit travels.
+  if position('bridge_access' in body) = 0
+     or position('transaction_read_only' in body) = 0
+     or position('transaction_read_only' in body) > position('bridge_access' in body) then
+    raise exception 'r24: wa.auth_bridge''s read-only guard is no longer the FIRST thing it does — in the catalog''s copy of the body (comments stripped) the read of wa.bridge_access comes before the current_setting(''transaction_read_only'') guard, or one of the two is not there at all. The guard''s whole property is that it «raises with nothing compared and nothing read»: once a live credential can reach the lookup or the last_used_at UPDATE inside a READ ONLY transaction, the GET answers differ again by status code or by body, and that difference is the live-credential oracle P45-WAb closed';
+  end if;
+
+  raise notice 'r24: bridge lane audited — 3 tables in schema wa, RLS on, 0 policies, 0 API grants; section (%) ≡ wa.log_bands(), reason (%) ≡ wa.bridge_reasons(); handle guards, the armed check and the read-only (GET) guard executable and FIRST (both comment syntaxes stripped)',
     array_to_string(wa.log_bands(), '/'), array_to_string(wa.bridge_reasons(), '/');
 end $$;
 
