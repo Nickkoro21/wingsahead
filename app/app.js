@@ -881,12 +881,50 @@ WA.coLockTag = function () {
   return `<span class="colock" title="${esc(WA.CO_LOCK_TIP)}" aria-label="${esc(WA.CO_LOCK_TIP)}">&#128274; locked by ${esc(WA.ADMIN_WORD)}</span>`;
 };
 WA.isCO = function (e) { return !!(e && e.entered_by === "admin"); };
+
+/* ══ ROUND 24 — THE THIRD SOURCE: THE SQUADRON'S OWN SCHEDULER ══════════════
+   A row's provenance stamp has had two values since round 4b — the admin's
+   'admin' and the owner's own null — and from this round it has three. The
+   FDMS bridge writes rows stamped 'fdms': flights the squadron already
+   recorded in its scheduler, pushed onto the student's log so he does not type
+   what somebody has already typed.
+   MIRROR: db/schema.sql → wa.entry_count_by / wa.carry_stamps / the 'fdms'
+   branch of wa.instructor_logbook. Three values, one function, everywhere.
+
+   WHY srcOf AND NOT A SECOND isCO. `WA.isCO` decides LOCKS and COUNTS — the
+   student may not touch an admin row, and «N of 18 entered by the admin» is
+   arithmetic. An fdms row is neither: it does NOT lock (the student may
+   correct it, and the correction becomes his) and it is NOT the admin's
+   (a row a machine proposed is not a row the admin wrote — wa.entry_count_by's
+   own comment, since round 12). So isCO is untouched, deliberately, and the
+   new question gets a new name. */
+WA.srcOf = function (e) {
+  const s = e && e.entered_by;
+  return s === "admin" ? "admin" : (s === "fdms" ? "fdms" : "self");
+};
+WA.isFdms = function (e) { return WA.srcOf(e) === "fdms"; };
+WA.FDMS_TAG = "FDMS";
+WA.FDMS_TIP =
+  "Pushed by the squadron's own scheduler (FDMS) — this flight was recorded there and crossed to your log, so you do not type it twice. " +
+  "You may CORRECT what it says (the instructor, the grade, the mission) and the corrected row becomes yours; the squadron sees the difference at its next cross-check. " +
+  "What it cannot be is REMOVED from this form, or renamed — its sortie, date and same-day sequence are the scheduler's handle for the flight, and a flight is removed on the squadron's side.";
+WA.fdmsTag = function (e) {
+  return WA.isFdms(e)
+    ? `<span class="fdmstag" title="${esc(WA.FDMS_TIP)}" aria-label="${esc(WA.FDMS_TIP)}">${esc(WA.FDMS_TAG)}</span>` : "";
+};
+/* ONE CHIP FUNCTION FOR THE ROW'S SOURCE. Every surface that wanted to say
+   «who put this here» already calls coTag on every row it draws — the student's
+   tables, the admin's drill-downs, the printed brief. Teaching THAT function
+   the third value is what makes the new stamp appear everywhere at once; the
+   alternative was finding thirty call sites and missing one. The admin branch
+   is byte-identical to what it was. */
 WA.coTag = function (e) {
+  if (WA.isFdms(e)) return WA.fdmsTag(e);
   return WA.isCO(e)
     ? `<span class="cotag" title="${esc(WA.CO_TIP)}" aria-label="${esc(WA.CO_TIP)}">${esc(WA.ADMIN_TAG)}</span>` : "";
 };
 /* the same fact for CSV / plain-text surfaces */
-WA.coWord = function (e) { return WA.isCO(e) ? "admin" : "self"; };
+WA.coWord = function (e) { return WA.srcOf(e); };
 
 /* ── THE SOURCE OF A WHOLE RECORD (round 4b) ───────────────────────────────
    A record is not "the admin's" because the admin touched it. 17 self-reported
@@ -895,27 +933,53 @@ WA.coWord = function (e) { return WA.isCO(e) ? "admin" : "self"; };
    MIRROR: db/schema.sql → wa.record_stamp / wa.co_entry_count / wa.entry_count.
    `stamp` is the record-level flag the server sends; it settles only the case
    the entries cannot — an empty record the admin created for an owner who has
-   never saved it. → { n, total, all, some, any, word, tip } */
+   never saved it. → { n, total, fdms, all, some, any, word, tip }
+
+   ROUND 24 — AND «THE REST IS SELF-REPORTED» STOPPED BEING TRUE. A record can
+   now hold a third kind of entry, and the sentence this function writes was the
+   one place that counted the other two and called everything else the owner's.
+   `fdms` is therefore counted here and named in the tip — the same rule as
+   round 4b's, one source further on: a surface that summarises a record must
+   say exactly what it is made of. The ADMIN question (`n`, `all`, `some`,
+   `word`, and WA.coRecordTag) is deliberately UNCHANGED: it answers «is this
+   the admin's record?», the fdms rows are not his, and folding them in would
+   re-create the round-4 defect from the other side. */
 WA.coSource = function (rec, stamp) {
   const r = rec || {};
   let total = 0;
-  for (const k of WA.COUNTED) total += WA.filled(k, r[k]).length;
+  let fdms = 0;
+  for (const k of WA.COUNTED) {
+    const filled = WA.filled(k, r[k]);
+    total += filled.length;
+    for (const e of filled) if (WA.isFdms(e)) fdms++;
+  }
   const n = WA.coEntries(r).length;   /* the one place admin entries are counted */
   const all = total > 0 ? n === total : stamp === "admin";
   const some = n > 0 && !all;
+  const rest = total - n - fdms;      /* what is genuinely the owner's own */
+  const fdmsClause = fdms
+    ? fdms + (fdms === 1 ? " entry came" : " entries came") +
+      " from the squadron's scheduler (FDMS)"
+    : "";
   return {
-    n, total, all, some, any: all || some,
+    n, total, fdms, all, some, any: all || some,
     /* the plain-text verdict for CSV: "admin" = all of it, "self+admin" = the
-       owner's record with admin additions (the count travels beside it) */
+       owner's record with admin additions (the count travels beside it).
+       It answers the ADMIN question only, and round 24 left it alone. */
     word: all ? "admin" : (some ? "self+admin" : "self"),
     tip: all
       ? (total ? "Every entry of this record was entered by " + WA.ADMIN_BODY + " on the owner's behalf"
                : "This record was opened by " + WA.ADMIN_BODY + " — its owner has never saved it")
       : some
         ? n + (n === 1 ? " entry was" : " entries were") +
-          " entered by " + WA.ADMIN_BODY + " on the owner's behalf — the other " +
-          (total - n) + (total - n === 1 ? " is" : " are") + " self-reported"
-        : "Self-reported by its owner",
+          " entered by " + WA.ADMIN_BODY + " on the owner's behalf" +
+          (fdms ? ", " + fdmsClause : "") + " — the other " +
+          rest + (rest === 1 ? " is" : " are") + " self-reported"
+        : fdms
+          ? (rest
+              ? "Self-reported by its owner — " + fdmsClause
+              : "Every entry of this record came from the squadron's scheduler (FDMS) — its owner has reported none of it himself")
+          : "Self-reported by its owner",
   };
 };
 /* the chip that carries that verdict: filled "ADMIN" = the whole record is the

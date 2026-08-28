@@ -426,6 +426,200 @@ revoke all on public.proposals          from public, anon, authenticated;
 revoke all on public.instructor_records from public, anon, authenticated;
 revoke all on all sequences in schema public from anon, authenticated;
 
+-- ══ ROUND 24 (P45-WA) — THE BRIDGE LANE: THREE TABLES, ALL IN SCHEMA `wa` ═══
+-- PHASES 4+5 of the FDMS bridge open a SECOND writer on public.student_records:
+-- the squadron's own scheduler, pushing the flights it already recorded into
+-- the student's log. Three tables carry it, and every one of them lives in
+-- schema `wa` for the reason wa.settings gives in its own comment: PostgREST
+-- reaches `public` and nothing else, so a table here needs no policy and no
+-- revoke to be unreachable — it is unreachable BY CONSTRUCTION, and the only
+-- way in or out is the RPC pair at the bottom of this file.
+--
+-- THAT IS THE ANSWER TO THE SHARPEST FINDING OF THE PHASE-4/5 ADVERSARIAL READ
+-- (2026-08-28, must-fix 2). The design drafted `public.bridge_tombstones`; on
+-- Supabase a new PUBLIC table is reachable through the REST surface, so a
+-- tombstone could have been READ (rid = oid ∷ sortie ∷ ord — training data),
+-- FORGED (a forged tombstone silently suppresses the push lane for any
+-- identity: a targeted data-withholding attack that needs no token at all) or
+-- DELETED (which un-gates it). Moving them one schema over removes the door
+-- rather than locking it. RLS + revoke are applied anyway, belt and braces, and
+-- THE r24 AUDIT BLOCK AT THE FOOT OF THIS FILE FAILS THE DEPLOYMENT if a future
+-- round ever grants anything on them, moves one out of schema `wa`, drops its
+-- RLS, gives it a policy, or widens one of its vocabularies away from the
+-- registry it mirrors. It reads pg_class / pg_constraint / relacl — the
+-- CATALOG, not this file — so what it asserts is true of the DATABASE.
+-- (WA-24 verify finding 9a: the two sentences that used to stand here promised
+-- exactly that block while no such block existed — the «comment that lied»
+-- class rounds 22b and 23b were spent on. It exists now; search this file for
+-- «r24:».)
+--
+-- ── 1. THE CREDENTIAL — DIGEST ONLY, AND IT IS NOT A PERSON ────────────────
+-- The bridge is not a member of the squadron and must never be listable as
+-- one. A fourth `wa_role` value would have to ride an `alter type` (which
+-- cannot run inside this file's do-blocks and cannot be used in the same
+-- transaction that references it), and a `people` row would leak into
+-- wa.person_json, into every export and into admin_list_people — which prints
+-- TOKENS. So the credential is one row in a table of its own, storing only the
+-- SHA-256 digest of a token the database never sees again.
+--   · wa.auth cannot match it (it is not in public.people), so a stolen bridge
+--     token opens public.bridge_pull and public.bridge_push and structurally
+--     nothing else — not one admin RPC, not one owner RPC, not one login token.
+--   · The plaintext exists exactly once, in the answer to admin_bridge_mint,
+--     on the admin's own screen. The database CANNOT echo what it never
+--     stored — which is a stronger guarantee than the §4φ rule it serves
+--     («καμία εντολή δεν επιστρέφει ποτέ στήλη token», now also true of
+--     `token_sha256`, which is a digest and still never returned).
+--   · ONE credential at a time, and ROTATION IS MINTING: the new digest
+--     overwrites the old, so every holder of the old token is out at its next
+--     call. Revoke is one switch that closes every lane at once.
+--
+-- ACTIVE ⇒ THERE IS A DIGEST (WA-24 verify finding 10·4). Without the CHECK the
+-- table accepted `active = true` beside `token_sha256 is null`: authentication
+-- refuses such a row correctly (NULL matches no digest — proven live), but
+-- admin_bridge_status would have printed «active since …» for a credential that
+-- CANNOT AUTHENTICATE — a status surface lying about the one fact it exists to
+-- report. It is the house's own presence-before-membership discipline written
+-- into the table: the state «armed» is not expressible without the thing that
+-- arms it. The other direction stays legal on purpose — a digest with
+-- active=false is exactly what REVOKE leaves behind, and it is what lets
+-- `revoked_at` mean something.
+create table if not exists wa.bridge_access (
+  id           int primary key default 1 check (id = 1),   -- exactly one row
+  token_sha256 text,                    -- hex digest; null = never minted
+  active       boolean not null default false,
+  minted_at    timestamptz,
+  last_used_at timestamptz,
+  revoked_at   timestamptz,
+  constraint bridge_access_armed_chk check (not active or token_sha256 is not null)
+);
+
+-- ── 2. TOMBSTONES — A DELETION IS NEVER AN ABSENCE ─────────────────────────
+-- «this identity does not come back on its own.» An FDMS undo or a deleted
+-- source event crosses the wire as a REMOVE op, which deletes the bridge's own
+-- row and lays a tombstone here. The FDMS side excludes a tombstoned identity
+-- from its derived push queue, so an undo STICKS against the five-second
+-- auto-push debounce instead of being re-created one beat later; the only
+-- clearance is an explicit, confirmed re-push (`clear_tombstone`), which sets
+-- cleared_at and is logged on both sides.
+-- THE KEY IS THE `rid` — the FDMS-side, DATE-FREE identity of the attempt
+-- (oid ∷ band ∷ node ∷ ord). The (sortie, date, seq) handle travels with it for
+-- the human reading the report, but it is NOT the identity: a date correction
+-- moves the handle and must not resurrect the tombstone.
+-- IT NEVER LOCKS THE STUDENT OUT. Nothing on the owner's save path reads this
+-- table — a tombstone is a fact about the BRIDGE's intentions, never a claim
+-- over a row the student typed.
+--
+-- ── THE KEY IS THE ROSTER OID, AND IT SURVIVES THE PERSON (verify finding 3c)
+-- The first draft keyed the gate on `student_id … on delete cascade`, and the
+-- verify proved live what that costs: lay two tombstones, delete the person,
+-- and NOTHING REMAINS — so admin_delete_person followed by a re-create on the
+-- SAME external_oid resurrects every undone push at the next auto-push cycle.
+-- The gate has to outlive the row it was laid against, and it can, because the
+-- identity it gates is not a WA uuid at all: the `rid` is FDMS's own and it
+-- CARRIES the roster object id. So `student_oid` is the key (people.external_oid
+-- is UNIQUE — round 9), the uuid stays beside it as a convenience handle and is
+-- NULLED, not cascaded, when the person goes. A student deleted and re-created
+-- on the same oid meets the same tombstones; one re-created on a DIFFERENT oid
+-- is a different student to the bridge and his rids differ too, so nothing
+-- stale can attach to him either.
+create table if not exists wa.bridge_tombstones (
+  id          uuid primary key default gen_random_uuid(),
+  student_oid text not null,                        -- THE KEY: people.external_oid
+  student_id  uuid references public.people(id) on delete set null,  -- handle only
+  -- THE VOCABULARY IS SPELLED OUT, AND IT IS AUDITED (verify finding 10·5).
+  -- The literals are written here on purpose — the proposals_level_chk
+  -- precedent, verbatim: «a CHECK that called a function could be silently
+  -- widened by redefining the function». What was missing was the other half:
+  -- nothing tied the spelled-out list back to the registry it mirrors, so a
+  -- future round widening wa.log_bands() would get a tombstone table that
+  -- silently refuses the new band. The r24 audit block at the foot of this file
+  -- reads BOTH out of the catalog and fails the deployment if they disagree.
+  -- MIRROR: wa.log_bands() · wa.bridge_reasons() below.
+  section     text not null constraint bridge_tombstones_section_chk
+                            check (section in ('flights', 'fs')),
+  sortie      text not null,
+  -- THE HANDLE IS GUARDED LIKE EVERY OTHER DATE AND SEQ IN THIS FILE (verify
+  -- finding 3b): the first draft took date='12/08/2026' and seq=-7 without a
+  -- murmur. The date literal is the ISO pattern of wa.is_iso_date and the seq
+  -- bounds are the ones wa.validate_record asks of a flight row
+  -- (wa.chk_int(e->'seq', …, 1, 20)); both are audited against their mirrors at
+  -- the foot of this file for the reason the section list is.
+  date        text not null constraint bridge_tombstones_date_chk
+                            check (date ~ '^\d{4}-\d{2}-\d{2}$'),
+  seq         int  not null default 1 constraint bridge_tombstones_seq_chk
+                            check (seq >= 1 and seq <= 20),
+  rid         text not null,
+  reason      text not null constraint bridge_tombstones_reason_chk
+                            check (reason in ('undo', 'source_removed', 'developer')),
+  at          timestamptz not null default now(),
+  cleared_at  timestamptz
+);
+-- ONE LIVE TOMBSTONE PER (student oid, rid) — the shape of the fact, asserted.
+-- WHAT THIS INDEX DOES AND DOES NOT DO (verify finding 5, the comment corrected).
+-- It makes a SECOND live tombstone for one identity impossible. It does NOT make
+-- a replayed remove idempotent: a unique index turns a duplicate into an ERROR,
+-- never into a no-op, and under the round's own «per-row outcomes are VERDICTS,
+-- not exceptions» rule an exception here would void every sibling op of the same
+-- push. Idempotency is therefore the CALLER's, and public.bridge_push is written
+-- to carry it: its remove branch answers a replay with the verdict `unchanged`
+-- BEFORE it writes, and lays its tombstone `on conflict … do nothing` so a race
+-- that beats the check is absorbed rather than raised. The index is the fence;
+-- the verdict is the behaviour.
+create unique index if not exists bridge_tombstones_live
+  on wa.bridge_tombstones (student_oid, rid) where cleared_at is null;
+create index if not exists bridge_tombstones_at on wa.bridge_tombstones (at desc);
+
+-- ── 3. THE AUDIT — EVERY OP, ITS VERDICT, AND NO NAMES ─────────────────────
+-- One row per operation, whatever the operation did (a refused push is exactly
+-- as interesting as an accepted one). NO NAMES AND NO GRADES: the person is the
+-- roster's object id, the flight is its handle, and the reason a row was
+-- refused is its FIELD PATH, never the value that failed. The tail of this
+-- table travels in bridge_pull and in admin_export, so both sides can render
+-- «what Wings Ahead remembers happening» beside «what the FDMS ledger claims» —
+-- and a drift between the two is a report line, never a silence.
+--
+-- `op` AND `verdict` ARE DELIBERATELY UNCONSTRAINED, and that is the opposite
+-- ruling from the tombstone table two blocks up — for the opposite reason. A
+-- tombstone is a LIVE GATE that the push lane consults, so a value outside the
+-- vocabulary would be a gate nobody can reason about. This is a LOG of what
+-- happened. A vocabulary CHECK on a log makes the history unwritable the day the
+-- vocabulary changes, and — worse — makes an old, honest row unreadable by a
+-- future constraint validation. What the ROUND guarantees instead is at the
+-- writer: public.bridge_push only ever writes wa.bridge_ops() / wa.bridge_verdicts()
+-- values, and it is the only writer there is.
+create table if not exists wa.bridge_audit (
+  id          bigint generated by default as identity primary key,
+  at          timestamptz not null default now(),
+  student_id  uuid references public.people(id) on delete set null,
+  student_oid text,
+  op          text not null,
+  section     text,
+  sortie      text,
+  date        text,
+  seq         int,
+  rid         text,
+  verdict     text not null,
+  note        text
+);
+create index if not exists bridge_audit_at on wa.bridge_audit (at desc);
+
+-- BELT AND BRACES over «unreachable by construction». Schema `wa` is already
+-- revoked from public/anon/authenticated at the top of this file, so none of
+-- the three is addressable through PostgREST at all; RLS with no policy is the
+-- second lock and the explicit revoke is the third. The SECURITY DEFINER RPCs
+-- run as the owner and are unaffected (the pattern public.people has carried
+-- since round 1). THE r24 AUDIT BLOCK AT THE FOOT OF THIS FILE asserts all of
+-- it against the CATALOG — schema, RLS, policy count, relacl and the sequence —
+-- so a future round cannot loosen it by accident. (It is real: WA-24 verify
+-- finding 9a caught this sentence promising a block nobody had written.)
+alter table wa.bridge_access     enable row level security;
+alter table wa.bridge_tombstones enable row level security;
+alter table wa.bridge_audit      enable row level security;
+revoke all on wa.bridge_access     from public, anon, authenticated;
+revoke all on wa.bridge_tombstones from public, anon, authenticated;
+revoke all on wa.bridge_audit      from public, anon, authenticated;
+revoke all on all sequences in schema wa from public, anon, authenticated;
+
 -- ── auth / validation helpers (schema wa — unreachable from the API) ───────
 create or replace function wa.auth(p_token text) returns public.people
 language plpgsql stable set search_path = public, wa, pg_temp as $$
@@ -452,6 +646,104 @@ begin
   end if;
   return v;
 end $$;
+
+-- ── THE BRIDGE'S OWN DOOR (round 24 / P45-WA) ──────────────────────────────
+-- The mirror image of wa.auth, and deliberately NOT a branch of it: this one
+-- looks the caller up in a table public.people is not, so the two credentials
+-- can never be confused for one another in either direction. A bridge token
+-- fails wa.auth (it is not a person); the admin token fails this (its digest is
+-- not the stored one). A wrongly pasted credential is therefore a NAMED refusal
+-- at setup time, never a working-but-overprivileged bridge.
+--
+-- ONE SENTENCE FOR ALL FOUR FAILURES — never minted, wrong token, revoked, and
+-- (verify finding 4, the one cosmetic seam of the fragment) A TOKEN TOO SHORT
+-- TO BE ONE. The short-token path used to answer «WA: invalid bridge token»,
+-- which is a DIFFERENT sentence and therefore an oracle: it discloses that a
+-- length floor exists and where it is, and it gives the legitimate caller who
+-- fat-fingered a paste no instruction at all. Telling the four apart would let
+-- a holder of nothing learn whether a credential exists and whether it was
+-- withdrawn; ONE sentence says what to DO, which is the only thing a legitimate
+-- caller needs. The length test stays — it is what stops a null or a stray ""
+-- reaching digest() — it simply no longer speaks in its own voice.
+--
+-- IT IS `volatile`, AND THAT IS LOAD-BEARING TWICE OVER (must-fix 1 of the
+-- 2026-08-28 adversarial read). It touches last_used_at, and PostgREST runs a
+-- STABLE function inside a READ ONLY transaction — a `stable` bridge_pull over
+-- this would have failed with «cannot execute UPDATE in a read-only
+-- transaction» on EVERY call, including the setup test, bricking onboarding
+-- with a Postgres error where the design promised the server's own sentence.
+-- And a volatile function is POST-only on PostgREST, so the token travels in
+-- the request BODY and can never be smeared through a URL or a proxy log.
+--
+-- `extensions` on the path for digest(), the wa.gen_token precedent.
+-- THE SENTENCE ITSELF IS A FUNCTION, for the wa.admin_lock_msg reason exactly:
+-- it is said in more than one place (here, and by public.bridge_pull /
+-- bridge_push when they refuse a caller who never authenticated), and one
+-- definition cannot drift from itself.
+create or replace function wa.bridge_refusal_msg() returns text
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select 'WA: invalid or revoked bridge token — the bridge credential is minted by the admin on the People page, under Bridge, and it is shown exactly once'
+$$;
+
+create or replace function wa.auth_bridge(p_token text) returns void
+language plpgsql volatile set search_path = public, wa, extensions, pg_temp as $$
+begin
+  if p_token is null or length(p_token) < 24
+     or not exists (select 1 from wa.bridge_access
+                     where active
+                       and token_sha256 = encode(digest(p_token, 'sha256'), 'hex')) then
+    raise exception '%', wa.bridge_refusal_msg();
+  end if;
+  update wa.bridge_access set last_used_at = now() where id = 1;
+end $$;
+
+-- ── THE BRIDGE VOCABULARIES — REGISTRIES, LIKE EVERY OTHER CLOSED LIST ─────
+-- Three closed lists the lane speaks in. They are functions and not literals
+-- scattered through bridge_push for the reason wa.missions() and
+-- wa.flight_kinds() are: a vocabulary spelled out twice is a vocabulary that
+-- can disagree with itself, and the r24 audit block at the foot of this file
+-- asserts the tombstone table's spelled-out CHECK against wa.bridge_reasons()
+-- so the ONE place a literal is still written down cannot drift from the list.
+--
+-- WHY THE THREE ARE SERVER-SIDE ONLY, recorded as a judgement and not an
+-- omission: the house rule is «a registry gets BOTH mirrors» — SQL and
+-- app/app.js — and it exists because a CLIENT that hardcodes a vocabulary
+-- drifts from the server that judges it. No Wings Ahead surface renders an op,
+-- a verdict or a removal reason: the ops are written by FDMS, the verdicts are
+-- read by FDMS, and the only WA surface that touches the lane is the People
+-- page's Bridge card, which prints booleans and dates. The value that DOES
+-- reach a WA surface is the per-entry stamp 'fdms', and that one has both its
+-- mirrors (wa.entry_count_by / WA.srcOf, WA.FDMS_TAG).
+create or replace function wa.bridge_ops() returns text[]
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select array['upsert','remove']::text[]
+$$;
+create or replace function wa.bridge_reasons() returns text[]
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select array['undo','source_removed','developer']::text[]
+$$;
+-- THE VERDICT LIST — every answer one op can get, and there is no other.
+--   created / moved / updated / removed  the write happened (audited)
+--   unchanged                            the row already said exactly this, or
+--                                        the tombstone was already lying there:
+--                                        a replay, absorbed, never an exception
+--   exists_student / exists_admin        a HUMAN's row stands at that handle —
+--                                        returned in full, and NOTHING written
+--   exists_fdms                          another bridge row already occupies the
+--                                        handle a move was aiming at
+--   missing                              `prev` named a bridge row that is gone
+--                                        (the admin deleted it — his custody)
+--   tombstoned                           the identity is tombstoned; only an
+--                                        explicit clear_tombstone re-push returns
+--   refused                              the op itself is malformed, or the
+--                                        section would not validate with it —
+--                                        THIS op is refused, its siblings land
+create or replace function wa.bridge_verdicts() returns text[]
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select array['created','moved','updated','removed','unchanged',
+               'exists_student','exists_admin','exists_fdms',
+               'missing','tombstoned','refused']::text[]
+$$;
 
 create or replace function wa.is_iso_date(t text) returns boolean
 language plpgsql immutable set search_path = public, wa, pg_temp as $$
@@ -2338,13 +2630,42 @@ language sql immutable set search_path = public, wa, pg_temp as $$
               where t.k = any(wa.entry_keys(p_sec))), '{}'::jsonb) end
 $$;
 
--- STUDENT RECORD payload — full structural validation, raises on violation.
--- v2 shape (round 3): every section is a LIST of dated entries; counts are
--- derived, never stored. Round 4 adds the per-section key whitelist.
-create or replace function wa.validate_record(p jsonb) returns void
+-- ── ONE SECTION, VALIDATED ON ITS OWN (round 24 / P45-WA) ─────────────────
+-- The STUDENT RECORD's structural validation, per section: the v2 shape of
+-- round 3 (a section is a LIST of dated entries, counts are derived and never
+-- stored) plus the round-4 per-section key whitelist. It RAISES on violation,
+-- in wa.chk's own sentence, naming the field path.
+-- THE EXTRACTION, AND WHY IT IS THE FEATURE AND NOT A TIDY-UP. public.bridge_push
+-- is a SURGEON, not a courier: it applies the FDMS ops to the STORED record
+-- server-side and never asks a client to send the other eleven sections back.
+-- It therefore must be able to validate exactly what it touched — `flights` and
+-- `fs` — and nothing else. That is not an optimisation, it is the round's
+-- load-bearing decision (design #3), and the local stack proves why: ONE of the
+-- four stored student records FAILS wa.validate_record on its own migrated form
+-- (an SMS entrance written before round 8 names no ΚΕΠΕ condition). A push
+-- written as a read-modify-write of the whole record would be PERMANENTLY
+-- REFUSED for that student — for a rule about a section the bridge does not
+-- touch, cannot see and could never fix. Here, his flights push lands and his
+-- SMS row stays exactly as unsaveable as it was, which is the truth.
+--
+-- IT IS THE SAME CODE, MOVED. wa.validate_record is now a loop over this
+-- function and holds only what is genuinely about the WHOLE payload (the root
+-- object test, the size cap, the section-name whitelist and the two renamed-key
+-- refusals). Everything below — the per-entry chain, the cap, and the four
+-- cross-row rules (solo slots, exam trials, the (track,sortie,date,seq) fence,
+-- the evaluation order) — is the round-12 body verbatim, with `p->k` reading
+-- `p_arr` and one indentation level removed. Behaviour-identical by
+-- construction: the moved code never referenced `p` except as `p->k`, and the
+-- loop that calls it walks wa.sections() in the same order, so the FIRST
+-- refusal a bad payload meets is the same refusal it met before.
+-- THE CAP TRAVELS WITH IT, deliberately (the adversarial read's item 10·5): the
+-- 400-row wa.section_cap used to live in the generic loop, and an extraction
+-- that left it behind would have let the surgeon grow a section past a limit the
+-- form cannot.
+create or replace function wa.validate_section(p_sec text, p_arr jsonb) returns void
 language plpgsql immutable set search_path = public, wa, pg_temp as $$
 declare
-  k text;
+  k text := p_sec;
   f text;
   e jsonb;
   i int;
@@ -2354,6 +2675,746 @@ declare
   prev_id text;
   done boolean[];
   is_ng boolean;
+begin
+  perform wa.chk(jsonb_typeof(p_arr) = 'array', k, 'must be a list');
+  -- ROUND 12: the flat 200 became wa.section_cap — the log tables can hold
+  -- the whole syllabus and its re-flies, which no earlier section could.
+  perform wa.chk(jsonb_array_length(p_arr) <= wa.section_cap(k), k, 'too many entries');
+  for i in 0 .. coalesce(jsonb_array_length(p_arr), 0) - 1 loop
+    e := p_arr->i;
+    w := format('%s[%s]', k, i);
+    perform wa.chk(jsonb_typeof(e) = 'object', w, 'entry must be an object');
+    perform wa.chk(not (e ? 'count'), w,
+                   'manual counts are not accepted — the count is derived from the entries');
+    perform wa.chk_bool(e->'legacy', w || '.legacy');
+
+    if k = 'nfs' then
+      perform wa.chk_date(e->'date', w || '.date', not wa.is_legacy(e));
+      -- the REASON is the printed cause of the ΦΜΠ (form Α0473, 3-01 ΚΕΦ.9)
+      perform wa.chk_text(e->'reason', w || '.reason', not wa.is_legacy(e), 40);
+      perform wa.chk(e->>'reason' is null or (e->>'reason') = any(wa.nfs_reasons()),
+                     w || '.reason',
+                     format('unknown NFS reason — the form prints %s',
+                            array_to_string(wa.nfs_reasons(), ' / ')));
+      perform wa.chk_text(e->'note', w || '.note', false, 300);
+      perform wa.chk((e->>'reason') is distinct from 'other'
+                     or nullif(trim(coalesce(e->>'note', '')), '') is not null,
+                     w || '.note',
+                     'reason "Other" needs the cause written out (the ΑΛΛΗ ΑΙΤΙΑ line of the form)');
+
+    elsif k = 'sms' then
+      perform wa.chk_date(e->'entrance_date', w || '.entrance_date', not wa.is_legacy(e));
+      perform wa.chk_date(e->'exit_date', w || '.exit_date', false);
+      perform wa.chk_text(e->'note', w || '.note', false, 300);
+      -- ROUND 8 — THE ENTRANCE NAMES ITS ΚΕΠΕ CONDITION (3-01 ΚΕΦ.2 §32β).
+      -- The regulation prints the six thresholds and, in the opening
+      -- sentence of the same paragraph, the Squadron CO / DO discretion
+      -- they specify; nothing else puts a student in ΚΕΠΕ, so nothing else
+      -- is accepted here. REQUIRED EVEN ON A LEGACY ROW — the legacy flag
+      -- excuses what the OLD form never asked for, never a rule of this
+      -- round, or the rule would be optional for exactly the rows that
+      -- break it. Such a row stays READABLE everywhere and is refused on
+      -- the next save until the condition is chosen.
+      perform wa.chk_text(e->'reason', w || '.reason', false, 40);
+      perform wa.chk(nullif(trim(coalesce(e->>'reason', '')), '') is not null,
+                     w || '.reason',
+                     'every SMS entrance names the condition it was raised under — the six ΚΕΠΕ entry thresholds of 3-01 ΚΕΦ.2 §32β, or the Squadron CO / DO decision of its opening sentence');
+      perform wa.chk((e->>'reason') = any(wa.sms_reasons()),
+                     w || '.reason',
+                     format('unknown SMS entry condition — 3-01 ΚΕΦ.2 §32β prints %s',
+                            array_to_string(wa.sms_reasons(), ' / ')));
+      -- the discretionary path is the only one that is not a measurable
+      -- threshold, so it carries its reason in writing (§32δ(2))
+      perform wa.chk((e->>'reason') is distinct from 'judgement'
+                     or nullif(trim(coalesce(e->>'note', '')), '') is not null,
+                     w || '.note',
+                     'a Squadron CO / DO decision names the reduced performance it was based on — write it in the note (3-01 ΚΕΦ.2 §32δ(2): the student is told the reasons he was put in ΚΕΠΕ)');
+
+    elsif k in ('fail', 'almost_good') then
+      perform wa.chk_entry_date(e, w);
+      perform wa.chk_text(e->'category', w || '.category', not wa.is_legacy(e), 40);
+      perform wa.chk(e->>'category' is null or (e->>'category') = any(wa.item_cats()),
+                     w || '.category', 'unknown category');
+      perform wa.chk_text(e->'flight_code', w || '.flight_code', false, 40);
+      -- CATEGORY ⇄ FLIGHT CODE (round 5). The picker only ever offers the
+      -- chosen track's sorties, so this can only arrive through free text
+      -- (or a hand-made payload). A syllabus-SHAPED code whose letter
+      -- contradicts the category is provably wrong — refused, by name.
+      -- A code the catalogue does not know (a re-numbered sortie, a
+      -- one-off) is accepted and shown marked "off-catalogue": the
+      -- syllabus data may lag reality, and a record must never become
+      -- unstorable because of it.
+      perform wa.chk(wa.code_track(e->>'flight_code') is null
+                     or (e->>'category') is null or (e->>'category') = 'other'
+                     or wa.code_track(e->>'flight_code') = (e->>'category'),
+                     w || '.flight_code',
+                     format('flight %s belongs to the %s track but this entry is filed under %s — choose the code from the chosen track''s list',
+                            upper(e->>'flight_code'),
+                            wa.code_track(e->>'flight_code'), e->>'category'));
+      perform wa.chk_str_list(e->'items', w || '.items',
+                              case when wa.is_legacy(e) then 0 else 1 end, 40, 300);
+      -- SYLLABUS ONLY (round 6). The custom "Other… (type it yourself)"
+      -- item is gone: an item that is not on the printed gradesheet of the
+      -- chosen track cannot be compared with anything, cannot be counted
+      -- across students and cannot be looked up in the MIF. items[] may
+      -- therefore hold ONLY the catalogue names of the entry's category —
+      -- and a row still filed under the migration placeholder 'other' has
+      -- no catalogue at all, so it must be given a real track first.
+      -- The legacy rows keep their custom strings (they are READ, marked
+      -- and shown), and this is the refusal that asks for them to be
+      -- replaced before the record is written again.
+      if jsonb_typeof(e->'items') = 'array' then
+        for i2 in 0 .. jsonb_array_length(e->'items') - 1 loop
+          perform wa.chk(
+            jsonb_typeof(e->'items'->i2) <> 'string'
+            or (e->>'category') is not null
+               and (e->'items'->>i2) = any(wa.item_names(e->>'category')),
+            format('%s.items[%s]', w, i2),
+            case
+              when (e->>'category') is null or (e->>'category') = 'other' then
+                format('“%s” is not a syllabus item, and this entry has no track yet — choose the track first, then pick the item from its printed gradesheet (the custom item was removed in round 6)',
+                       e->'items'->>i2)
+              else
+                format('“%s” is not a syllabus item — FAIL / ALMOST GOOD items come from the printed %s gradesheet only (the custom item was removed in round 6): replace it with an item of that list',
+                       e->'items'->>i2, e->>'category')
+            end);
+        end loop;
+      end if;
+      perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
+      perform wa.chk_grade(e->'grade', w || '.grade', false);
+
+    elsif k = 'airsickness' then
+      -- ROUND 6 — THE FLIGHT, NOT THE PHASE. An airsickness event is
+      -- attached to the sortie it happened on (any track: airsickness does
+      -- not respect the syllabus), and the free-text "phase of flight /
+      -- note" box is gone. A stored note is still READ — nothing is
+      -- destroyed behind its owner's back — but a row that carries one
+      -- cannot be written again until the flight has been chosen.
+      perform wa.chk_entry_date(e, w);
+      perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
+      perform wa.chk_text(e->'flight_code', w || '.flight_code', false, 40);
+      perform wa.chk_text(e->'phase', w || '.phase', false, 300);
+      -- THE FLIGHT IS MANDATORY (round 6b). "Add the flight" was the point
+      -- of the round: an airsickness event with no sortie on it is a date
+      -- and a name, and no pattern can be seen in that. ABSENT, null, ""
+      -- and "   " are the SAME absence and all four are refused — the
+      -- value has already been through wa.norm_code at the write boundary,
+      -- so a padded string arrives here as ''.
+      -- REQUIRED EVEN ON A LEGACY ROW, exactly like the solo instructor
+      -- below: the legacy flag excuses what the OLD form never asked for,
+      -- it does not excuse a rule of this round, or the rule would be
+      -- optional for precisely the rows that break it. Such a row stays
+      -- READABLE everywhere and is refused on the next save until the
+      -- flight is supplied — the standing "keep it, ask for it" contract.
+      -- The row that still carries the retired note gets the sentence that
+      -- explains what happened to it; every other one gets the rule.
+      perform wa.chk(nullif(trim(coalesce(e->>'flight_code', '')), '') is not null,
+                     w || '.flight_code',
+                     case when nullif(trim(coalesce(e->>'phase', '')), '') is not null
+                          then 'the phase-of-flight note is no longer collected — this entry keeps it as legacy information, but it cannot be saved again until you choose the FLIGHT the airsickness happened on'
+                          else 'every airsickness entry names the FLIGHT it happened on — choose the sortie the student was sick on (round 6 replaced the phase-of-flight note with the flight)'
+                     end);
+
+    elsif k = 'evaluations' then
+      -- FIXED SLOT RULE (round 5): the eight checkrides are always present.
+      -- A checkride that has not been flown yet is an identity and nothing
+      -- else — it cannot carry the date it does not have. The moment it
+      -- carries anything at all (a date, a grade, an evaluator) it is a
+      -- flown evaluation and the date is required again.
+      perform wa.chk_bool(e->'legacy', w || '.legacy');
+      perform wa.chk_date(e->'date', w || '.date',
+                          not wa.is_legacy(e) and not wa.slot_empty(k, e));
+      perform wa.chk_text(e->'evaluation', w || '.evaluation', not wa.is_legacy(e), 20);
+      perform wa.chk(e->>'evaluation' is null or (e->>'evaluation') = any(wa.eval_ids()),
+                     w || '.evaluation', 'unknown evaluation — expected one of the eight checkrides');
+      perform wa.chk_text(e->'with', w || '.with', false, 200);
+      perform wa.chk_grade(e->'grade', w || '.grade', false);
+      -- ROUND 23 — the CHECKRIDE's own HOURS, under the same rule and the
+      -- same sentence as a flight-log row. «Να βάλουμε και το duration στις
+      -- παράγωγες γραμμές»: the derived Flights row of a checkride reads it
+      -- off THIS row, which is the one place it is stored. Optional: null /
+      -- absent is legal and the key never decides a state.
+      perform wa.chk_duration(e->'duration', w || '.duration');
+
+    elsif k = 'solo_flights' then
+      -- FIXED SLOT RULE (round 5): the solos of the stage are the syllabus
+      -- slots, present from day one and empty until flown. `slot` names
+      -- which one; a slot-LESS entry is the "additional solo" escape hatch
+      -- for a solo the syllabus did not foresee.
+      perform wa.chk_bool(e->'legacy', w || '.legacy');
+      perform wa.chk_text(e->'slot', w || '.slot', false, 40);
+      perform wa.chk((e->>'slot') is null or (e->>'slot') = any(wa.solo_slots()),
+                     w || '.slot',
+                     'unknown solo slot — the solo rows are the fixed slots of the syllabus');
+      perform wa.chk_text(e->'sortie', w || '.sortie', false, 20);
+      perform wa.chk((e->>'sortie') is null or wa.code_track(e->>'sortie') is not null,
+                     w || '.sortie', 'the solo sortie must be a syllabus code (e.g. C4802)');
+      perform wa.chk((e->>'sortie') is null or (e->>'slot') is null
+                     or left(upper(e->>'sortie'), 1) = left(e->>'slot', 1),
+                     w || '.sortie',
+                     'this sortie does not belong to the Training Section of that solo slot');
+
+      -- ══ ROUND 22b — THE FENCE THIS SECTION OWED (verify finding 2b) ══
+      -- ══ ROUND 23 — AND THE PAIR THAT LEFT WITH THE RULING ════════════
+      -- The solo picker offers the Training Section's candidates AND free
+      -- text beside them, because the generated chart can lag reality; the
+      -- rule below is what that opening may NOT be used for. It is asked
+      -- only of a row that NAMES a sortie — presence before membership, the
+      -- round-20b rule: an unflown slot names none, so it can neither be
+      -- caught by it nor disarm it.
+      --
+      -- A CHECKRIDE IN A SOLO SLOT — the R12 sentence, one section over.
+      --     `{"sortie": "C4590"}` was accepted here: stored, counted and
+      --     exported while appearing NOWHERE in the Flights table, because
+      --     WA.derivedSlots skips a checkride position on purpose — that
+      --     position belongs to Evaluations, where the syllabus order and
+      --     the pass-attempt rule apply to it. A checkride is flown WITH an
+      --     evaluator; it can never be a solo, whoever typed it. STRUCTURAL:
+      --     no true flight matches it, which is why it is still a REFUSAL.
+      --
+      -- WHAT LEFT: TWO SOLOS OF ONE SORTIE. 22b refused the pair by name
+      -- (wa.solo_twin). RULING 2026-08-28 (evening), §4y·11·1: «Ένα solo που
+      -- δεν πετάχτηκε σε μια ενότητα (λόγω καιρού) συνήθως πετιέται σε
+      -- κάποιο repeat» — a genuine second solo of one code is a flight that
+      -- happened, and this refusal refused it. Both rows are now KEPT,
+      -- STORED and MARKED SUSPECT on the client (WA.soloPairSuspect,
+      -- rendered at rest on BOTH rows), and the double record is untangled
+      -- with the squadron. wa.solo_twin and wa.solo_row_name were dropped
+      -- with it — see the round-23 block above wa.strip_entry.
+      --
+      -- THE JUDGEMENT ON THE REST OF THE FREE TEXT, recorded (spec §4y·10,
+      -- pointer §4y·11·1): the CANDIDATE SET IS NOT FENCED. A solo of a
+      -- sortie the chart did not mark `sc` is still a flight that happened,
+      -- and refusing it would refuse the truth — the one thing this
+      -- application must never do. Such a code is already bounded
+      -- (wa.code_track: ^[BCIFN][0-9]{4}$, and its letter must match the
+      -- slot's Training Section above) and, unlike a checkride, it makes no
+      -- second book: the Flights position it names is DERIVED from this very
+      -- row.
+      -- KEEP IT, ASK FOR IT: a legacy row that breaks the rule is stored,
+      -- read and shown exactly as it stands — what is refused is the SAVE,
+      -- with the row named, so the owner is in front of the form when the
+      -- question is asked. The way out is the row's own picker (a slot) or
+      -- its ✕ (an additional solo).
+      -- MIRROR: app/app.js → WA.soloIsCheckrideRefusal;
+      --         app/student.js → buildPayload, the solo_flights branch.
+      perform wa.chk(nullif(trim(coalesce(e->>'sortie', '')), '') is null
+                     or not (upper(wa.norm_line(e->>'sortie')) = any(wa.eval_ids())),
+                     w || '.sortie',
+                     format('%s is one of the eight checkrides — a checkride is recorded in the Evaluations section, where the syllabus order and the pass-attempt rule apply to it, and it is flown WITH an evaluator: it can never be a solo. Choose the sortie this Training Section prescribes as its solo.',
+                            upper(wa.norm_line(e->>'sortie'))));
+      -- ROUND 23 — the SOLO's own HOURS, under the same rule and the same
+      -- sentence as a flight-log row. Optional: null / absent is legal
+      -- (wa.chk_duration returns on null), and the key never decides a
+      -- state — a solo is complete on its date, its authorising instructor
+      -- and either NG or a grade, exactly as it was.
+      perform wa.chk_duration(e->'duration', w || '.duration');
+      perform wa.chk(not (e ? 'graded'), w || '.graded',
+                     'replaced — send "ng": true for a non-graded solo');
+      perform wa.chk_bool(e->'ng', w || '.ng');
+      -- THE INSTRUCTOR IS ON EVERY FLOWN SOLO ROW (round 6) — NG included.
+      -- A student never launches alone on their own authority: somebody
+      -- AUTHORISES the solo, signs for it and owns it. NG removes the
+      -- GRADE (there is nothing to score), never the person: on a
+      -- non-graded row the name is the AUTHORISING instructor, on a graded
+      -- one it is the instructor / evaluator who graded it.
+      if not wa.slot_empty(k, e) then
+        is_ng := coalesce(case when jsonb_typeof(e->'ng') = 'boolean'
+                               then (e->>'ng')::boolean else false end, false);
+        perform wa.chk_date(e->'date', w || '.date', not wa.is_legacy(e));
+        -- REQUIRED EVEN ON A LEGACY ROW. The legacy flag excuses what the
+        -- OLD form never asked for; it does not excuse a round-6 rule, or
+        -- the rule would be optional for exactly the rows that break it.
+        -- A row without the name is readable everywhere and refused on the
+        -- next save until it is supplied ("keep it, ask for it").
+        -- The type/length check first, so a number in the box is answered
+        -- with "must be text" and not with the rule below…
+        perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
+        -- …and then THE NAME ITSELF, on every FLOWN row, graded or NG.
+        -- ROUND 6b: one absence, four spellings. The key ABSENT, an
+        -- explicit null, "" and "   " all mean nobody signed for this
+        -- solo, so all four are refused — the value has already been
+        -- through wa.norm_line at the write boundary, so a padded string
+        -- arrives here as ''. (Before this, a graded row could carry
+        -- instructor:"" past the required-text check, which only asks
+        -- whether a STRING is there; and absent/null were refused with a
+        -- generic "required text missing" instead of the rule.) The
+        -- sentence names which kind of row it is, because the two are
+        -- different duties: the NG row wants the AUTHORISING instructor,
+        -- the graded one the instructor / evaluator who scored it.
+        perform wa.chk(nullif(trim(coalesce(e->>'instructor', '')), '') is not null,
+                       w || '.instructor',
+                       case when is_ng
+                            then 'a non-graded (NG) solo still names the AUTHORISING instructor — NG removes the grade, not the person who authorised the flight'
+                            else 'a flown solo names the instructor / evaluator who signed for it — a student never launches alone on their own authority'
+                       end);
+        if is_ng then
+          perform wa.chk(e->'grade' is null or jsonb_typeof(e->'grade') = 'null',
+                         w || '.grade', 'a non-graded (NG) solo carries no grade');
+        else
+          perform wa.chk_grade(e->'grade', w || '.grade', not wa.is_legacy(e));
+        end if;
+      end if;
+
+    elsif k in ('fpc', 'cef') then
+      -- round 5: the person is the EVALUATOR (DO / Squadron CO / an
+      -- instructor), and the entry names the STAGE FLIGHT that triggered it.
+      perform wa.chk(not (e ? 'by'), w || '.by',
+                     'renamed — the person who conducted it is the evaluator, send it as "evaluator"');
+      perform wa.chk_entry_date(e, w);
+      perform wa.chk_text(e->'flight_code', w || '.flight_code', false, 40);
+      perform wa.chk((e->>'flight_code') is null
+                     or wa.code_track(e->>'flight_code') is not null
+                     or length(trim(e->>'flight_code')) > 0,
+                     w || '.flight_code', 'the trigger flight cannot be blank');
+      perform wa.chk_text(e->'evaluator', w || '.evaluator', false, 200);
+      -- AN FPC IS CONDUCTED BY THE SQUADRON CO OR THE DO — nobody else
+      -- (round 6). CEF keeps its open list: a CEF is flown with a Squadron
+      -- Evaluator. A stored value from before this rule is READ and shown,
+      -- and this refusal is what asks for it to be corrected.
+      if k = 'fpc' then
+        perform wa.chk((e->>'evaluator') is null
+                       or (e->>'evaluator') = any(wa.fpc_evaluators()),
+                       w || '.evaluator',
+                       format('an FPC is conducted by the %s and by nobody else — “%s” is not one of them',
+                              array_to_string(wa.fpc_evaluators(), ' or the '),
+                              e->>'evaluator'));
+      end if;
+      perform wa.chk_text(e->'result', w || '.result', false, 300);
+      perform wa.chk_grade(e->'grade', w || '.grade', false);
+
+    -- ══ ROUND 12 — THE LOG TABLES ═════════════════════════════════════
+    elsif k in ('flights', 'fs') then
+      -- THE DATE. The flight happened on a day; only the GRADE lags, which
+      -- is the whole point of «δεκτο το null, γιατι καποιες φορες αργει το
+      -- debriefing». A date is therefore required on every row.
+      perform wa.chk_entry_date(e, w);
+
+      -- WHICH TABLE THIS ROW IS IN. Four per band, and the row says which:
+      -- kind fcf / cef / other have no syllabus code to read a track off,
+      -- so the track cannot be derived and has to be stored.
+      perform wa.chk_text(e->'track', w || '.track', not wa.is_legacy(e), 20);
+      perform wa.chk((e->>'track') is null
+                     or ((e->>'track') = any(wa.item_cats()) and (e->>'track') <> 'other'),
+                     w || '.track',
+                     format('unknown track — the four tables of a band are %s',
+                            array_to_string(array['contact','instrument','formation','vfr_navigation'], ' / ')));
+
+      -- THE FLIGHT IDENTITY. «contact» in the directive is the sortie: the
+      -- table is already per category, so the first column is WHICH FLIGHT.
+      perform wa.chk_text(e->'sortie', w || '.sortie', not wa.is_legacy(e), 40);
+      perform wa.chk(wa.is_legacy(e)
+                     or nullif(trim(coalesce(e->>'sortie', '')), '') is not null,
+                     w || '.sortie',
+                     'every row of a flight log names the flight — choose the sortie from the table''s list, or type it if the syllabus data lags reality');
+      -- TRACK ⇄ CODE, the round-5 rule applied to the same kind of pair. A
+      -- code the catalogue does NOT know is accepted and shown marked
+      -- off-catalogue (the syllabus data may lag reality and a record must
+      -- never become unstorable); a syllabus-SHAPED code whose letter
+      -- contradicts the table it sits in is provably wrong.
+      perform wa.chk(wa.code_track(e->>'sortie') is null or (e->>'track') is null
+                     or wa.code_track(e->>'sortie') = (e->>'track'),
+                     w || '.sortie',
+                     format('%s belongs to the %s track but this row is in the %s table — record it in that table instead',
+                            upper(e->>'sortie'), wa.code_track(e->>'sortie'), e->>'track'));
+      -- BAND ⇄ CODE, the same doctrine one axis over. Nothing derives
+      -- flights-from-F/S out of a code, so the generated catalogue is the
+      -- only authority — and where it knows the code, it is a fact.
+      perform wa.chk(wa.sortie_band(e->>'sortie') is null
+                     or wa.sortie_band(e->>'sortie') = k,
+                     w || '.sortie',
+                     format('%s is %s sortie — it belongs in the %s tables, not the %s ones',
+                            upper(e->>'sortie'),
+                            case when wa.sortie_band(e->>'sortie') = 'fs' then 'a SIMULATOR' else 'an AIRCRAFT' end,
+                            case when wa.sortie_band(e->>'sortie') = 'fs' then 'F/S' else 'Flights' end,
+                            case when k = 'fs' then 'F/S' else 'Flights' end));
+      -- ONE FACT, ONE ROW. The eight checkrides have their own section,
+      -- with the syllabus-order rule and the pass-attempt rule on them. A
+      -- second row here would be a second grade for one flight, and the two
+      -- can disagree — which is the corruption this app exists to prevent.
+      perform wa.chk(not ((e->>'sortie') = any(wa.eval_ids())),
+                     w || '.sortie',
+                     format('%s is one of the eight checkrides — a checkride is recorded in the Evaluations section, where the syllabus order and the pass-attempt rule apply to it. Two rows for one flight would be two grades that can disagree.',
+                            upper(e->>'sortie')));
+
+      -- ══ ROUND 22 — AND THE SAME DOCTRINE FOR A SOLO, IN TWO TIERS ═══════
+      -- ══ ROUND 23 — AND BOTH TIERS ARE NOW MARKS, NOT REFUSALS ═══════════
+      -- RULING (2026-08-28), the user's own words: «Έβαλα την C4791 και
+      -- έκανα save. Γιατί δεν ανανεώνεται στον πίνακα Flights;» A solo
+      -- is recorded in the Solo flights section; the Flights table renders
+      -- that record at the sortie's place in the flow chart and stores
+      -- nothing. A row here for the same sortie MAY be the second book.
+      --
+      -- THE SET IS JUDGED FROM THE SYLLABUS, NOT ASSUMED, and the syllabus
+      -- has two shapes (spec §4y·3; app/app.js carries the same judgement in
+      -- prose). THE JUDGEMENT STANDS — it is still what decides WHICH
+      -- SENTENCE a row wears; what it produces is no longer a refusal:
+      --
+      -- TIER 1 — A SOLO BY DEFINITION. A Training Section whose solo is
+      --   REQUIRED and whose picker offers no alternative: the slot must be
+      --   filled and only one code can fill it, so nobody flies that code
+      --   dual, ever. Today that is exactly C4791, the stage's 1st SOLO.
+      --   MARKED SUSPECT, by name.
+      -- TIER 2 — A SOLO CANDIDATE. C4802 and C4803 are the two candidates
+      --   of a four-sortie section prescribing ONE solo: whichever was not
+      --   flown solo WAS flown dual, and its Flights row is the truth.
+      --   Marking all 17 candidates by name would cry wolf on a real
+      --   flight, so the mark fires only on the SAME-DAY shape: the same
+      --   sortie on the same day as a flown solo of this record. A dual
+      --   C4802 on another day is a second real sortie and wears no
+      --   suspicion at all — it is the commonest TRUE shape in the syllabus.
+      --
+      -- RULING 2026-08-28 (evening) — ΜΑΡΚΑΡΙΣΜΑ, ΟΧΙ ΑΡΝΗΣΗ (§4y·11·1):
+      -- «Όπως είναι με το which-sortie που μπορούμε να κάνουμε type είναι μια
+      -- χαρά — θα μπαίνει ως έξτρα γραμμή. Για να μην το πνίξουμε:
+      -- ΜΑΡΚΑΡΙΣΜΑ ως ύποπτο, και το ξεδιαλύνουμε μετά και μαζί.»
+      -- A refusal here refused FLIGHTS THAT HAPPENED — a repeat flown in
+      -- another section's slot, a genuine second solo («ένα solo που δεν
+      -- πετάχτηκε … συνήθως πετιέται σε κάποιο repeat») — so the two
+      -- tiers became MARKS. Nothing is refused, nothing is destroyed, and
+      -- the double record is untangled with the squadron.
+      -- THE ONE-TRUTH CORE IS UNTOUCHED: a filled solo still DERIVES its
+      -- Flights position and the derived row still WINS it (WA.slotKey /
+      -- WA.slotOwner), so a stored row for that sortie is always an EXTRA —
+      -- now suspect-marked instead of refused. The two wa.chk calls that
+      -- stood here, and wa.solo_holder with them, are gone; what stands in
+      -- their place is a CLIENT computation on all three surfaces, because
+      -- «this sortie appears twice» is a RELATION between two rows and a flag
+      -- stored on one of them would outlive the edit that resolved it.
+      -- MIRROR: app/app.js → WA.soloOnlySuspect / WA.soloSameDaySuspect /
+      -- WA.logRowFlag; WA.slotKey / WA.slotOwner (unchanged, and load-
+      -- bearing: they are why the position is still never claimed).
+
+      -- WHICH FLIGHT OF THAT CODE ON THAT DAY. Deliberate, never derived:
+      -- an array index is a POSITION and this is a FACT, and there is no
+      -- (sortie, date) uniqueness rule here — a second turn on one day is a
+      -- real thing, and a rule that refused it would refuse the truth.
+      perform wa.chk_int(e->'seq', w || '.seq', 1, 20);
+
+      -- THE KIND — closed list, 'syllabus' by default (see wa.flight_kinds)
+      perform wa.chk_text(e->'kind', w || '.kind', false, 20);
+      perform wa.chk((e->>'kind') is null or (e->>'kind') = any(wa.flight_kinds()),
+                     w || '.kind',
+                     format('unknown kind of flight — the list is %s',
+                            array_to_string(wa.flight_kinds(), ' / ')));
+
+      -- THE INSTRUCTOR IS ON EVERY ROW — the round-6 solo doctrine applied
+      -- to every sortie: «a student never launches alone on their own
+      -- authority». On a graded row it is who graded it, on an NG or
+      -- ungraded row it is who flew with or authorised it. Required even on
+      -- a legacy row: the flag excuses what an OLD form never asked for,
+      -- never a rule of this round, or the rule would be optional for
+      -- exactly the rows that break it.
+      perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
+      perform wa.chk(nullif(trim(coalesce(e->>'instructor', '')), '') is not null,
+                     w || '.instructor',
+                     'every flown sortie names the instructor — a student never launches alone on their own authority, and an ungraded row still had somebody in the other seat or somebody who authorised it');
+      -- the unambiguous identity, written by the admin's form path only for
+      -- now. Never drawn as a box, so nothing a student types reaches it.
+      perform wa.chk_text(e->'instructor_oid', w || '.instructor_oid', false, 64);
+
+      perform wa.chk_duration(e->'duration', w || '.duration');
+      perform wa.chk_bool(e->'ng', w || '.ng');
+      is_ng := coalesce(case when jsonb_typeof(e->'ng') = 'boolean'
+                             then (e->>'ng')::boolean else false end, false);
+      if is_ng then
+        -- the identical rule and the identical sentence as solo_flights
+        perform wa.chk(e->'grade' is null or jsonb_typeof(e->'grade') = 'null',
+                       w || '.grade', 'a non-graded (NG) flight carries no grade');
+      else
+        perform wa.chk_grade(e->'grade', w || '.grade', false);
+      end if;
+
+      -- THE MISSION, AND WHERE IT MAY LIVE (round 12b). Only where the
+      -- grade is absent and the row is not NG. Two answers, no third.
+      perform wa.chk_text(e->'mission', w || '.mission', false, 20);
+      perform wa.chk((e->>'mission') is null or (e->>'mission') = any(wa.missions()),
+                     w || '.mission',
+                     format('unknown mission — %s', array_to_string(wa.missions(), ' / ')));
+      perform wa.chk((e->>'mission') is null or jsonb_typeof(e->'grade') <> 'number',
+                     w || '.mission',
+                     format('this row has a grade, so its mission is READ from it (%s %% is “mission %s”) — a stored mission beside a stored grade is a second source of truth that can contradict the first',
+                            -- round-12 verify finding 1, kept: the grade is whole by
+                            -- construction (chk_grade above), so it prints UNCHANGED —
+                            -- the trailing-zero trim borrowed from chk_grade once turned
+                            -- 100 into "1 %" here.
+                            (e->>'grade'),
+                            wa.grade_mission((e->>'grade')::numeric)));
+      perform wa.chk((e->>'mission') is null or not is_ng,
+                     w || '.mission',
+                     'a non-graded (NG) flight is not scorable at all — it carries neither a grade nor a mission');
+
+      -- ROUND 12b — THE TWO RETIRED KEYS, REFUSED BY NAME. The generic
+      -- whitelist below would answer "unknown field"; these say WHY, which
+      -- is the ruling and not a typo report.
+      perform wa.chk(not (e ? 'note'), w || '.note',
+        'the note field was removed from the flight log — «Δε θελω πεδιο note»: a flight row is the flight, the date, who flew it, how long it lasted and how it went');
+      perform wa.chk(not (e ? 'verdict'), w || '.verdict',
+        'the three-way verdict (pass / lagging / failed) was replaced by MISSION — «Θελω μονο mission complete, mission incomplete»');
+
+    elsif k = 'lessons' then
+      -- ══ ROUND 14 — AN END DATE ALONE IS A VALID RECORD ═══════════════
+      -- «τα μαθηματα να δεχομαστε και μονο end date για την καταγραφη»
+      -- A lesson is a BLOCK: date = start, end_date = end. Round 12b asked
+      -- for the START on every row, which meant a course that a student
+      -- knows FINISHED on the 12th but cannot date the beginning of could
+      -- not be recorded at all — and it is the exact row round 13's open
+      -- item 2 named («a started ground lesson cannot be saved»): the ONLY
+      -- partial state a two-date row has is an end without a start, and it
+      -- was the one state the server refused. EITHER date is now enough;
+      -- neither is still refused, because a lesson with no date at all says
+      -- nothing that «this course is in the programme» does not already.
+      -- This is the ONE section where chk_entry_date does not apply.
+      perform wa.chk_bool(e->'legacy', w || '.legacy');
+      perform wa.chk_date(e->'date', w || '.date', false);
+      perform wa.chk_date(e->'end_date', w || '.end_date', false);
+      perform wa.chk(wa.is_legacy(e)
+                     or wa.is_iso_date(e->>'date')
+                     or wa.is_iso_date(e->>'end_date'),
+                     w || '.date',
+                     'a ground lesson is recorded by its start date, its end date, or both — one of the two is required');
+      perform wa.chk((e->>'end_date') is null or (e->>'date') is null
+                     or (e->>'end_date') >= (e->>'date'),
+                     w || '.end_date', 'a lesson cannot end before it started');
+      -- THE GROUP IS THE CLOSED LIST — it is the identity of the row, and
+      -- one of the twelve theory groups of the printed programme.
+      perform wa.chk_text(e->'group', w || '.group', not wa.is_legacy(e), 40);
+      perform wa.chk((e->>'group') is null or (e->>'group') = any(wa.lesson_groups()),
+                     w || '.group',
+                     'unknown ground group — the list is the twelve theory groups of the syllabus');
+      perform wa.chk(wa.is_legacy(e)
+                     or nullif(trim(coalesce(e->>'group', '')), '') is not null,
+                     w || '.group', 'every ground lesson names the group it belongs to');
+      -- ROUND 12b — THE SIMPLICITY RULING, REFUSED BY NAME. «Μη βαλεις
+      -- εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο» — and the
+      -- same review took the note field with it. The periods and attendance
+      -- boxes went too: the table the user drew is GROUP · COURSE · START ·
+      -- END, and a key with no cell is a key nobody could ever edit.
+      perform wa.chk(not (e ? 'instructor') and not (e ? 'instructor_oid'),
+        w || '.instructor',
+        'a ground lesson does not name an instructor — «Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο»');
+      perform wa.chk(not (e ? 'note'), w || '.note',
+        'the note field was removed — «Δε θελω πεδιο note»');
+      perform wa.chk(not (e ? 'periods') and not (e ? 'absent'), w || '.periods',
+        'a ground lesson row is GROUP · COURSE · START · END — the periods and attendance boxes were removed with the round-12b simplification');
+      -- THE COURSE, off-catalogue accepted and marked (the sortie rule):
+      -- course codes are derived at run time from the printed duration
+      -- block, so they are the value most likely to lag reality. What IS
+      -- refused is the CONTRADICTION — a course that exists but in ANOTHER
+      -- group, which would make the (group, course) join key false.
+      perform wa.chk_text(e->'course', w || '.course', false, 60);
+      perform wa.chk((e->>'course') is null or (e->>'group') is null
+                     or (e->>'course') = any(wa.lesson_courses(e->>'group'))
+                     or not exists (select 1 from unnest(wa.lesson_groups()) g
+                                    where (e->>'course') = any(wa.lesson_courses(g))),
+                     w || '.course',
+                     format('“%s” is a course of another group — a course is identified by the PAIR (group, course), never by its code alone (OJT is a course of four different groups)',
+                            e->>'course'));
+
+    elsif k = 'exams' then
+      -- ══ ROUND 14 — TWO SHAPES, AND THEY ARE EXCLUSIVE ════════════════
+      -- Either the row is one of the EIGHT (exam + optional trial 2|3), or
+      -- it is a Weekly exam of the weekly series (series + series_no, no
+      -- exam). A row that tried to be both would be a fixed exam the eight
+      -- do not contain, and every count of "how many of the eight are done"
+      -- would disagree with every other.
+      perform wa.chk_bool(e->'legacy', w || '.legacy');
+      perform wa.chk_text(e->'series', w || '.series', false, 20);
+      -- ROUND 18 — the ONE refusal that must still print the STORED KEY,
+      -- because it is the value the payload has to carry. It names the
+      -- visible word beside it so the reader can tell which is which.
+      perform wa.chk((e->>'series') is null or (e->>'series') = any(wa.exam_series()),
+                     w || '.series',
+                     format('unknown exam series — the list is %s (the %s theory exams)',
+                            array_to_string(wa.exam_series(), ' / '),
+                            wa.series_label('EETH')));
+      perform wa.chk(not ((e->>'series') is not null and (e->>'exam') is not null),
+                     w || '.series',
+                     format('a row is either one of the eight ground exams or one of the %s series — never both',
+                            wa.series_label('EETH')));
+      if (e->>'series') is not null then
+        -- THE NUMBER IS THE NAME. A Weekly exam with no number cannot be
+        -- told from any other, so it is the one thing this shape requires;
+        -- the DATE and the GRADE are both nullable, because a weekly exam
+        -- is put on the programme before it is sat.
+        perform wa.chk_date(e->'date', w || '.date', false);
+        perform wa.chk_int(e->'series_no', w || '.series_no', 1, wa.section_cap('exams'));
+        -- coalesce, because an ABSENT key makes jsonb_typeof return SQL
+        -- NULL and a NULL predicate is not a failed one: without it the
+        -- «required» half of this rule never fired at all.
+        perform wa.chk(wa.is_legacy(e)
+                       or coalesce(jsonb_typeof(e->'series_no'), 'missing') = 'number',
+                       w || '.series_no',
+                       format('every %1$s exam carries its number — %1$s 1, %1$s 2 … — because the number is its name',
+                              wa.series_label('EETH')));
+        perform wa.chk(not (e ? 'trial'), w || '.trial',
+          format('a %s exam is not an attempt at one of the eight ground exams — it carries its series number, never a trial',
+                 wa.series_label('EETH')));
+      else
+        -- A PLANNED ATTEMPT MAY BE DATELESS (round 14). A minted 2nd or 3rd
+        -- trial says «a re-sit has been ordered» before it says when; the
+        -- FIRST trial still needs its date, because a first attempt with no
+        -- date is exactly the owed slot, and that stores nothing at all.
+        perform wa.chk_bool(e->'legacy', w || '.legacy');
+        perform wa.chk_date(e->'date', w || '.date', false);
+        perform wa.chk(wa.is_legacy(e) or (e ? 'trial')
+                       or wa.is_iso_date(e->>'date'),
+                       w || '.date',
+                       'the first sitting of a ground exam carries its date — a re-sit that has only been scheduled is recorded as a 2nd or 3rd trial');
+        perform wa.chk_text(e->'exam', w || '.exam', not wa.is_legacy(e), 40);
+        perform wa.chk((e->>'exam') is null or (e->>'exam') = any(wa.exam_ids()),
+                       w || '.exam',
+                       format('unknown ground exam — the list is %s',
+                              array_to_string(wa.exam_ids(), ' / ')));
+        perform wa.chk(wa.is_legacy(e)
+                       or nullif(trim(coalesce(e->>'exam', '')), '') is not null,
+                       w || '.exam',
+                       format('every exam row names which of the eight ground exams it was, or the %s series it belongs to',
+                              wa.series_label('EETH')));
+        -- 2 AND 3, AND NOTHING ELSE. 1 is written as no key at all: a
+        -- stored 1 would be a second way of saying what the absence already
+        -- says, and two spellings of one fact is how a uniqueness rule gets
+        -- quietly bypassed.
+        perform wa.chk(not (e ? 'trial') or (e->>'trial') <> '1', w || '.trial',
+          'the first trial is written as no trial key at all — a stored 1 would be a second spelling of the same fact, and two spellings is how a uniqueness rule gets bypassed');
+        perform wa.chk_int(e->'trial', w || '.trial', 2, wa.exam_trials());
+        perform wa.chk(not (e ? 'series_no'), w || '.series_no',
+          format('a series number belongs to a %s exam — one of the eight ground exams is numbered by its TRIAL',
+                 wa.series_label('EETH')));
+      end if;
+      -- NULLABLE, for the same reason a flight's grade is: the result can
+      -- take longer to arrive than the exam did to sit.
+      -- SHAPE ONLY, AND DELIBERATELY (round 15): chk_grade asks for a whole
+      -- number 0-100 and asks nothing about whether it PASSED. A ground
+      -- exam passes at 80 (wa.exam_pass_min) and a flight at 60, and a
+      -- refusal written here with either number would be the server
+      -- deciding a question no server function is asked. A 40 % is a valid,
+      -- complete, storable ground-exam row — it simply did not pass.
+      perform wa.chk_grade(e->'grade', w || '.grade', false);
+      -- ROUND 12b — the same simplicity ruling, one section over.
+      perform wa.chk(not (e ? 'instructor') and not (e ? 'instructor_oid'),
+        w || '.instructor',
+        'a ground exam does not name an examiner — «Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο»');
+      perform wa.chk(not (e ? 'note'), w || '.note',
+        'the note field was removed — «Δε θελω πεδιο note»');
+    end if;
+
+    -- PENDING IS GONE (round 8) — refused by name, before the generic
+    -- whitelist message, so the reason is the ruling and not a typo report.
+    perform wa.chk(not (e ? 'pending'), w || '.pending',
+      'the pending flag was removed — an entry that has not happened yet is simply an unfilled row (a fixed slot with no date reads as not flown), and a result that is still awaited is a grade not written yet');
+
+    -- KEY WHITELIST — last, so the specific messages above win when they
+    -- apply. Everything else: named, and refused.
+    perform wa.chk_text(e->'entered_by', w || '.entered_by', false, 20);
+    for f in select jsonb_object_keys(e) loop
+      perform wa.chk(f = any(wa.entry_keys(k)), w || '.' || f,
+        format('unknown field for a %s entry — accepted fields are %s',
+               k, array_to_string(wa.entry_keys(k), ', ')));
+    end loop;
+  end loop;
+
+  -- ONE ROW PER SOLO SLOT. The section is a fixed list; two rows claiming
+  -- the same slot would make "the C4801-04 solo" ambiguous and let the
+  -- fixed list grow through the back door.
+  if k = 'solo_flights' then
+    perform wa.chk((select count(*) = count(distinct t.slot) from (
+                      select e2->>'slot' as slot
+                      from jsonb_array_elements(p_arr) e2
+                      where jsonb_typeof(e2) = 'object' and (e2->>'slot') is not null) t),
+                   k, 'each solo slot may appear only once — the solo rows are fixed');
+  end if;
+
+  -- ══ ROUND 14 — ONE ROW PER (EXAM, TRIAL), AND WEEKLY NUMBERS ARE UNIQUE
+  -- The solo-slot precedent two blocks up, applied to the two new shapes.
+  -- Two rows both calling themselves «IN190, 2nd trial» are two results for
+  -- one sitting that can disagree, and the pass-attempt rule would have to
+  -- pick between them arbitrarily; two rows both calling themselves
+  -- «Weekly 3» make the number stop being a name. Both are closed here, on
+  -- the server, because the form's «next trial» / «+ Weekly n» affordances
+  -- mint from max+1 and a payload can always be hand-made.
+  if k = 'exams' then
+    perform wa.chk((select count(*) = count(distinct t.key) from (
+                      select coalesce(e2->>'exam', '-') || '|'
+                             || coalesce(e2->>'trial', '1') as key
+                      from jsonb_array_elements(p_arr) e2
+                      where jsonb_typeof(e2) = 'object'
+                        and (e2->>'series') is null
+                        and (e2->>'exam') is not null) t),
+                   k, 'two rows are the same trial of the same ground exam — each of the eight may be sat once per trial (1st, 2nd, 3rd)');
+    perform wa.chk((select count(*) = count(distinct t.key) from (
+                      select coalesce(e2->>'series', '-') || '|'
+                             || coalesce(e2->>'series_no', '-') as key
+                      from jsonb_array_elements(p_arr) e2
+                      where jsonb_typeof(e2) = 'object'
+                        and (e2->>'series') is not null
+                        and (e2->>'series_no') is not null) t),
+                   k, format('two rows carry the same %s number — the number is the name, so it identifies exactly one weekly exam',
+                             wa.series_label('EETH')));
+  end if;
+
+  -- SEQ MUST DISAMBIGUATE (round-12 verify finding 2, the solo precedent
+  -- one section up). Dropping the (sortie,date) uniqueness was the ruling
+  -- — a same-day re-fly is real — but two rows sharing (track,sortie,date)
+  -- AND seq are two grades for one flight that can disagree, exactly the
+  -- corruption the checkride refusal exists to prevent; and a duplicated
+  -- FAIL pair is the mechanism the bridge critique names as able to
+  -- fabricate a ΠΔ 29/2020 referral downstream.
+  if k in ('flights', 'fs') then
+    perform wa.chk((select count(*) = count(distinct t.key) from (
+                      select coalesce(e2->>'track', '-') || '|' || coalesce(e2->>'sortie', '-')
+                             || '|' || coalesce(e2->>'date', '-') || '|'
+                             || coalesce(e2->>'seq', '1') as key
+                      from jsonb_array_elements(p_arr) e2
+                      where jsonb_typeof(e2) = 'object'
+                        and (e2->>'sortie') is not null and (e2->>'date') is not null) t),
+                   k, 'two rows carry the same sortie, date and seq — a same-day re-fly needs its own seq (the form''s "+ same-day re-fly" mints the next one)');
+  end if;
+
+  -- ── EVALUATIONS FOLLOW THE SYLLABUS ORDER (round 6) ─────────────────
+  -- The stage is flown in one order and the checkrides sit in it at fixed
+  -- points, so a later checkride cannot have been flown while an earlier
+  -- one has not: such a record is a typo in the identity picker, and it
+  -- silently corrupts every per-checkride comparison the admin makes.
+  -- THE ORDER IS THE SYLLABUS ORDER — wa.eval_ids(), generated from the
+  -- FILE ORDER of the sortie entries in flowchart2.json (the printed
+  -- Training Flow Chart): C4590 → C4790 → C5090 → C5490 → I4490 → I4890
+  -- → F4690 → N4690.
+  -- What is refused is a FILL out of order. A row that is still the empty
+  -- fixed slot is always allowed — that is the default state of all eight
+  -- from day one, and it is the state every predecessor starts in.
+  if k = 'evaluations' then
+    done := array_fill(false, array[array_length(wa.eval_ids(), 1)]);
+    for i in 0 .. coalesce(jsonb_array_length(p_arr), 0) - 1 loop
+      e := p_arr->i;
+      if jsonb_typeof(e) <> 'object' then continue; end if;
+      pos := wa.eval_pos(e->>'evaluation');
+      if pos is not null and not wa.slot_empty(k, e) then done[pos] := true; end if;
+    end loop;
+    for i in 1 .. array_length(wa.eval_ids(), 1) loop
+      if not done[i] then continue; end if;
+      for i2 in 1 .. i - 1 loop
+        if not done[i2] then
+          prev_id := (wa.eval_ids())[i2];
+          perform wa.chk(false, k || '[' || (wa.eval_ids())[i] || ']',
+            format('evaluations follow the syllabus order — %s cannot be recorded while %s has not been flown',
+                   (wa.eval_ids())[i], prev_id));
+        end if;
+      end loop;
+    end loop;
+  end if;
+end $$;
+
+-- ROUND 24 — WHAT IS LEFT HERE IS WHAT IS TRUE OF THE WHOLE PAYLOAD and of
+-- nothing smaller: the root object, the 400 kB ceiling, the section-name
+-- whitelist and the two renamed-key refusals. Everything that is true of ONE
+-- SECTION moved to wa.validate_section above, which is now the only place a
+-- section is judged — by this loop, and by public.bridge_push for the two
+-- sections it touched. Two callers, one rule.
+create or replace function wa.validate_record(p jsonb) returns void
+language plpgsql immutable set search_path = public, wa, pg_temp as $$
+declare
+  k text;
   allowed text[] := wa.sections();
 begin
   perform wa.chk(p is not null and jsonb_typeof(p) = 'object', 'root', 'payload must be an object');
@@ -2367,736 +3428,12 @@ begin
   perform wa.chk(jsonb_typeof(p->'nfs') is distinct from 'object', 'nfs',
                  'manual counts are no longer accepted — send a list of dated entries');
 
-  -- every section: array, <= 200 entries, entries are dated objects
+  -- every section: array, capped, entries are dated objects — ONE function,
+  -- called once per present section, in wa.sections() order (round 24), so the
+  -- FIRST refusal a bad payload meets is the one it met before the extraction.
   foreach k in array allowed loop
     if p ? k then
-      perform wa.chk(jsonb_typeof(p->k) = 'array', k, 'must be a list');
-      -- ROUND 12: the flat 200 became wa.section_cap — the log tables can hold
-      -- the whole syllabus and its re-flies, which no earlier section could.
-      perform wa.chk(jsonb_array_length(p->k) <= wa.section_cap(k), k, 'too many entries');
-      for i in 0 .. coalesce(jsonb_array_length(p->k), 0) - 1 loop
-        e := p->k->i;
-        w := format('%s[%s]', k, i);
-        perform wa.chk(jsonb_typeof(e) = 'object', w, 'entry must be an object');
-        perform wa.chk(not (e ? 'count'), w,
-                       'manual counts are not accepted — the count is derived from the entries');
-        perform wa.chk_bool(e->'legacy', w || '.legacy');
-
-        if k = 'nfs' then
-          perform wa.chk_date(e->'date', w || '.date', not wa.is_legacy(e));
-          -- the REASON is the printed cause of the ΦΜΠ (form Α0473, 3-01 ΚΕΦ.9)
-          perform wa.chk_text(e->'reason', w || '.reason', not wa.is_legacy(e), 40);
-          perform wa.chk(e->>'reason' is null or (e->>'reason') = any(wa.nfs_reasons()),
-                         w || '.reason',
-                         format('unknown NFS reason — the form prints %s',
-                                array_to_string(wa.nfs_reasons(), ' / ')));
-          perform wa.chk_text(e->'note', w || '.note', false, 300);
-          perform wa.chk((e->>'reason') is distinct from 'other'
-                         or nullif(trim(coalesce(e->>'note', '')), '') is not null,
-                         w || '.note',
-                         'reason "Other" needs the cause written out (the ΑΛΛΗ ΑΙΤΙΑ line of the form)');
-
-        elsif k = 'sms' then
-          perform wa.chk_date(e->'entrance_date', w || '.entrance_date', not wa.is_legacy(e));
-          perform wa.chk_date(e->'exit_date', w || '.exit_date', false);
-          perform wa.chk_text(e->'note', w || '.note', false, 300);
-          -- ROUND 8 — THE ENTRANCE NAMES ITS ΚΕΠΕ CONDITION (3-01 ΚΕΦ.2 §32β).
-          -- The regulation prints the six thresholds and, in the opening
-          -- sentence of the same paragraph, the Squadron CO / DO discretion
-          -- they specify; nothing else puts a student in ΚΕΠΕ, so nothing else
-          -- is accepted here. REQUIRED EVEN ON A LEGACY ROW — the legacy flag
-          -- excuses what the OLD form never asked for, never a rule of this
-          -- round, or the rule would be optional for exactly the rows that
-          -- break it. Such a row stays READABLE everywhere and is refused on
-          -- the next save until the condition is chosen.
-          perform wa.chk_text(e->'reason', w || '.reason', false, 40);
-          perform wa.chk(nullif(trim(coalesce(e->>'reason', '')), '') is not null,
-                         w || '.reason',
-                         'every SMS entrance names the condition it was raised under — the six ΚΕΠΕ entry thresholds of 3-01 ΚΕΦ.2 §32β, or the Squadron CO / DO decision of its opening sentence');
-          perform wa.chk((e->>'reason') = any(wa.sms_reasons()),
-                         w || '.reason',
-                         format('unknown SMS entry condition — 3-01 ΚΕΦ.2 §32β prints %s',
-                                array_to_string(wa.sms_reasons(), ' / ')));
-          -- the discretionary path is the only one that is not a measurable
-          -- threshold, so it carries its reason in writing (§32δ(2))
-          perform wa.chk((e->>'reason') is distinct from 'judgement'
-                         or nullif(trim(coalesce(e->>'note', '')), '') is not null,
-                         w || '.note',
-                         'a Squadron CO / DO decision names the reduced performance it was based on — write it in the note (3-01 ΚΕΦ.2 §32δ(2): the student is told the reasons he was put in ΚΕΠΕ)');
-
-        elsif k in ('fail', 'almost_good') then
-          perform wa.chk_entry_date(e, w);
-          perform wa.chk_text(e->'category', w || '.category', not wa.is_legacy(e), 40);
-          perform wa.chk(e->>'category' is null or (e->>'category') = any(wa.item_cats()),
-                         w || '.category', 'unknown category');
-          perform wa.chk_text(e->'flight_code', w || '.flight_code', false, 40);
-          -- CATEGORY ⇄ FLIGHT CODE (round 5). The picker only ever offers the
-          -- chosen track's sorties, so this can only arrive through free text
-          -- (or a hand-made payload). A syllabus-SHAPED code whose letter
-          -- contradicts the category is provably wrong — refused, by name.
-          -- A code the catalogue does not know (a re-numbered sortie, a
-          -- one-off) is accepted and shown marked "off-catalogue": the
-          -- syllabus data may lag reality, and a record must never become
-          -- unstorable because of it.
-          perform wa.chk(wa.code_track(e->>'flight_code') is null
-                         or (e->>'category') is null or (e->>'category') = 'other'
-                         or wa.code_track(e->>'flight_code') = (e->>'category'),
-                         w || '.flight_code',
-                         format('flight %s belongs to the %s track but this entry is filed under %s — choose the code from the chosen track''s list',
-                                upper(e->>'flight_code'),
-                                wa.code_track(e->>'flight_code'), e->>'category'));
-          perform wa.chk_str_list(e->'items', w || '.items',
-                                  case when wa.is_legacy(e) then 0 else 1 end, 40, 300);
-          -- SYLLABUS ONLY (round 6). The custom "Other… (type it yourself)"
-          -- item is gone: an item that is not on the printed gradesheet of the
-          -- chosen track cannot be compared with anything, cannot be counted
-          -- across students and cannot be looked up in the MIF. items[] may
-          -- therefore hold ONLY the catalogue names of the entry's category —
-          -- and a row still filed under the migration placeholder 'other' has
-          -- no catalogue at all, so it must be given a real track first.
-          -- The legacy rows keep their custom strings (they are READ, marked
-          -- and shown), and this is the refusal that asks for them to be
-          -- replaced before the record is written again.
-          if jsonb_typeof(e->'items') = 'array' then
-            for i2 in 0 .. jsonb_array_length(e->'items') - 1 loop
-              perform wa.chk(
-                jsonb_typeof(e->'items'->i2) <> 'string'
-                or (e->>'category') is not null
-                   and (e->'items'->>i2) = any(wa.item_names(e->>'category')),
-                format('%s.items[%s]', w, i2),
-                case
-                  when (e->>'category') is null or (e->>'category') = 'other' then
-                    format('“%s” is not a syllabus item, and this entry has no track yet — choose the track first, then pick the item from its printed gradesheet (the custom item was removed in round 6)',
-                           e->'items'->>i2)
-                  else
-                    format('“%s” is not a syllabus item — FAIL / ALMOST GOOD items come from the printed %s gradesheet only (the custom item was removed in round 6): replace it with an item of that list',
-                           e->'items'->>i2, e->>'category')
-                end);
-            end loop;
-          end if;
-          perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
-          perform wa.chk_grade(e->'grade', w || '.grade', false);
-
-        elsif k = 'airsickness' then
-          -- ROUND 6 — THE FLIGHT, NOT THE PHASE. An airsickness event is
-          -- attached to the sortie it happened on (any track: airsickness does
-          -- not respect the syllabus), and the free-text "phase of flight /
-          -- note" box is gone. A stored note is still READ — nothing is
-          -- destroyed behind its owner's back — but a row that carries one
-          -- cannot be written again until the flight has been chosen.
-          perform wa.chk_entry_date(e, w);
-          perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
-          perform wa.chk_text(e->'flight_code', w || '.flight_code', false, 40);
-          perform wa.chk_text(e->'phase', w || '.phase', false, 300);
-          -- THE FLIGHT IS MANDATORY (round 6b). "Add the flight" was the point
-          -- of the round: an airsickness event with no sortie on it is a date
-          -- and a name, and no pattern can be seen in that. ABSENT, null, ""
-          -- and "   " are the SAME absence and all four are refused — the
-          -- value has already been through wa.norm_code at the write boundary,
-          -- so a padded string arrives here as ''.
-          -- REQUIRED EVEN ON A LEGACY ROW, exactly like the solo instructor
-          -- below: the legacy flag excuses what the OLD form never asked for,
-          -- it does not excuse a rule of this round, or the rule would be
-          -- optional for precisely the rows that break it. Such a row stays
-          -- READABLE everywhere and is refused on the next save until the
-          -- flight is supplied — the standing "keep it, ask for it" contract.
-          -- The row that still carries the retired note gets the sentence that
-          -- explains what happened to it; every other one gets the rule.
-          perform wa.chk(nullif(trim(coalesce(e->>'flight_code', '')), '') is not null,
-                         w || '.flight_code',
-                         case when nullif(trim(coalesce(e->>'phase', '')), '') is not null
-                              then 'the phase-of-flight note is no longer collected — this entry keeps it as legacy information, but it cannot be saved again until you choose the FLIGHT the airsickness happened on'
-                              else 'every airsickness entry names the FLIGHT it happened on — choose the sortie the student was sick on (round 6 replaced the phase-of-flight note with the flight)'
-                         end);
-
-        elsif k = 'evaluations' then
-          -- FIXED SLOT RULE (round 5): the eight checkrides are always present.
-          -- A checkride that has not been flown yet is an identity and nothing
-          -- else — it cannot carry the date it does not have. The moment it
-          -- carries anything at all (a date, a grade, an evaluator) it is a
-          -- flown evaluation and the date is required again.
-          perform wa.chk_bool(e->'legacy', w || '.legacy');
-          perform wa.chk_date(e->'date', w || '.date',
-                              not wa.is_legacy(e) and not wa.slot_empty(k, e));
-          perform wa.chk_text(e->'evaluation', w || '.evaluation', not wa.is_legacy(e), 20);
-          perform wa.chk(e->>'evaluation' is null or (e->>'evaluation') = any(wa.eval_ids()),
-                         w || '.evaluation', 'unknown evaluation — expected one of the eight checkrides');
-          perform wa.chk_text(e->'with', w || '.with', false, 200);
-          perform wa.chk_grade(e->'grade', w || '.grade', false);
-          -- ROUND 23 — the CHECKRIDE's own HOURS, under the same rule and the
-          -- same sentence as a flight-log row. «Να βάλουμε και το duration στις
-          -- παράγωγες γραμμές»: the derived Flights row of a checkride reads it
-          -- off THIS row, which is the one place it is stored. Optional: null /
-          -- absent is legal and the key never decides a state.
-          perform wa.chk_duration(e->'duration', w || '.duration');
-
-        elsif k = 'solo_flights' then
-          -- FIXED SLOT RULE (round 5): the solos of the stage are the syllabus
-          -- slots, present from day one and empty until flown. `slot` names
-          -- which one; a slot-LESS entry is the "additional solo" escape hatch
-          -- for a solo the syllabus did not foresee.
-          perform wa.chk_bool(e->'legacy', w || '.legacy');
-          perform wa.chk_text(e->'slot', w || '.slot', false, 40);
-          perform wa.chk((e->>'slot') is null or (e->>'slot') = any(wa.solo_slots()),
-                         w || '.slot',
-                         'unknown solo slot — the solo rows are the fixed slots of the syllabus');
-          perform wa.chk_text(e->'sortie', w || '.sortie', false, 20);
-          perform wa.chk((e->>'sortie') is null or wa.code_track(e->>'sortie') is not null,
-                         w || '.sortie', 'the solo sortie must be a syllabus code (e.g. C4802)');
-          perform wa.chk((e->>'sortie') is null or (e->>'slot') is null
-                         or left(upper(e->>'sortie'), 1) = left(e->>'slot', 1),
-                         w || '.sortie',
-                         'this sortie does not belong to the Training Section of that solo slot');
-
-          -- ══ ROUND 22b — THE FENCE THIS SECTION OWED (verify finding 2b) ══
-          -- ══ ROUND 23 — AND THE PAIR THAT LEFT WITH THE RULING ════════════
-          -- The solo picker offers the Training Section's candidates AND free
-          -- text beside them, because the generated chart can lag reality; the
-          -- rule below is what that opening may NOT be used for. It is asked
-          -- only of a row that NAMES a sortie — presence before membership, the
-          -- round-20b rule: an unflown slot names none, so it can neither be
-          -- caught by it nor disarm it.
-          --
-          -- A CHECKRIDE IN A SOLO SLOT — the R12 sentence, one section over.
-          --     `{"sortie": "C4590"}` was accepted here: stored, counted and
-          --     exported while appearing NOWHERE in the Flights table, because
-          --     WA.derivedSlots skips a checkride position on purpose — that
-          --     position belongs to Evaluations, where the syllabus order and
-          --     the pass-attempt rule apply to it. A checkride is flown WITH an
-          --     evaluator; it can never be a solo, whoever typed it. STRUCTURAL:
-          --     no true flight matches it, which is why it is still a REFUSAL.
-          --
-          -- WHAT LEFT: TWO SOLOS OF ONE SORTIE. 22b refused the pair by name
-          -- (wa.solo_twin). RULING 2026-08-28 (evening), §4y·11·1: «Ένα solo που
-          -- δεν πετάχτηκε σε μια ενότητα (λόγω καιρού) συνήθως πετιέται σε
-          -- κάποιο repeat» — a genuine second solo of one code is a flight that
-          -- happened, and this refusal refused it. Both rows are now KEPT,
-          -- STORED and MARKED SUSPECT on the client (WA.soloPairSuspect,
-          -- rendered at rest on BOTH rows), and the double record is untangled
-          -- with the squadron. wa.solo_twin and wa.solo_row_name were dropped
-          -- with it — see the round-23 block above wa.strip_entry.
-          --
-          -- THE JUDGEMENT ON THE REST OF THE FREE TEXT, recorded (spec §4y·10,
-          -- pointer §4y·11·1): the CANDIDATE SET IS NOT FENCED. A solo of a
-          -- sortie the chart did not mark `sc` is still a flight that happened,
-          -- and refusing it would refuse the truth — the one thing this
-          -- application must never do. Such a code is already bounded
-          -- (wa.code_track: ^[BCIFN][0-9]{4}$, and its letter must match the
-          -- slot's Training Section above) and, unlike a checkride, it makes no
-          -- second book: the Flights position it names is DERIVED from this very
-          -- row.
-          -- KEEP IT, ASK FOR IT: a legacy row that breaks the rule is stored,
-          -- read and shown exactly as it stands — what is refused is the SAVE,
-          -- with the row named, so the owner is in front of the form when the
-          -- question is asked. The way out is the row's own picker (a slot) or
-          -- its ✕ (an additional solo).
-          -- MIRROR: app/app.js → WA.soloIsCheckrideRefusal;
-          --         app/student.js → buildPayload, the solo_flights branch.
-          perform wa.chk(nullif(trim(coalesce(e->>'sortie', '')), '') is null
-                         or not (upper(wa.norm_line(e->>'sortie')) = any(wa.eval_ids())),
-                         w || '.sortie',
-                         format('%s is one of the eight checkrides — a checkride is recorded in the Evaluations section, where the syllabus order and the pass-attempt rule apply to it, and it is flown WITH an evaluator: it can never be a solo. Choose the sortie this Training Section prescribes as its solo.',
-                                upper(wa.norm_line(e->>'sortie'))));
-          -- ROUND 23 — the SOLO's own HOURS, under the same rule and the same
-          -- sentence as a flight-log row. Optional: null / absent is legal
-          -- (wa.chk_duration returns on null), and the key never decides a
-          -- state — a solo is complete on its date, its authorising instructor
-          -- and either NG or a grade, exactly as it was.
-          perform wa.chk_duration(e->'duration', w || '.duration');
-          perform wa.chk(not (e ? 'graded'), w || '.graded',
-                         'replaced — send "ng": true for a non-graded solo');
-          perform wa.chk_bool(e->'ng', w || '.ng');
-          -- THE INSTRUCTOR IS ON EVERY FLOWN SOLO ROW (round 6) — NG included.
-          -- A student never launches alone on their own authority: somebody
-          -- AUTHORISES the solo, signs for it and owns it. NG removes the
-          -- GRADE (there is nothing to score), never the person: on a
-          -- non-graded row the name is the AUTHORISING instructor, on a graded
-          -- one it is the instructor / evaluator who graded it.
-          if not wa.slot_empty(k, e) then
-            is_ng := coalesce(case when jsonb_typeof(e->'ng') = 'boolean'
-                                   then (e->>'ng')::boolean else false end, false);
-            perform wa.chk_date(e->'date', w || '.date', not wa.is_legacy(e));
-            -- REQUIRED EVEN ON A LEGACY ROW. The legacy flag excuses what the
-            -- OLD form never asked for; it does not excuse a round-6 rule, or
-            -- the rule would be optional for exactly the rows that break it.
-            -- A row without the name is readable everywhere and refused on the
-            -- next save until it is supplied ("keep it, ask for it").
-            -- The type/length check first, so a number in the box is answered
-            -- with "must be text" and not with the rule below…
-            perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
-            -- …and then THE NAME ITSELF, on every FLOWN row, graded or NG.
-            -- ROUND 6b: one absence, four spellings. The key ABSENT, an
-            -- explicit null, "" and "   " all mean nobody signed for this
-            -- solo, so all four are refused — the value has already been
-            -- through wa.norm_line at the write boundary, so a padded string
-            -- arrives here as ''. (Before this, a graded row could carry
-            -- instructor:"" past the required-text check, which only asks
-            -- whether a STRING is there; and absent/null were refused with a
-            -- generic "required text missing" instead of the rule.) The
-            -- sentence names which kind of row it is, because the two are
-            -- different duties: the NG row wants the AUTHORISING instructor,
-            -- the graded one the instructor / evaluator who scored it.
-            perform wa.chk(nullif(trim(coalesce(e->>'instructor', '')), '') is not null,
-                           w || '.instructor',
-                           case when is_ng
-                                then 'a non-graded (NG) solo still names the AUTHORISING instructor — NG removes the grade, not the person who authorised the flight'
-                                else 'a flown solo names the instructor / evaluator who signed for it — a student never launches alone on their own authority'
-                           end);
-            if is_ng then
-              perform wa.chk(e->'grade' is null or jsonb_typeof(e->'grade') = 'null',
-                             w || '.grade', 'a non-graded (NG) solo carries no grade');
-            else
-              perform wa.chk_grade(e->'grade', w || '.grade', not wa.is_legacy(e));
-            end if;
-          end if;
-
-        elsif k in ('fpc', 'cef') then
-          -- round 5: the person is the EVALUATOR (DO / Squadron CO / an
-          -- instructor), and the entry names the STAGE FLIGHT that triggered it.
-          perform wa.chk(not (e ? 'by'), w || '.by',
-                         'renamed — the person who conducted it is the evaluator, send it as "evaluator"');
-          perform wa.chk_entry_date(e, w);
-          perform wa.chk_text(e->'flight_code', w || '.flight_code', false, 40);
-          perform wa.chk((e->>'flight_code') is null
-                         or wa.code_track(e->>'flight_code') is not null
-                         or length(trim(e->>'flight_code')) > 0,
-                         w || '.flight_code', 'the trigger flight cannot be blank');
-          perform wa.chk_text(e->'evaluator', w || '.evaluator', false, 200);
-          -- AN FPC IS CONDUCTED BY THE SQUADRON CO OR THE DO — nobody else
-          -- (round 6). CEF keeps its open list: a CEF is flown with a Squadron
-          -- Evaluator. A stored value from before this rule is READ and shown,
-          -- and this refusal is what asks for it to be corrected.
-          if k = 'fpc' then
-            perform wa.chk((e->>'evaluator') is null
-                           or (e->>'evaluator') = any(wa.fpc_evaluators()),
-                           w || '.evaluator',
-                           format('an FPC is conducted by the %s and by nobody else — “%s” is not one of them',
-                                  array_to_string(wa.fpc_evaluators(), ' or the '),
-                                  e->>'evaluator'));
-          end if;
-          perform wa.chk_text(e->'result', w || '.result', false, 300);
-          perform wa.chk_grade(e->'grade', w || '.grade', false);
-
-        -- ══ ROUND 12 — THE LOG TABLES ═════════════════════════════════════
-        elsif k in ('flights', 'fs') then
-          -- THE DATE. The flight happened on a day; only the GRADE lags, which
-          -- is the whole point of «δεκτο το null, γιατι καποιες φορες αργει το
-          -- debriefing». A date is therefore required on every row.
-          perform wa.chk_entry_date(e, w);
-
-          -- WHICH TABLE THIS ROW IS IN. Four per band, and the row says which:
-          -- kind fcf / cef / other have no syllabus code to read a track off,
-          -- so the track cannot be derived and has to be stored.
-          perform wa.chk_text(e->'track', w || '.track', not wa.is_legacy(e), 20);
-          perform wa.chk((e->>'track') is null
-                         or ((e->>'track') = any(wa.item_cats()) and (e->>'track') <> 'other'),
-                         w || '.track',
-                         format('unknown track — the four tables of a band are %s',
-                                array_to_string(array['contact','instrument','formation','vfr_navigation'], ' / ')));
-
-          -- THE FLIGHT IDENTITY. «contact» in the directive is the sortie: the
-          -- table is already per category, so the first column is WHICH FLIGHT.
-          perform wa.chk_text(e->'sortie', w || '.sortie', not wa.is_legacy(e), 40);
-          perform wa.chk(wa.is_legacy(e)
-                         or nullif(trim(coalesce(e->>'sortie', '')), '') is not null,
-                         w || '.sortie',
-                         'every row of a flight log names the flight — choose the sortie from the table''s list, or type it if the syllabus data lags reality');
-          -- TRACK ⇄ CODE, the round-5 rule applied to the same kind of pair. A
-          -- code the catalogue does NOT know is accepted and shown marked
-          -- off-catalogue (the syllabus data may lag reality and a record must
-          -- never become unstorable); a syllabus-SHAPED code whose letter
-          -- contradicts the table it sits in is provably wrong.
-          perform wa.chk(wa.code_track(e->>'sortie') is null or (e->>'track') is null
-                         or wa.code_track(e->>'sortie') = (e->>'track'),
-                         w || '.sortie',
-                         format('%s belongs to the %s track but this row is in the %s table — record it in that table instead',
-                                upper(e->>'sortie'), wa.code_track(e->>'sortie'), e->>'track'));
-          -- BAND ⇄ CODE, the same doctrine one axis over. Nothing derives
-          -- flights-from-F/S out of a code, so the generated catalogue is the
-          -- only authority — and where it knows the code, it is a fact.
-          perform wa.chk(wa.sortie_band(e->>'sortie') is null
-                         or wa.sortie_band(e->>'sortie') = k,
-                         w || '.sortie',
-                         format('%s is %s sortie — it belongs in the %s tables, not the %s ones',
-                                upper(e->>'sortie'),
-                                case when wa.sortie_band(e->>'sortie') = 'fs' then 'a SIMULATOR' else 'an AIRCRAFT' end,
-                                case when wa.sortie_band(e->>'sortie') = 'fs' then 'F/S' else 'Flights' end,
-                                case when k = 'fs' then 'F/S' else 'Flights' end));
-          -- ONE FACT, ONE ROW. The eight checkrides have their own section,
-          -- with the syllabus-order rule and the pass-attempt rule on them. A
-          -- second row here would be a second grade for one flight, and the two
-          -- can disagree — which is the corruption this app exists to prevent.
-          perform wa.chk(not ((e->>'sortie') = any(wa.eval_ids())),
-                         w || '.sortie',
-                         format('%s is one of the eight checkrides — a checkride is recorded in the Evaluations section, where the syllabus order and the pass-attempt rule apply to it. Two rows for one flight would be two grades that can disagree.',
-                                upper(e->>'sortie')));
-
-          -- ══ ROUND 22 — AND THE SAME DOCTRINE FOR A SOLO, IN TWO TIERS ═══════
-          -- ══ ROUND 23 — AND BOTH TIERS ARE NOW MARKS, NOT REFUSALS ═══════════
-          -- RULING (2026-08-28), the user's own words: «Έβαλα την C4791 και
-          -- έκανα save. Γιατί δεν ανανεώνεται στον πίνακα Flights;» A solo
-          -- is recorded in the Solo flights section; the Flights table renders
-          -- that record at the sortie's place in the flow chart and stores
-          -- nothing. A row here for the same sortie MAY be the second book.
-          --
-          -- THE SET IS JUDGED FROM THE SYLLABUS, NOT ASSUMED, and the syllabus
-          -- has two shapes (spec §4y·3; app/app.js carries the same judgement in
-          -- prose). THE JUDGEMENT STANDS — it is still what decides WHICH
-          -- SENTENCE a row wears; what it produces is no longer a refusal:
-          --
-          -- TIER 1 — A SOLO BY DEFINITION. A Training Section whose solo is
-          --   REQUIRED and whose picker offers no alternative: the slot must be
-          --   filled and only one code can fill it, so nobody flies that code
-          --   dual, ever. Today that is exactly C4791, the stage's 1st SOLO.
-          --   MARKED SUSPECT, by name.
-          -- TIER 2 — A SOLO CANDIDATE. C4802 and C4803 are the two candidates
-          --   of a four-sortie section prescribing ONE solo: whichever was not
-          --   flown solo WAS flown dual, and its Flights row is the truth.
-          --   Marking all 17 candidates by name would cry wolf on a real
-          --   flight, so the mark fires only on the SAME-DAY shape: the same
-          --   sortie on the same day as a flown solo of this record. A dual
-          --   C4802 on another day is a second real sortie and wears no
-          --   suspicion at all — it is the commonest TRUE shape in the syllabus.
-          --
-          -- RULING 2026-08-28 (evening) — ΜΑΡΚΑΡΙΣΜΑ, ΟΧΙ ΑΡΝΗΣΗ (§4y·11·1):
-          -- «Όπως είναι με το which-sortie που μπορούμε να κάνουμε type είναι μια
-          -- χαρά — θα μπαίνει ως έξτρα γραμμή. Για να μην το πνίξουμε:
-          -- ΜΑΡΚΑΡΙΣΜΑ ως ύποπτο, και το ξεδιαλύνουμε μετά και μαζί.»
-          -- A refusal here refused FLIGHTS THAT HAPPENED — a repeat flown in
-          -- another section's slot, a genuine second solo («ένα solo που δεν
-          -- πετάχτηκε … συνήθως πετιέται σε κάποιο repeat») — so the two
-          -- tiers became MARKS. Nothing is refused, nothing is destroyed, and
-          -- the double record is untangled with the squadron.
-          -- THE ONE-TRUTH CORE IS UNTOUCHED: a filled solo still DERIVES its
-          -- Flights position and the derived row still WINS it (WA.slotKey /
-          -- WA.slotOwner), so a stored row for that sortie is always an EXTRA —
-          -- now suspect-marked instead of refused. The two wa.chk calls that
-          -- stood here, and wa.solo_holder with them, are gone; what stands in
-          -- their place is a CLIENT computation on all three surfaces, because
-          -- «this sortie appears twice» is a RELATION between two rows and a flag
-          -- stored on one of them would outlive the edit that resolved it.
-          -- MIRROR: app/app.js → WA.soloOnlySuspect / WA.soloSameDaySuspect /
-          -- WA.logRowFlag; WA.slotKey / WA.slotOwner (unchanged, and load-
-          -- bearing: they are why the position is still never claimed).
-
-          -- WHICH FLIGHT OF THAT CODE ON THAT DAY. Deliberate, never derived:
-          -- an array index is a POSITION and this is a FACT, and there is no
-          -- (sortie, date) uniqueness rule here — a second turn on one day is a
-          -- real thing, and a rule that refused it would refuse the truth.
-          perform wa.chk_int(e->'seq', w || '.seq', 1, 20);
-
-          -- THE KIND — closed list, 'syllabus' by default (see wa.flight_kinds)
-          perform wa.chk_text(e->'kind', w || '.kind', false, 20);
-          perform wa.chk((e->>'kind') is null or (e->>'kind') = any(wa.flight_kinds()),
-                         w || '.kind',
-                         format('unknown kind of flight — the list is %s',
-                                array_to_string(wa.flight_kinds(), ' / ')));
-
-          -- THE INSTRUCTOR IS ON EVERY ROW — the round-6 solo doctrine applied
-          -- to every sortie: «a student never launches alone on their own
-          -- authority». On a graded row it is who graded it, on an NG or
-          -- ungraded row it is who flew with or authorised it. Required even on
-          -- a legacy row: the flag excuses what an OLD form never asked for,
-          -- never a rule of this round, or the rule would be optional for
-          -- exactly the rows that break it.
-          perform wa.chk_text(e->'instructor', w || '.instructor', false, 200);
-          perform wa.chk(nullif(trim(coalesce(e->>'instructor', '')), '') is not null,
-                         w || '.instructor',
-                         'every flown sortie names the instructor — a student never launches alone on their own authority, and an ungraded row still had somebody in the other seat or somebody who authorised it');
-          -- the unambiguous identity, written by the admin's form path only for
-          -- now. Never drawn as a box, so nothing a student types reaches it.
-          perform wa.chk_text(e->'instructor_oid', w || '.instructor_oid', false, 64);
-
-          perform wa.chk_duration(e->'duration', w || '.duration');
-          perform wa.chk_bool(e->'ng', w || '.ng');
-          is_ng := coalesce(case when jsonb_typeof(e->'ng') = 'boolean'
-                                 then (e->>'ng')::boolean else false end, false);
-          if is_ng then
-            -- the identical rule and the identical sentence as solo_flights
-            perform wa.chk(e->'grade' is null or jsonb_typeof(e->'grade') = 'null',
-                           w || '.grade', 'a non-graded (NG) flight carries no grade');
-          else
-            perform wa.chk_grade(e->'grade', w || '.grade', false);
-          end if;
-
-          -- THE MISSION, AND WHERE IT MAY LIVE (round 12b). Only where the
-          -- grade is absent and the row is not NG. Two answers, no third.
-          perform wa.chk_text(e->'mission', w || '.mission', false, 20);
-          perform wa.chk((e->>'mission') is null or (e->>'mission') = any(wa.missions()),
-                         w || '.mission',
-                         format('unknown mission — %s', array_to_string(wa.missions(), ' / ')));
-          perform wa.chk((e->>'mission') is null or jsonb_typeof(e->'grade') <> 'number',
-                         w || '.mission',
-                         format('this row has a grade, so its mission is READ from it (%s %% is “mission %s”) — a stored mission beside a stored grade is a second source of truth that can contradict the first',
-                                -- round-12 verify finding 1, kept: the grade is whole by
-                                -- construction (chk_grade above), so it prints UNCHANGED —
-                                -- the trailing-zero trim borrowed from chk_grade once turned
-                                -- 100 into "1 %" here.
-                                (e->>'grade'),
-                                wa.grade_mission((e->>'grade')::numeric)));
-          perform wa.chk((e->>'mission') is null or not is_ng,
-                         w || '.mission',
-                         'a non-graded (NG) flight is not scorable at all — it carries neither a grade nor a mission');
-
-          -- ROUND 12b — THE TWO RETIRED KEYS, REFUSED BY NAME. The generic
-          -- whitelist below would answer "unknown field"; these say WHY, which
-          -- is the ruling and not a typo report.
-          perform wa.chk(not (e ? 'note'), w || '.note',
-            'the note field was removed from the flight log — «Δε θελω πεδιο note»: a flight row is the flight, the date, who flew it, how long it lasted and how it went');
-          perform wa.chk(not (e ? 'verdict'), w || '.verdict',
-            'the three-way verdict (pass / lagging / failed) was replaced by MISSION — «Θελω μονο mission complete, mission incomplete»');
-
-        elsif k = 'lessons' then
-          -- ══ ROUND 14 — AN END DATE ALONE IS A VALID RECORD ═══════════════
-          -- «τα μαθηματα να δεχομαστε και μονο end date για την καταγραφη»
-          -- A lesson is a BLOCK: date = start, end_date = end. Round 12b asked
-          -- for the START on every row, which meant a course that a student
-          -- knows FINISHED on the 12th but cannot date the beginning of could
-          -- not be recorded at all — and it is the exact row round 13's open
-          -- item 2 named («a started ground lesson cannot be saved»): the ONLY
-          -- partial state a two-date row has is an end without a start, and it
-          -- was the one state the server refused. EITHER date is now enough;
-          -- neither is still refused, because a lesson with no date at all says
-          -- nothing that «this course is in the programme» does not already.
-          -- This is the ONE section where chk_entry_date does not apply.
-          perform wa.chk_bool(e->'legacy', w || '.legacy');
-          perform wa.chk_date(e->'date', w || '.date', false);
-          perform wa.chk_date(e->'end_date', w || '.end_date', false);
-          perform wa.chk(wa.is_legacy(e)
-                         or wa.is_iso_date(e->>'date')
-                         or wa.is_iso_date(e->>'end_date'),
-                         w || '.date',
-                         'a ground lesson is recorded by its start date, its end date, or both — one of the two is required');
-          perform wa.chk((e->>'end_date') is null or (e->>'date') is null
-                         or (e->>'end_date') >= (e->>'date'),
-                         w || '.end_date', 'a lesson cannot end before it started');
-          -- THE GROUP IS THE CLOSED LIST — it is the identity of the row, and
-          -- one of the twelve theory groups of the printed programme.
-          perform wa.chk_text(e->'group', w || '.group', not wa.is_legacy(e), 40);
-          perform wa.chk((e->>'group') is null or (e->>'group') = any(wa.lesson_groups()),
-                         w || '.group',
-                         'unknown ground group — the list is the twelve theory groups of the syllabus');
-          perform wa.chk(wa.is_legacy(e)
-                         or nullif(trim(coalesce(e->>'group', '')), '') is not null,
-                         w || '.group', 'every ground lesson names the group it belongs to');
-          -- ROUND 12b — THE SIMPLICITY RULING, REFUSED BY NAME. «Μη βαλεις
-          -- εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο» — and the
-          -- same review took the note field with it. The periods and attendance
-          -- boxes went too: the table the user drew is GROUP · COURSE · START ·
-          -- END, and a key with no cell is a key nobody could ever edit.
-          perform wa.chk(not (e ? 'instructor') and not (e ? 'instructor_oid'),
-            w || '.instructor',
-            'a ground lesson does not name an instructor — «Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο»');
-          perform wa.chk(not (e ? 'note'), w || '.note',
-            'the note field was removed — «Δε θελω πεδιο note»');
-          perform wa.chk(not (e ? 'periods') and not (e ? 'absent'), w || '.periods',
-            'a ground lesson row is GROUP · COURSE · START · END — the periods and attendance boxes were removed with the round-12b simplification');
-          -- THE COURSE, off-catalogue accepted and marked (the sortie rule):
-          -- course codes are derived at run time from the printed duration
-          -- block, so they are the value most likely to lag reality. What IS
-          -- refused is the CONTRADICTION — a course that exists but in ANOTHER
-          -- group, which would make the (group, course) join key false.
-          perform wa.chk_text(e->'course', w || '.course', false, 60);
-          perform wa.chk((e->>'course') is null or (e->>'group') is null
-                         or (e->>'course') = any(wa.lesson_courses(e->>'group'))
-                         or not exists (select 1 from unnest(wa.lesson_groups()) g
-                                        where (e->>'course') = any(wa.lesson_courses(g))),
-                         w || '.course',
-                         format('“%s” is a course of another group — a course is identified by the PAIR (group, course), never by its code alone (OJT is a course of four different groups)',
-                                e->>'course'));
-
-        elsif k = 'exams' then
-          -- ══ ROUND 14 — TWO SHAPES, AND THEY ARE EXCLUSIVE ════════════════
-          -- Either the row is one of the EIGHT (exam + optional trial 2|3), or
-          -- it is a Weekly exam of the weekly series (series + series_no, no
-          -- exam). A row that tried to be both would be a fixed exam the eight
-          -- do not contain, and every count of "how many of the eight are done"
-          -- would disagree with every other.
-          perform wa.chk_bool(e->'legacy', w || '.legacy');
-          perform wa.chk_text(e->'series', w || '.series', false, 20);
-          -- ROUND 18 — the ONE refusal that must still print the STORED KEY,
-          -- because it is the value the payload has to carry. It names the
-          -- visible word beside it so the reader can tell which is which.
-          perform wa.chk((e->>'series') is null or (e->>'series') = any(wa.exam_series()),
-                         w || '.series',
-                         format('unknown exam series — the list is %s (the %s theory exams)',
-                                array_to_string(wa.exam_series(), ' / '),
-                                wa.series_label('EETH')));
-          perform wa.chk(not ((e->>'series') is not null and (e->>'exam') is not null),
-                         w || '.series',
-                         format('a row is either one of the eight ground exams or one of the %s series — never both',
-                                wa.series_label('EETH')));
-          if (e->>'series') is not null then
-            -- THE NUMBER IS THE NAME. A Weekly exam with no number cannot be
-            -- told from any other, so it is the one thing this shape requires;
-            -- the DATE and the GRADE are both nullable, because a weekly exam
-            -- is put on the programme before it is sat.
-            perform wa.chk_date(e->'date', w || '.date', false);
-            perform wa.chk_int(e->'series_no', w || '.series_no', 1, wa.section_cap('exams'));
-            -- coalesce, because an ABSENT key makes jsonb_typeof return SQL
-            -- NULL and a NULL predicate is not a failed one: without it the
-            -- «required» half of this rule never fired at all.
-            perform wa.chk(wa.is_legacy(e)
-                           or coalesce(jsonb_typeof(e->'series_no'), 'missing') = 'number',
-                           w || '.series_no',
-                           format('every %1$s exam carries its number — %1$s 1, %1$s 2 … — because the number is its name',
-                                  wa.series_label('EETH')));
-            perform wa.chk(not (e ? 'trial'), w || '.trial',
-              format('a %s exam is not an attempt at one of the eight ground exams — it carries its series number, never a trial',
-                     wa.series_label('EETH')));
-          else
-            -- A PLANNED ATTEMPT MAY BE DATELESS (round 14). A minted 2nd or 3rd
-            -- trial says «a re-sit has been ordered» before it says when; the
-            -- FIRST trial still needs its date, because a first attempt with no
-            -- date is exactly the owed slot, and that stores nothing at all.
-            perform wa.chk_bool(e->'legacy', w || '.legacy');
-            perform wa.chk_date(e->'date', w || '.date', false);
-            perform wa.chk(wa.is_legacy(e) or (e ? 'trial')
-                           or wa.is_iso_date(e->>'date'),
-                           w || '.date',
-                           'the first sitting of a ground exam carries its date — a re-sit that has only been scheduled is recorded as a 2nd or 3rd trial');
-            perform wa.chk_text(e->'exam', w || '.exam', not wa.is_legacy(e), 40);
-            perform wa.chk((e->>'exam') is null or (e->>'exam') = any(wa.exam_ids()),
-                           w || '.exam',
-                           format('unknown ground exam — the list is %s',
-                                  array_to_string(wa.exam_ids(), ' / ')));
-            perform wa.chk(wa.is_legacy(e)
-                           or nullif(trim(coalesce(e->>'exam', '')), '') is not null,
-                           w || '.exam',
-                           format('every exam row names which of the eight ground exams it was, or the %s series it belongs to',
-                                  wa.series_label('EETH')));
-            -- 2 AND 3, AND NOTHING ELSE. 1 is written as no key at all: a
-            -- stored 1 would be a second way of saying what the absence already
-            -- says, and two spellings of one fact is how a uniqueness rule gets
-            -- quietly bypassed.
-            perform wa.chk(not (e ? 'trial') or (e->>'trial') <> '1', w || '.trial',
-              'the first trial is written as no trial key at all — a stored 1 would be a second spelling of the same fact, and two spellings is how a uniqueness rule gets bypassed');
-            perform wa.chk_int(e->'trial', w || '.trial', 2, wa.exam_trials());
-            perform wa.chk(not (e ? 'series_no'), w || '.series_no',
-              format('a series number belongs to a %s exam — one of the eight ground exams is numbered by its TRIAL',
-                     wa.series_label('EETH')));
-          end if;
-          -- NULLABLE, for the same reason a flight's grade is: the result can
-          -- take longer to arrive than the exam did to sit.
-          -- SHAPE ONLY, AND DELIBERATELY (round 15): chk_grade asks for a whole
-          -- number 0-100 and asks nothing about whether it PASSED. A ground
-          -- exam passes at 80 (wa.exam_pass_min) and a flight at 60, and a
-          -- refusal written here with either number would be the server
-          -- deciding a question no server function is asked. A 40 % is a valid,
-          -- complete, storable ground-exam row — it simply did not pass.
-          perform wa.chk_grade(e->'grade', w || '.grade', false);
-          -- ROUND 12b — the same simplicity ruling, one section over.
-          perform wa.chk(not (e ? 'instructor') and not (e ? 'instructor_oid'),
-            w || '.instructor',
-            'a ground exam does not name an examiner — «Μη βαλεις εκπαιδευτη για μαθηματα και εξετασεις για να ειναι απλο»');
-          perform wa.chk(not (e ? 'note'), w || '.note',
-            'the note field was removed — «Δε θελω πεδιο note»');
-        end if;
-
-        -- PENDING IS GONE (round 8) — refused by name, before the generic
-        -- whitelist message, so the reason is the ruling and not a typo report.
-        perform wa.chk(not (e ? 'pending'), w || '.pending',
-          'the pending flag was removed — an entry that has not happened yet is simply an unfilled row (a fixed slot with no date reads as not flown), and a result that is still awaited is a grade not written yet');
-
-        -- KEY WHITELIST — last, so the specific messages above win when they
-        -- apply. Everything else: named, and refused.
-        perform wa.chk_text(e->'entered_by', w || '.entered_by', false, 20);
-        for f in select jsonb_object_keys(e) loop
-          perform wa.chk(f = any(wa.entry_keys(k)), w || '.' || f,
-            format('unknown field for a %s entry — accepted fields are %s',
-                   k, array_to_string(wa.entry_keys(k), ', ')));
-        end loop;
-      end loop;
-
-      -- ONE ROW PER SOLO SLOT. The section is a fixed list; two rows claiming
-      -- the same slot would make "the C4801-04 solo" ambiguous and let the
-      -- fixed list grow through the back door.
-      if k = 'solo_flights' then
-        perform wa.chk((select count(*) = count(distinct t.slot) from (
-                          select e2->>'slot' as slot
-                          from jsonb_array_elements(p->k) e2
-                          where jsonb_typeof(e2) = 'object' and (e2->>'slot') is not null) t),
-                       k, 'each solo slot may appear only once — the solo rows are fixed');
-      end if;
-
-      -- ══ ROUND 14 — ONE ROW PER (EXAM, TRIAL), AND WEEKLY NUMBERS ARE UNIQUE
-      -- The solo-slot precedent two blocks up, applied to the two new shapes.
-      -- Two rows both calling themselves «IN190, 2nd trial» are two results for
-      -- one sitting that can disagree, and the pass-attempt rule would have to
-      -- pick between them arbitrarily; two rows both calling themselves
-      -- «Weekly 3» make the number stop being a name. Both are closed here, on
-      -- the server, because the form's «next trial» / «+ Weekly n» affordances
-      -- mint from max+1 and a payload can always be hand-made.
-      if k = 'exams' then
-        perform wa.chk((select count(*) = count(distinct t.key) from (
-                          select coalesce(e2->>'exam', '-') || '|'
-                                 || coalesce(e2->>'trial', '1') as key
-                          from jsonb_array_elements(p->k) e2
-                          where jsonb_typeof(e2) = 'object'
-                            and (e2->>'series') is null
-                            and (e2->>'exam') is not null) t),
-                       k, 'two rows are the same trial of the same ground exam — each of the eight may be sat once per trial (1st, 2nd, 3rd)');
-        perform wa.chk((select count(*) = count(distinct t.key) from (
-                          select coalesce(e2->>'series', '-') || '|'
-                                 || coalesce(e2->>'series_no', '-') as key
-                          from jsonb_array_elements(p->k) e2
-                          where jsonb_typeof(e2) = 'object'
-                            and (e2->>'series') is not null
-                            and (e2->>'series_no') is not null) t),
-                       k, format('two rows carry the same %s number — the number is the name, so it identifies exactly one weekly exam',
-                                 wa.series_label('EETH')));
-      end if;
-
-      -- SEQ MUST DISAMBIGUATE (round-12 verify finding 2, the solo precedent
-      -- one section up). Dropping the (sortie,date) uniqueness was the ruling
-      -- — a same-day re-fly is real — but two rows sharing (track,sortie,date)
-      -- AND seq are two grades for one flight that can disagree, exactly the
-      -- corruption the checkride refusal exists to prevent; and a duplicated
-      -- FAIL pair is the mechanism the bridge critique names as able to
-      -- fabricate a ΠΔ 29/2020 referral downstream.
-      if k in ('flights', 'fs') then
-        perform wa.chk((select count(*) = count(distinct t.key) from (
-                          select coalesce(e2->>'track', '-') || '|' || coalesce(e2->>'sortie', '-')
-                                 || '|' || coalesce(e2->>'date', '-') || '|'
-                                 || coalesce(e2->>'seq', '1') as key
-                          from jsonb_array_elements(p->k) e2
-                          where jsonb_typeof(e2) = 'object'
-                            and (e2->>'sortie') is not null and (e2->>'date') is not null) t),
-                       k, 'two rows carry the same sortie, date and seq — a same-day re-fly needs its own seq (the form''s "+ same-day re-fly" mints the next one)');
-      end if;
-
-      -- ── EVALUATIONS FOLLOW THE SYLLABUS ORDER (round 6) ─────────────────
-      -- The stage is flown in one order and the checkrides sit in it at fixed
-      -- points, so a later checkride cannot have been flown while an earlier
-      -- one has not: such a record is a typo in the identity picker, and it
-      -- silently corrupts every per-checkride comparison the admin makes.
-      -- THE ORDER IS THE SYLLABUS ORDER — wa.eval_ids(), generated from the
-      -- FILE ORDER of the sortie entries in flowchart2.json (the printed
-      -- Training Flow Chart): C4590 → C4790 → C5090 → C5490 → I4490 → I4890
-      -- → F4690 → N4690.
-      -- What is refused is a FILL out of order. A row that is still the empty
-      -- fixed slot is always allowed — that is the default state of all eight
-      -- from day one, and it is the state every predecessor starts in.
-      if k = 'evaluations' then
-        done := array_fill(false, array[array_length(wa.eval_ids(), 1)]);
-        for i in 0 .. coalesce(jsonb_array_length(p->k), 0) - 1 loop
-          e := p->k->i;
-          if jsonb_typeof(e) <> 'object' then continue; end if;
-          pos := wa.eval_pos(e->>'evaluation');
-          if pos is not null and not wa.slot_empty(k, e) then done[pos] := true; end if;
-        end loop;
-        for i in 1 .. array_length(wa.eval_ids(), 1) loop
-          if not done[i] then continue; end if;
-          for i2 in 1 .. i - 1 loop
-            if not done[i2] then
-              prev_id := (wa.eval_ids())[i2];
-              perform wa.chk(false, k || '[' || (wa.eval_ids())[i] || ']',
-                format('evaluations follow the syllabus order — %s cannot be recorded while %s has not been flown',
-                       (wa.eval_ids())[i], prev_id));
-            end if;
-          end loop;
-        end loop;
-      end if;
+      perform wa.validate_section(k, p_arr => p->k);
     end if;
   end loop;
 end $$;
@@ -4197,6 +4534,48 @@ language sql immutable set search_path = public, wa, pg_temp as $$
   select 'this entry was set by the squadron administration and only the admin can change or remove it — it is shown on your form locked, and your save must leave it exactly as it stands'
 $$;
 
+-- ── THE HANDLE OF A LOG ROW, IN ONE PLACE (round 24) ──────────────────────
+-- (sortie, date, seq) is what NAMES a flight-log row to anything outside the
+-- record: the bridge's ops carry it as `prev`, the survival clause below asks
+-- «does a row still stand at this handle?», and public.bridge_push matches on
+-- it. It is a HANDLE and not an identity — a date correction MOVES it, which is
+-- exactly why the FDMS ledger keys on its own date-free rid instead. Absent seq
+-- reads as 1, the same default wa.migrate_record writes and wa.entry_keys
+-- documents, so a hand-made payload cannot dodge a match by omitting the key.
+create or replace function wa.log_handle(e jsonb) returns text
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select coalesce(e->>'sortie', '') || U&'\2237' || coalesce(e->>'date', '')
+      || U&'\2237' || coalesce(nullif(e->>'seq', ''), '1')
+$$;
+
+-- ── THE BRIDGE ROW'S SURVIVAL CLAUSE — THE SENTENCE (round 24 / B.4) ──────
+-- The mirror of wa.admin_lock_msg one notch SOFTER, and the difference is the
+-- whole ruling: an admin row is LOCKED (it may not be edited at all), an FDMS
+-- row is CORRECTABLE (edit it and the corrected row becomes YOURS — the stamp
+-- is stripped, and the next cross-check reports the divergence to the
+-- developer, who rules). What it is not is DELETABLE from this form.
+--
+-- WHERE THE BOUNDARY RUNS, SAID OUT LOUD (the adversarial read's must-fix 9).
+-- The successor test below keys on the HANDLE — sortie, date, seq — so changing
+-- one of those three is indistinguishable from removing the row, and is refused
+-- as one. That is a POLICY and not an accident: the handle is the scheduler's
+-- own name for the flight, the thing its ledger and its report are keyed to,
+-- and a student silently renaming it would leave the two systems talking about
+-- different flights with nobody told. The sentence therefore says which fields
+-- are his and which are not, instead of promising «correct it if it is wrong»
+-- and then refusing exactly one kind of correction.
+-- It names the flight and the day, because a refusal a student cannot LOCATE on
+-- a form of eighty rows is a refusal he cannot act on.
+create or replace function wa.fdms_lock_msg(e jsonb) returns text
+language sql immutable set search_path = public, wa, pg_temp as $$
+  select format(
+    '%s of %s came from the squadron''s own scheduler (FDMS). You may CORRECT what it says — the instructor, the grade, the mission — and the corrected row becomes yours; the squadron sees the difference at its next cross-check. What you may not do here is REMOVE it, or change the three fields that name it (the sortie, the date and the same-day sequence number): those are the scheduler''s handle for this flight, and a flight is removed on the squadron''s side, not on this form. If the row appeared while you were editing, reload the form — nothing you have typed has been sent.',
+    coalesce(nullif(upper(coalesce(e->>'sortie', '')), ''), 'this flight'),
+    case when wa.is_iso_date(e->>'date')
+         then to_char((e->>'date')::date, 'DD/MM/YYYY')
+         else 'an unrecorded date' end)
+$$;
+
 -- the OWNER path (round 8): the submitted payload against the STORED record.
 -- Every entry the admin owns must still be there, fact for fact — matched by
 -- wa.entry_core exactly as the admin path matches, position first — and it comes
@@ -4205,12 +4584,33 @@ $$;
 -- An admin entry that was ALTERED has no match, and an admin entry that was DELETED
 -- has no match either; both leave a stored stamp unclaimed, and that is the
 -- refusal — one sentence, naming the rule, for both.
+--
+-- ══ ROUND 24 — AND THE SAME PASS NOW ANSWERS FOR THE BRIDGE'S ROWS ═════════
+-- The FDMS lane writes entries stamped 'fdms'. Two sentences bind it, and they
+-- pull in opposite directions:
+--   «an fdms row does NOT lock the student out of his own record» — so the
+--     admin clause above is left ALONE: it fires on the literal 'admin' and on
+--     nothing else, which is why an fdms row can be edited at all;
+--   «a bridge row must not be deletable by accident, from either side» — so an
+--     fdms stamp that comes back unclaimed is not automatically the owner's to
+--     drop.
+-- The two meet at ONE test, and it is the HANDLE: an unclaimed stored fdms row
+-- is an EDIT (allowed, stamp stripped by the loop above — the row is now his)
+-- when a submitted row still stands at the same (sortie, date, seq); it is a
+-- DELETION (refused, by wa.fdms_lock_msg, which names the flight and the day)
+-- when nothing does. The whole-section-omitted case falls out of the same rule
+-- with no successor possible, so it is refused unconditionally — the shape the
+-- admin clause has carried since round 8.
+-- WHAT THIS DOES NOT DO: it never consults wa.bridge_tombstones and never asks
+-- whether the bridge is even configured. A student's save is judged against
+-- what is IN HIS RECORD, so no bridge state can ever lock him out.
 create or replace function wa.carry_stamps(p_new jsonb, p_old jsonb) returns jsonb
 language plpgsql immutable set search_path = public, wa, pg_temp as $$
 declare
   o jsonb := '{}'::jsonb;
   k text; nw jsonb; od jsonb; arr jsonb; e jsonb; core jsonb;
   i int; j int; n_old int; hit int; used boolean[];
+  kept boolean;
 begin
   if p_new is null or jsonb_typeof(p_new) <> 'object' then return coalesce(p_new, '{}'::jsonb); end if;
   for k in select jsonb_object_keys(p_new) loop
@@ -4253,21 +4653,40 @@ begin
     end loop;
     -- EVERY ADMIN ENTRY MUST HAVE BEEN CLAIMED. One that was not is one the
     -- owner altered or dropped, and only the admin may do either.
+    -- ROUND 24 — AND EVERY FDMS ENTRY MUST STILL HAVE A ROW AT ITS HANDLE. One
+    -- that has not is a flight the student deleted (or renamed, which is the
+    -- same act to the scheduler), and a flight is removed on the squadron's
+    -- side. One that HAS is a correction, and the loop above has already made
+    -- the corrected row his.
     for j in 0 .. n_old - 1 loop
-      if not used[j + 1] and (od->j->>'entered_by') = 'admin'
-         and not wa.slot_empty(k, od->j) then
+      if used[j + 1] or wa.slot_empty(k, od->j) then continue; end if;
+      if (od->j->>'entered_by') = 'admin' then
         perform wa.chk(false, format('%s[%s]', k, j), wa.admin_lock_msg());
+      elsif (od->j->>'entered_by') = 'fdms' then
+        kept := false;
+        for i in 0 .. jsonb_array_length(nw) - 1 loop
+          if jsonb_typeof(nw->i) = 'object'
+             and wa.log_handle(nw->i) = wa.log_handle(od->j) then
+            kept := true; exit;
+          end if;
+        end loop;
+        perform wa.chk(kept, format('%s[%s]', k, j), wa.fdms_lock_msg(od->j));
       end if;
     end loop;
     o := o || jsonb_build_object(k, arr);
   end loop;
   -- a whole SECTION the payload omitted takes its stored admin entries with it,
   -- so the same rule has to look at what is not in the payload at all
+  -- (ROUND 24 — and its fdms entries too: an omitted section can hold no
+  -- successor at any handle, so every one of them is a deletion)
   for k in select jsonb_object_keys(coalesce(p_old, '{}'::jsonb)) loop
     if (p_new ? k) or jsonb_typeof(p_old->k) <> 'array' then continue; end if;
     for j in 0 .. jsonb_array_length(p_old->k) - 1 loop
-      if (p_old->k->j->>'entered_by') = 'admin'
-         and not wa.slot_empty(k, p_old->k->j) then
+      if wa.slot_empty(k, p_old->k->j) then continue; end if;
+      if (p_old->k->j->>'entered_by') = 'fdms' then
+        perform wa.chk(false, format('%s[%s]', k, j), wa.fdms_lock_msg(p_old->k->j));
+      end if;
+      if (p_old->k->j->>'entered_by') = 'admin' then
         perform wa.chk(false, format('%s[%s]', k, j), wa.admin_lock_msg());
       end if;
     end loop;
@@ -4563,9 +4982,12 @@ $$;
 -- (c) FDMS-PROGRESS — the designed, empty slot: a student-record row whose
 --     provenance stamp is 'fdms' (`entered_by = 'fdms'`, the value
 --     wa.entry_count_by already reserves for bridge slice 3) is labelled
---     src:'fdms' instead of 'sp'. Today zero rows carry it, so counts.fdms is
---     0 and the source column exists — Phase 4's FDMS→WA lane lands into a
---     finished surface with NO further logbook change.
+--     src:'fdms' instead of 'sp'.
+--     ROUND 24 — THE SLOT IS FILLED, AND ROUND 21's PROMISE HELD LITERALLY:
+--     public.bridge_push writes entered_by:'fdms' rows into exactly the two
+--     sections this lane already scans, so «Phase 4's FDMS→WA lane lands into a
+--     finished surface with NO further logbook change» is now a fact and not a
+--     forecast — NOT ONE LINE of this function changed to receive it.
 --
 -- THE MATCHING RULE — oid-first, surname fallback, shared-surname honesty:
 --   1. a row carrying instructor_oid matches iff v.external_oid is non-null
@@ -5250,6 +5672,12 @@ begin
         -- 1 of 18 is a self-reported record with one admin addition, 18 of 18 is
         -- a record the admin entered. The dashboard must not confuse the two.
         'co_entries', wa.co_entry_count(m.rec),
+        -- ROUND 24 — AND HOW MANY CAME FROM THE SQUADRON'S SCHEDULER. Beside
+        -- co_entries and counted the same way, NEVER folded into it: a row a
+        -- machine pushed is not a row the admin wrote, and conflating the two
+        -- would be a truth defect in the very feature that exists to be honest
+        -- about provenance (wa.entry_count_by's own comment, since round 12).
+        'fdms_entries', wa.entry_count_by(m.rec, 'fdms'),
         'entries_total', wa.entry_count(m.rec),
         'proposals_in', (select count(*) from public.proposals pr
                          join public.people ip on ip.id = pr.instructor_id and ip.active
@@ -5371,6 +5799,31 @@ begin
     'generated_at', now());
 end $$;
 
+-- ── THE CREDENTIAL'S STATE, AND NEVER ITS DIGEST (round 24) ───────────────
+-- Everything a surface may know about the bridge credential: whether one was
+-- ever minted, whether it is armed, and the three dates. `token_sha256` is not
+-- returned, not counted and not hinted at — the §4φ rule («καμία εντολή δεν
+-- επιστρέφει ποτέ στήλη token») extended by name to a column that is only a
+-- digest and is still nobody's business.
+-- `exists` IS DERIVED FROM THE DIGEST AND `active` IS THE COLUMN, and the table
+-- itself guarantees they cannot disagree (bridge_access_armed_chk): the state
+-- «active with nothing to authenticate» is not expressible, so this card can
+-- never print «active since …» for a credential that would refuse every call —
+-- which is exactly what the first draft of the table allowed.
+create or replace function wa.bridge_status_json() returns jsonb
+language sql stable set search_path = public, wa, pg_temp as $$
+  select coalesce((select jsonb_build_object(
+           'exists', b.token_sha256 is not null,
+           'active', b.active,
+           'minted_at', b.minted_at,
+           'last_used_at', b.last_used_at,
+           'revoked_at', b.revoked_at)
+         from wa.bridge_access b where b.id = 1),
+         jsonb_build_object('exists', false, 'active', false,
+                            'minted_at', null, 'last_used_at', null,
+                            'revoked_at', null))
+$$;
+
 -- raw export (JSON download / CSV built client-side) — tokens excluded
 --
 -- ══ ROUND 19 — THE PAYLOAD SAYS WHAT IT IS: "schema": "wa-export-v1" ═══════
@@ -5387,12 +5840,27 @@ end $$;
 -- ignores what it does not know still gets every field it came for. Only a
 -- change that BREAKS such a reader — a key renamed, a type changed, a section
 -- removed — may move it to v2, and nothing here may move it silently.
-create or replace function public.admin_export(p_token text) returns jsonb
-language plpgsql stable security definer set search_path = public, wa, pg_temp as $$
-declare v public.people;
+--
+-- ══ ROUND 24 — ONE BODY, TWO DOORS (P45-WA) ═══════════════════════════════
+-- The FDMS bridge reads Wings Ahead through public.bridge_pull, and what it must
+-- read is THE EXPORT — the same shape, the same marker, the same reader on the
+-- far side (the bridge's parseExport is not taught a second format). Writing the
+-- payload twice would have been two payloads that drift apart on the first round
+-- that adds a key to one of them. So the body is ONE function and the two RPCs
+-- are two doors onto it, differing in exactly two declared ways:
+--   · `proposals` — admin only. The assessments are the one payload with real
+--     judgement sensitivity and zero bridge use; minimum leakage cuts there
+--     (design decision #10), and the cut is a BOOLEAN ARGUMENT so it is visible
+--     in the signature rather than hidden in a branch.
+--   · `via` — the bridge door stamps `"via": "bridge"` on its answer, so a file
+--     saved from a live pull can never be mistaken for an admin download.
+-- Everything else is identical, `instructor_records` and `currency_kinds`
+-- included: the currency lane is the named next errand of this same credential.
+create or replace function wa.export_body(p_with_proposals boolean) returns jsonb
+language plpgsql stable set search_path = public, wa, pg_temp as $$
+declare o jsonb;
 begin
-  v := wa.auth_role(p_token, 'admin');
-  return jsonb_build_object(
+  o := jsonb_build_object(
     'schema', 'wa-export-v1',
     'exported_at', now(),
     'people', coalesce((select jsonb_agg(wa.person_json(p)
@@ -5404,6 +5872,9 @@ begin
                           'data_as_stored', r.data,
                           'entered_by', wa.record_stamp(m.rec, r.entered_by),
                           'co_entries', wa.co_entry_count(m.rec),
+                          -- ROUND 24 — the bridge's own count, beside the
+                          -- admin's and never inside it (see admin_get_data)
+                          'fdms_entries', wa.entry_count_by(m.rec, 'fdms'),
                           'entries_total', wa.entry_count(m.rec),
                           'last_update', r.last_update))
                         from public.student_records r
@@ -5411,7 +5882,13 @@ begin
     -- ROUND 10: the assessment and its weight. The frozen rank_* / nr_*
     -- columns are not exported either — the export is what the app knows, and
     -- the app no longer knows anything about aircraft types.
-    'proposals', coalesce((select jsonb_agg(jsonb_build_object(
+    -- ROUND 24 — AND THE BRIDGE DOOR DOES NOT GET THIS ONE. It is built here
+    -- and STRIPPED at the foot of the function (see there for why removing the
+    -- key is the only honest way to leave it out). Both answers are still
+    -- `wa-export-v1` — the marker describes the shape of what is present
+    -- (§4u·9), and a v1 reader that came for `people` still gets it.
+    'proposals', coalesce((
+                   select jsonb_agg(jsonb_build_object(
                     'instructor_id', pr.instructor_id, 'student_id', pr.student_id,
                     'level', pr.level,
                     'level_label', wa.level_label(pr.level),
@@ -5471,7 +5948,533 @@ begin
                       'programme_name', wa.currency_category_name(
                                           wa.s_category_group(t.id)),
                       'legacy', t.id = any(wa.s_category_legacy_ids())) order by t.ord)
-                    from unnest(wa.s_category_ids()) with ordinality t(id, ord)), '[]'::jsonb));
+                    from unnest(wa.s_category_ids()) with ordinality t(id, ord)), '[]'::jsonb),
+    -- ══ ROUND 24 — WHAT WINGS AHEAD REMEMBERS THE BRIDGE DOING ═════════════
+    -- Two blocks, in BOTH doors: the admin's own download shows the bridge's
+    -- history for the same reason the FDMS report needs it — «what WA remembers
+    -- happening» has to be renderable beside «what the FDMS ledger claims», and
+    -- a drift between the two is a report line rather than a silence.
+    -- NO NAMES: a tombstone is (roster oid, section, handle, rid, reason) and an
+    -- audit row is the same plus its verdict. The audit tail is the LAST 200
+    -- rows — enough to explain a week, small enough that an export stays a file
+    -- a person can open, and honest about being a tail (`audit_total` says how
+    -- many there are, so a reader is never left thinking 200 is all of it).
+    'bridge', jsonb_build_object(
+      'tombstones', coalesce((select jsonb_agg(jsonb_build_object(
+                        'student_oid', t.student_oid, 'student_id', t.student_id,
+                        'section', t.section, 'sortie', t.sortie, 'date', t.date,
+                        'seq', t.seq, 'rid', t.rid, 'reason', t.reason,
+                        'at', t.at, 'cleared_at', t.cleared_at) order by t.at desc)
+                      from wa.bridge_tombstones t), '[]'::jsonb),
+      'audit_total', (select count(*) from wa.bridge_audit),
+      'audit_tail', coalesce((select jsonb_agg(jsonb_build_object(
+                        'at', a.at, 'student_oid', a.student_oid, 'op', a.op,
+                        'section', a.section, 'sortie', a.sortie, 'date', a.date,
+                        'seq', a.seq, 'rid', a.rid, 'verdict', a.verdict,
+                        'note', a.note) order by a.at desc, a.id desc)
+                      from (select * from wa.bridge_audit
+                             order by at desc, id desc limit 200) a), '[]'::jsonb),
+      -- the credential's STATE and never its digest: booleans and dates, the
+      -- §4φ rule («καμία εντολή δεν επιστρέφει ποτέ στήλη token») applied to a
+      -- column that is not a token but is not anybody's business either
+      'credential', wa.bridge_status_json()));
+  -- THE KEY IS REMOVED, NOT EMPTIED. `jsonb_build_object('proposals', NULL)`
+  -- would have written `"proposals": null` — a reader cannot tell that from «no
+  -- assessments recorded», and one of the two readings is false. Stripping the
+  -- key says «not in this payload», which is the only true thing to say.
+  if not p_with_proposals then o := o - 'proposals'; end if;
+  return o;
+end $$;
+
+-- THE ADMIN'S DOOR — unchanged in every observable way except the two keys the
+-- round adds (`fdms_entries` per student record, and the `bridge` block). Still
+-- `wa-export-v1`: both are ADDITIVE, and a v1 reader that ignores what it does
+-- not know still gets every field it came for (§4u·9's promotion rule fires on
+-- a key RENAMED, a type CHANGED or a section REMOVED — none happened here).
+create or replace function public.admin_export(p_token text) returns jsonb
+language plpgsql stable security definer set search_path = public, wa, pg_temp as $$
+declare v public.people;
+begin
+  v := wa.auth_role(p_token, 'admin');
+  return wa.export_body(true);
+end $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ROUND 24 (P45-WA) — THE BRIDGE'S OWN RPCs
+-- ───────────────────────────────────────────────────────────────────────────
+-- Five doors. Three are the ADMIN's (mint · revoke · status) and open with the
+-- admin token like every other admin_* RPC; two are the BRIDGE's (pull · push)
+-- and open with the digest credential and with nothing else. No door opens with
+-- both, in either direction, and that is structural rather than checked:
+-- wa.auth looks a caller up in public.people, wa.auth_bridge looks one up in
+-- wa.bridge_access, and no row is ever in both tables.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── STATUS — booleans and dates (never the digest) ────────────────────────
+create or replace function public.admin_bridge_status(p_token text) returns jsonb
+language plpgsql stable security definer set search_path = public, wa, pg_temp as $$
+declare v public.people;
+begin
+  v := wa.auth_role(p_token, 'admin');
+  return wa.bridge_status_json();
+end $$;
+
+-- ── MINT — the plaintext exists once, in this answer ──────────────────────
+-- ROTATION IS MINTING (design decision #2). There is exactly one credential, so
+-- a second mint OVERWRITES the first digest: every holder of the old token —
+-- the developer's browser, his other device, the weekly backup Action — is out
+-- at its next call, with no list of holders to walk and nothing left half-armed.
+-- That is the price of one switch that closes every lane at once, and it is the
+-- right price for a squadron of one owner.
+-- TWO wa.gen_token()s, because one is 144 bits of the same alphabet the login
+-- tokens use and this credential guards a wider door than any single person's.
+-- WHAT THE DATABASE KEEPS IS THE DIGEST. It cannot echo the plaintext later
+-- because it never stored it — a stronger guarantee than the §4φ rule it
+-- serves, and the reason `token` appears in this file exactly once more, in the
+-- return value of this function, on the admin's own screen.
+create or replace function public.admin_bridge_mint(p_token text) returns jsonb
+language plpgsql volatile security definer
+set search_path = public, wa, extensions, pg_temp as $$
+declare v public.people; t text;
+begin
+  v := wa.auth_role(p_token, 'admin');
+  t := wa.gen_token() || wa.gen_token();
+  insert into wa.bridge_access as b (id, token_sha256, active, minted_at, revoked_at)
+  values (1, encode(digest(t, 'sha256'), 'hex'), true, now(), null)
+  on conflict (id) do update
+    set token_sha256 = excluded.token_sha256,
+        active       = true,
+        minted_at    = now(),
+        last_used_at = null,
+        revoked_at   = null;
+  return jsonb_build_object('token', t, 'status', wa.bridge_status_json());
+end $$;
+
+-- ── REVOKE — idempotent, and it keeps the digest ──────────────────────────
+-- The row is not deleted and the digest is not cleared, on purpose: `revoked_at`
+-- has to mean something, and «there was a credential and it was withdrawn on
+-- the 29th» is a fact the People card prints. Authentication asks for `active`,
+-- so a revoked digest matches nothing (proven live: the same one sentence).
+create or replace function public.admin_bridge_revoke(p_token text) returns jsonb
+language plpgsql volatile security definer set search_path = public, wa, pg_temp as $$
+declare v public.people;
+begin
+  v := wa.auth_role(p_token, 'admin');
+  update wa.bridge_access
+     set active = false,
+         revoked_at = coalesce(revoked_at, now())
+   where id = 1 and active;
+  return wa.bridge_status_json();
+end $$;
+
+-- ── PULL — the export-equivalent read, and it is VOLATILE ─────────────────
+-- MUST-FIX 1 OF THE ADVERSARIAL READ, and the fragment's own comment proved the
+-- premise live: wa.auth_bridge touches `last_used_at`, PostgREST runs a STABLE
+-- function inside a READ ONLY transaction, and a `stable` pull would therefore
+-- have died with «cannot execute UPDATE in a read-only transaction» on EVERY
+-- call — including the setup Test, bricking onboarding with a Postgres error
+-- where the design promised the server's own sentence. `volatile` is the cure
+-- and it costs nothing: the call is a POST either way, and being POST-only is
+-- itself worth having, because it keeps the token in the request BODY where no
+-- URL and no proxy log can smear it (design decision #15, and the whole reason
+-- the Cloudflare-Worker lift of E.4 is a URL swap and not a contract change).
+--
+-- IT RETURNS NO TOKEN COLUMN OF ANY KIND. wa.person_json has been tokenless by
+-- construction since round 1; `token_sha256` is not in the body either — the
+-- `bridge.credential` block is wa.bridge_status_json, which is booleans and
+-- dates. So a stolen bridge credential reads the roster and the records and
+-- CANNOT read one login token: the whole point of giving the lane a table of
+-- its own instead of a fourth wa_role.
+create or replace function public.bridge_pull(p_token text) returns jsonb
+language plpgsql volatile security definer set search_path = public, wa, pg_temp as $$
+begin
+  perform wa.auth_bridge(p_token);
+  return wa.export_body(false) || jsonb_build_object('via', 'bridge');
+end $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PUSH — THE SERVER-SIDE SURGEON
+-- ───────────────────────────────────────────────────────────────────────────
+-- THE SHAPE OF THE CALL. One student, a list of ops, one transaction:
+--   p_ops = [ { "op": "upsert" | "remove",
+--               "section": "flights" | "fs",
+--               "rid": "<the FDMS date-free identity>",
+--               "prev": { "sortie": …, "date": …, "seq": 1 } | null,
+--               "row":  { date, track, sortie, seq, kind, instructor,
+--                         instructor_oid, grade, ng, mission },   -- upsert only
+--               "clear_tombstone": false,
+--               "reason": "undo" | "source_removed" | "developer" } ]  -- remove
+--
+-- WHY A SURGEON AND NOT A COURIER (design decision #3). The study's first shape
+-- had the client READ the record, modify it and send the whole thing back. That
+-- shape is dead on arrival here, and the local stack is the proof: one of the
+-- four stored records fails wa.validate_record on its own migrated form, so a
+-- courier push would be PERMANENTLY REFUSED for that student — over an SMS row
+-- the bridge does not touch, cannot see and could never fix. The surgery
+-- happens here instead: the ops are applied to the STORED record, and only the
+-- sections they touched are re-validated (wa.validate_section). The untouched
+-- eleven are not serialized, not sent, not re-validated and not rewritten.
+--
+-- VERDICTS, NOT EXCEPTIONS. One bad op must never void its nine siblings, so
+-- every per-op outcome — including a section that would not validate with the
+-- op applied — is a VERDICT (wa.bridge_verdicts) and the op is simply not
+-- applied. Only the ENVELOPE raises: a bad credential, an unknown or ambiguous
+-- OID, an inactive student, a p_ops that is not an array.
+--
+-- THE THREE THINGS IT NEVER DOES.
+--   · It never overwrites a row it does not own. A handle occupied by a
+--     student's row or an admin's row is answered `exists_student` /
+--     `exists_admin`, the row is RETURNED IN FULL so the FDMS report can show
+--     both versions, and nothing is written.
+--   · It never accepts provenance from the wire. `entered_by` is set HERE, to
+--     'fdms', on every row it writes; a client that sends one is refused by
+--     name. Provenance is a property of which function was called, exactly as
+--     `p_as_admin` is on wa.write_record.
+--   · It never bakes the migration into storage. The write-back is SURGICAL —
+--     `data = <stored, untouched> || {the touched sections}` — so a record whose
+--     owner has never opened a form keeps its raw truth in `data_as_stored` and
+--     everywhere else. (A whole-record `data = wa.migrate_record(...)` would
+--     have replaced every stored record's raw form ~5 s after any training-log
+--     write, with no human in the loop. Today only a human save bakes it.)
+--
+-- THERE IS NO RECORD-LEVEL OPTIMISTIC LOCK, and that is a DECISION (must-fix 4
+-- of the adversarial read). The design carried `p_if_last_update` from the
+-- courier era; with the surgery server-side, every op is judged against the
+-- LIVE stored record inside one transaction and the per-op provenance verdicts
+-- already refuse everything the lock could refuse. What the lock would have
+-- ADDED is a lie: after any student save the next push would answer `stale`,
+-- and the recovery the design wrote for it was «retry after a fresh pull,
+-- automatically» — an automatic background pull of the full real-names export
+-- with no tab open, which the same design forbids in its own custody section.
+-- Every retry in this lane is therefore an explicit act, and there is nothing
+-- in this file that polls.
+create or replace function public.bridge_push(p_token text, p_student_oid text,
+                                              p_ops jsonb)
+returns jsonb
+language plpgsql volatile security definer set search_path = public, wa, pg_temp as $$
+declare
+  s public.people;
+  n_match int;
+  raw jsonb;          -- the record exactly as stored
+  mig jsonb;          -- the same record, read-migrated (matching only)
+  had boolean;
+  cur jsonb := '{}'::jsonb;   -- section -> working array (migrated + normalised)
+  touched text[] := '{}';
+  verdicts jsonb := '[]'::jsonb;
+  op jsonb;
+  o_op text; sec text; v_rid text; prv jsonb; row_in jsonb; v_reason text;
+  clear_tomb boolean;
+  arr jsonb; cand jsonb; outrec jsonb;
+  hit int; tgt int; j int; ix int;
+  stamp text; tgt_stamp text;
+  vd text; note text; found jsonb; changed boolean := false;
+  h_prev text; h_new text;
+  t timestamptz;
+  k text;
+begin
+  -- ── THE ENVELOPE ────────────────────────────────────────────────────────
+  perform wa.auth_bridge(p_token);
+  perform wa.chk(jsonb_typeof(p_ops) = 'array', 'ops', 'the push carries a LIST of operations');
+  perform wa.chk(jsonb_array_length(p_ops) <= 200, 'ops',
+                 'a single push carries at most 200 operations — send the rest in the next one');
+
+  -- THE PERSON IS THE ROSTER'S OBJECT ID (ruling #4): OID first, and a surname
+  -- never resolves anybody here. Two refusals, and each says which of the two
+  -- things went wrong, because the developer has to know whether to add a
+  -- person or to heal a duplicate.
+  select count(*) into n_match from public.people p
+   where p.role = 'student' and p.active and p.external_oid = p_student_oid;
+  perform wa.chk(n_match > 0, 'student_oid',
+    format('no ACTIVE student carries the roster object id %s — the person has to exist on the Wings Ahead roster, and be active, before a flight can be pushed onto his record',
+           coalesce(p_student_oid, '(none)')));
+  perform wa.chk(n_match < 2, 'student_oid',
+    format('roster object id %s is carried by more than one person — the roster must be healed before the bridge writes anything to it',
+           p_student_oid));
+  select * into s from public.people p
+   where p.role = 'student' and p.active and p.external_oid = p_student_oid;
+
+  -- ── THE RECORD, AND THE TWO ARRAYS THE LANE MAY TOUCH ───────────────────
+  -- `raw` is what is stored, byte for byte, and it is what the write-back
+  -- starts from. The two working arrays are the MIGRATED, NORMALISED forms of
+  -- the two log sections, because that is the shape the stored rows are matched
+  -- and compared in (wa.entry_core against a raw row would never collapse with
+  -- a row the form wrote). Their migration is only the seq / kind / ng defaults
+  -- and the track fill-in — nothing that can lose a fact.
+  select sr.data, true into raw, had
+    from public.student_records sr where sr.student_id = s.id;
+  raw := coalesce(raw, '{}'::jsonb);
+  had := coalesce(had, false);
+  mig := wa.migrate_record(raw);
+  foreach k in array wa.log_bands() loop
+    cur := cur || jsonb_build_object(k, coalesce(mig->k, '[]'::jsonb));
+  end loop;
+
+  -- ── ONE OP AT A TIME ────────────────────────────────────────────────────
+  for j in 0 .. jsonb_array_length(p_ops) - 1 loop
+    op := p_ops->j;
+    vd := null; note := null; found := null;
+    o_op := op->>'op';
+    sec := op->>'section';
+    v_rid := op->>'rid';
+    v_reason := op->>'reason';
+    clear_tomb := coalesce((case when jsonb_typeof(op->'clear_tombstone') = 'boolean'
+                                 then (op->>'clear_tombstone')::boolean end), false);
+    prv := case when jsonb_typeof(op->'prev') = 'object'
+                then wa.norm_entry(op->'prev') else null end;
+    row_in := case when jsonb_typeof(op->'row') = 'object'
+                   then wa.norm_entry(op->'row') else null end;
+
+    -- THE OP'S OWN SHAPE. Refusals here are verdicts like any other: a
+    -- malformed op is this op's problem and not its siblings'.
+    if jsonb_typeof(op) <> 'object' then
+      vd := 'refused'; note := 'an operation must be an object';
+    elsif o_op is null or not (o_op = any(wa.bridge_ops())) then
+      vd := 'refused';
+      note := format('unknown operation — the lane speaks %s',
+                     array_to_string(wa.bridge_ops(), ' / '));
+    elsif sec is null or not (sec = any(wa.log_bands())) then
+      vd := 'refused';
+      note := format('a pushed flight belongs to %s — nothing else is writable through this lane',
+                     array_to_string(wa.log_bands(), ' or '));
+    elsif nullif(trim(coalesce(v_rid, '')), '') is null then
+      vd := 'refused';
+      note := 'every operation names the FDMS identity it is about (rid) — it is what the tombstones and the audit are keyed to';
+    elsif o_op = 'remove' and (v_reason is null
+                               or not (v_reason = any(wa.bridge_reasons()))) then
+      vd := 'refused';
+      note := format('a removal names its reason — %s',
+                     array_to_string(wa.bridge_reasons(), ' / '));
+    elsif o_op = 'upsert' and row_in is null then
+      vd := 'refused'; note := 'an upsert carries the row it means to write';
+    elsif o_op = 'upsert' and (row_in ? 'entered_by') then
+      -- PROVENANCE IS NOT A WIRE FIELD. Refused by NAME rather than silently
+      -- overwritten, because a caller that sends it believes something false
+      -- about who decides it, and the next thing it believes may not be
+      -- harmless. (wa.write_record overwrites instead — but there the client is
+      -- the owner's own form, and there is no second system to correct.)
+      vd := 'refused';
+      note := 'entered_by is not accepted from the wire — the bridge''s rows are stamped ''fdms'' by the server, because provenance is a property of WHICH DOOR was called';
+    elsif o_op = 'upsert' and (row_in ? 'legacy') then
+      vd := 'refused';
+      note := 'the legacy flag marks a row inherited from the previous form — the bridge writes complete rows, so it never sets it';
+    elsif o_op = 'upsert' and coalesce((case when jsonb_typeof(row_in->'ng') = 'boolean'
+                                             then (row_in->>'ng')::boolean end), false) then
+      -- NG IS WELDED SHUT FROM THIS LANE (design F.4). FDMS has no NG state to
+      -- assert, and ng-as-completion-switch is a named must-fix of the earlier
+      -- critique: a lane that could set it could silently un-score a flight.
+      vd := 'refused';
+      note := 'the bridge never marks a flight NON-GRADED — FDMS has no such state to assert, and NG removes the grade';
+    elsif o_op = 'upsert' and jsonb_typeof(row_in->'duration') is not null
+          and jsonb_typeof(row_in->'duration') <> 'null' then
+      -- DURATION CROSSES IN NEITHER DIRECTION UNTIL FDMS HAS THE FIELD
+      -- (ruling #8). Refused rather than dropped: silently discarding a number
+      -- somebody sent is how the two systems start disagreeing about hours.
+      vd := 'refused';
+      note := 'the bridge carries no flight TIME in either direction yet — the hours belong to the student''s own row, and a pushed duration would be a second source for a number FDMS does not hold';
+    end if;
+
+    if vd is null then
+      arr := cur->sec;
+      h_prev := case when prv is not null then wa.log_handle(prv)
+                     when row_in is not null then wa.log_handle(row_in) end;
+      h_new  := case when row_in is not null then wa.log_handle(row_in) end;
+
+      -- WHERE THE ROW STANDS NOW, and what stands where it is going
+      hit := -1; tgt := -1;
+      for ix in 0 .. jsonb_array_length(arr) - 1 loop
+        if jsonb_typeof(arr->ix) <> 'object' then continue; end if;
+        if hit < 0 and wa.log_handle(arr->ix) = h_prev then hit := ix; end if;
+        if tgt < 0 and h_new is not null and wa.log_handle(arr->ix) = h_new then tgt := ix; end if;
+      end loop;
+      stamp := case when hit >= 0 then arr->hit->>'entered_by' end;
+      tgt_stamp := case when tgt >= 0 then arr->tgt->>'entered_by' end;
+
+      if o_op = 'upsert' then
+        -- 1. THE TOMBSTONE GATE. An identity somebody undid does not come back
+        --    on its own; only an explicit, confirmed re-push clears it.
+        if exists (select 1 from wa.bridge_tombstones tb
+                    where tb.student_oid = p_student_oid and tb.rid = v_rid
+                      and tb.cleared_at is null)
+           and not clear_tomb then
+          vd := 'tombstoned';
+          note := 'this identity was removed from Wings Ahead by the bridge — bringing it back is a deliberate act (clear_tombstone), not something the queue does by itself';
+        -- 2. A HUMAN'S ROW AT THE HANDLE WE ARE MOVING FROM.
+        elsif hit >= 0 and stamp is distinct from 'fdms' then
+          vd := case when stamp = 'admin' then 'exists_admin' else 'exists_student' end;
+          found := arr->hit;
+          note := case when stamp = 'admin'
+                       then 'the admin has taken this row over — the bridge does not write over it'
+                       else 'a row typed on this record already stands at that flight, date and seq — the bridge never overwrites what a human wrote' end;
+        -- 3. A ROW AT THE HANDLE WE ARE MOVING TO that is not the one we hold.
+        elsif tgt >= 0 and tgt <> hit then
+          if tgt_stamp is distinct from 'fdms' then
+            vd := case when tgt_stamp = 'admin' then 'exists_admin' else 'exists_student' end;
+          else
+            vd := 'exists_fdms';
+          end if;
+          found := arr->tgt;
+          note := 'that flight, date and seq is already taken on this record — the move would have made two rows one flight';
+        else
+          -- 4. THE WRITE ITSELF.
+          if hit < 0 and prv is not null then
+            -- `prev` named a bridge row that is not there: the admin deleted it
+            -- (his custody). Reported, never silently re-created — the developer
+            -- settles it from the report.
+            vd := 'missing';
+            note := 'the row this operation was going to change is no longer on the record — the admin removed it, and putting it back is a deliberate re-push';
+          else
+            -- THE CANDIDATE IS BUILT BY THE READ MIGRATION, not by hand. The
+            -- stored rows it is about to be compared with have all been through
+            -- wa.migrate_record — which normalises every string (the round-5b
+            -- boundary), writes the three authored defaults (seq 1, kind
+            -- 'syllabus', ng false), resolves the track from a syllabus code
+            -- and strips any key the section has retired. Building the
+            -- candidate any other way would make an UNCHANGED row look changed
+            -- on every push, purely because FDMS did not send a key whose
+            -- default this database writes: permanent churn, and a report the
+            -- developer would learn to ignore. One function, both sides — and
+            -- it is also where must-fix 6 (the normalisation boundary) is
+            -- honoured, by the same call the stored rows go through.
+            cand := wa.migrate_record(jsonb_build_object(sec, jsonb_build_array(
+                      row_in || jsonb_build_object('entered_by', 'fdms'))))->sec->0;
+            if coalesce((case when jsonb_typeof(cand->'legacy') = 'boolean'
+                              then (cand->>'legacy')::boolean end), false) then
+              -- THE MIGRATION FLAGGED IT INCOMPLETE. That flag is a READ repair
+              -- for rows inherited from the previous form; a row arriving today
+              -- without a date, a sortie, a table or an instructor is not
+              -- inherited, it is unfinished — and writing it would put a row on
+              -- a student's record that only HE can be asked to complete, for a
+              -- flight he did not enter.
+              vd := 'refused';
+              note := 'an incomplete flight is not pushed — a row of the log names its DATE, its SORTIE, the TABLE it belongs to and the INSTRUCTOR who flew it or authorised it';
+            elsif hit >= 0 and wa.entry_core(arr->hit) = wa.entry_core(cand) then
+              vd := 'unchanged';
+            else
+              if hit >= 0 then
+                vd := case when h_prev is distinct from h_new then 'moved' else 'updated' end;
+                arr := jsonb_set(arr, array[hit::text], cand);
+              else
+                vd := 'created';
+                arr := arr || jsonb_build_array(cand);
+              end if;
+            end if;
+          end if;
+        end if;
+
+      else  -- o_op = 'remove'
+        if hit < 0 then
+          -- A REPLAY, ABSORBED (verify finding 5). The unique index would RAISE
+          -- on a second tombstone and the raise would void every sibling op, so
+          -- the caller carries the idempotency — here, by answering the replay
+          -- before it writes.
+          if exists (select 1 from wa.bridge_tombstones tb
+                      where tb.student_oid = p_student_oid and tb.rid = v_rid
+                        and tb.cleared_at is null) then
+            vd := 'unchanged';
+            note := 'already removed, and the tombstone is already lying on it';
+          else
+            vd := 'missing';
+            note := 'no row stands at that flight, date and seq — nothing to remove';
+          end if;
+        elsif stamp is distinct from 'fdms' then
+          -- THE BRIDGE REMOVES ONLY ITS OWN ROWS, on either side of the wire.
+          -- A row whose stamp was stripped is the student's correction and is
+          -- his; the admin's is the admin's.
+          vd := case when stamp = 'admin' then 'exists_admin' else 'exists_student' end;
+          found := arr->hit;
+          note := case when stamp = 'admin'
+                       then 'the admin has taken this row over — only he removes it now'
+                       else 'this row is no longer the bridge''s: somebody on this record corrected it, and a corrected row belongs to the person who corrected it' end;
+        else
+          vd := 'removed';
+          arr := (select coalesce(jsonb_agg(x), '[]'::jsonb)
+                    from jsonb_array_elements(arr) with ordinality t(x, n)
+                   where n - 1 <> hit);
+        end if;
+      end if;
+
+      -- 5. THE SECTION MUST STILL BE A LEGAL SECTION — and if it is not, THIS
+      --    op is refused and its siblings are untouched. The sub-block is what
+      --    isolates them: a validator raise inside it rolls back to the
+      --    savepoint plpgsql opened, not to the start of the call.
+      if vd in ('created', 'moved', 'updated', 'removed') then
+        begin
+          perform wa.validate_section(sec, arr);
+          cur := cur || jsonb_build_object(sec, arr);
+          if not (sec = any(touched)) then touched := touched || sec; end if;
+          changed := true;
+        exception when others then
+          vd := 'refused';
+          note := SQLERRM;
+        end;
+      end if;
+
+      -- 6. THE TOMBSTONE AND ITS CLEARANCE, after the section proved legal.
+      if vd = 'removed' then
+        insert into wa.bridge_tombstones
+          (student_oid, student_id, section, sortie, date, seq, rid, reason)
+        values (p_student_oid, s.id, sec,
+                coalesce(prv->>'sortie', row_in->>'sortie'),
+                coalesce(prv->>'date', row_in->>'date'),
+                coalesce(nullif(coalesce(prv->>'seq', row_in->>'seq'), '')::int, 1),
+                v_rid, v_reason)
+        on conflict do nothing;
+      elsif clear_tomb and vd in ('created', 'moved', 'updated', 'unchanged') then
+        update wa.bridge_tombstones tb
+           set cleared_at = now()
+         where tb.student_oid = p_student_oid and tb.rid = v_rid
+           and tb.cleared_at is null;
+      end if;
+    end if;
+
+    -- 7. THE AUDIT — one row per op, whatever it decided. No names, no grades.
+    insert into wa.bridge_audit
+      (student_id, student_oid, op, section, sortie, date, seq, rid, verdict, note)
+    values (s.id, p_student_oid, coalesce(o_op, '(none)'), sec,
+            coalesce(row_in->>'sortie', prv->>'sortie'),
+            coalesce(row_in->>'date', prv->>'date'),
+            nullif(coalesce(row_in->>'seq', prv->>'seq', ''), '')::int,
+            v_rid, vd, note);
+
+    verdicts := verdicts || jsonb_build_array(jsonb_build_object(
+      'rid', v_rid, 'op', o_op, 'section', sec, 'verdict', vd,
+      'note', note, 'row', found));
+  end loop;
+
+  -- ── ONE WRITE, SURGICAL ─────────────────────────────────────────────────
+  -- `raw ||` keeps every untouched section exactly as stored — including the
+  -- eleven this lane cannot see and the one that would not validate today.
+  -- The record-level `entered_by` is NOT recomputed: wa.record_stamp counts the
+  -- literal 'admin', so an fdms row can never flip a record's stamp, and
+  -- rewriting it here would be the lane deciding a question it is not asked.
+  if changed then
+    outrec := raw;
+    foreach k in array touched loop
+      outrec := outrec || jsonb_build_object(k, cur->k);
+    end loop;
+    if had then
+      update public.student_records
+         set data = outrec, last_update = now()
+       where student_id = s.id
+      returning last_update into t;
+    else
+      insert into public.student_records (student_id, data, last_update, entered_by)
+      values (s.id, outrec, now(), null)
+      returning last_update into t;
+    end if;
+  else
+    select sr.last_update into t from public.student_records sr where sr.student_id = s.id;
+  end if;
+
+  outrec := coalesce((select wa.migrate_record(sr.data) from public.student_records sr
+                       where sr.student_id = s.id), '{}'::jsonb);
+  return jsonb_build_object(
+    'ok', true,
+    'student_oid', p_student_oid,
+    'last_update', t,
+    'verdicts', verdicts,
+    'fdms_entries', wa.entry_count_by(outrec, 'fdms'),
+    'entries_total', wa.entry_count(outrec));
 end $$;
 
 -- weekly keep-alive ping (GitHub Action) — touches nothing, returns 'ok'
@@ -5504,6 +6507,25 @@ begin
     'admin_save_proposal(text, uuid, uuid, jsonb)',
     'admin_get_data(text)',
     'admin_export(text)',
+    -- ══ ROUND 24 — THE BRIDGE'S FIVE (P45-WA) ═══════════════════════════════
+    -- They join the same loop as everything else, and that is the doctrine
+    -- rather than an oversight: this application is RPC-ONLY, `anon` is the
+    -- role every browser and every wire client arrives as, and each function
+    -- authenticates ITSELF from the credential in its argument. The three
+    -- admin_bridge_* ask wa.auth_role(admin); bridge_pull and bridge_push ask
+    -- wa.auth_bridge, which looks the caller up in a table `public.people` is
+    -- NOT — so being callable is not being answerable.
+    -- NOTE for anybody counting refusals: this list is 25 entries, of which
+    -- keepalive() takes no credential at all and whoami answers {"role": null}
+    -- to a stranger rather than refusing. «Every other RPC refuses the bridge
+    -- token» is therefore 22 refusals + 1 anonymous answer + 1 tokenless ping,
+    -- and an acceptance test that says «25 refusals» fails on its own
+    -- arithmetic (the adversarial read's own nit, kept where the list is).
+    'admin_bridge_status(text)',
+    'admin_bridge_mint(text)',
+    'admin_bridge_revoke(text)',
+    'bridge_pull(text)',
+    'bridge_push(text, text, jsonb)',
     'keepalive()'
   ] loop
     execute format('revoke all on function public.%s from public', fn);
@@ -5621,6 +6643,45 @@ begin
       wa.assessment_class(),
       (select count(*) from public.people s
         where s.role = 'student' and s.active and wa.student_in_scope(s));
+  end if;
+end $$;
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- ROUND 24 SEED — THE BRIDGE CREDENTIAL'S ROW EXISTS, AND IT IS NEVER MINTED
+-- ──────────────────────────────────────────────────────────────────────────
+-- wa.bridge_access is a SINGLETON (`check (id = 1)`), and this is where its one
+-- row is born — in the honest never-minted state: no digest, not active, no
+-- dates. So the People page's Bridge card reads a ROW that says «no credential»
+-- rather than inferring it from an absence, and admin_bridge_mint is an UPDATE
+-- of something that exists instead of a create-or-update whose two branches can
+-- drift.
+--
+-- WHAT THIS BLOCK DOES NOT DO, AND MUST NEVER DO: mint. A deployment cannot mint
+-- a credential, because the plaintext exists exactly once, in the answer to the
+-- admin's own click — a token minted by a schema run would have nowhere to be
+-- shown and would sit armed in the database with nobody holding it. The
+-- credential is created by a human, on his own screen, and by no other path.
+--
+-- IT IS GUARDED BY THE LEDGER AND NOT BY `on conflict`, for the round-10 and
+-- round-18 reason exactly: this file is re-applied on every deploy, and «insert
+-- if the row is missing» would RESURRECT the row the first time an owner
+-- deliberately de-provisions the lane by deleting it. A decision somebody made
+-- must not be undone by a deployment. So it runs ONCE per database, ever.
+do $$
+declare st jsonb;
+begin
+  if exists (select 1 from wa.migrations where id = 'p45-bridge-lane') then
+    st := wa.bridge_status_json();
+    raise notice 'r24: bridge lane already seeded — credential exists=% active=% (minted by the admin, never by a deploy)',
+      st->>'exists', st->>'active';
+  else
+    insert into wa.bridge_access (id, token_sha256, active) values (1, null, false)
+    on conflict (id) do nothing;
+    insert into wa.migrations (id, note) values ('p45-bridge-lane',
+      'r24 (P45-WA): the FDMS bridge lane — wa.bridge_access / bridge_tombstones / bridge_audit, wa.auth_bridge, public.bridge_pull / bridge_push and the three admin_bridge_* RPCs. This row seeds the SINGLETON credential row in its never-minted state (no digest, not active). No deployment ever mints: the plaintext exists once, in the answer to admin_bridge_mint, on the admin''s own screen.');
+    raise notice 'r24: bridge lane seeded — one credential row, never minted; % tombstone(s), % audit row(s)',
+      (select count(*) from wa.bridge_tombstones),
+      (select count(*) from wa.bridge_audit);
   end if;
 end $$;
 
@@ -5766,6 +6827,151 @@ begin
     coalesce(array_length(wa.solo_slot_codes(), 1), 0),
     coalesce(array_length(wa.solo_only_codes(), 1), 0),
     array_to_string(wa.solo_only_codes(), '/');
+end $$;
+
+-- ══ ROUND 24 — THE BRIDGE TABLES' AUDIT: THE PROMISE, KEPT ════════════════
+-- THIS BLOCK IS THE ONE THE FRAGMENT'S COMMENTS PROMISED AND NOBODY WROTE
+-- (WA-24 verify findings 9a and 10·1). Two sentences up the file claimed «an
+-- audit block at the foot of this file FAILS THE DEPLOYMENT if a future round
+-- ever grants anything on them» and «asserts all of it against the CATALOG»,
+-- and there was no such block: the belt-and-braces argument rested on a
+-- tripwire that did not exist, so a later round could have loosened every one
+-- of these locks and nothing would have complained. That is precisely the
+-- «comment that lied» class rounds 22b and 23b were spent on, and the cure is
+-- the same one: not to soften the sentence, but to write the block.
+--
+-- IT READS THE CATALOG, NOT THIS FILE — pg_class, pg_namespace, pg_policy,
+-- pg_constraint and the ACLs — so what it asserts is true of the DATABASE the
+-- schema was just applied to. Four things, each failing with names:
+--   1. all three tables are in schema `wa` (the unreachability argument IS
+--      their address: PostgREST is configured for `public` and
+--      `graphql_public` and reaches nothing else);
+--   2. RLS on, ZERO policies — default-deny, the §4φ-accepted shape;
+--   3. no privilege of any kind for public / anon / authenticated, on the
+--      tables or on the audit table's identity sequence;
+--   4. the two spelled-out vocabularies of wa.bridge_tombstones still say
+--      exactly what their registries say, and the two handle guards are still
+--      there. This is the other half of the proposals_level_chk doctrine: the
+--      literals stay literals (a CHECK that called a function could be widened
+--      by redefining the function), and the AUDIT is what stops them drifting
+--      from the list they mirror — the r22 withsp_markers pattern, applied to
+--      a table constraint instead of to a pair of functions.
+do $$
+declare
+  bad text[];
+  want text[];
+  got  text[];
+  def  text;
+  n int;
+begin
+  -- 1 · the address
+  select coalesce(array_agg(t.rel order by t.rel), '{}') into bad
+  from unnest(array['bridge_access','bridge_tombstones','bridge_audit']) t(rel)
+  where not exists (select 1 from pg_class c join pg_namespace ns on ns.oid = c.relnamespace
+                     where ns.nspname = 'wa' and c.relname = t.rel and c.relkind = 'r');
+  if coalesce(array_length(bad, 1), 0) > 0 then
+    raise exception 'r24: the bridge table(s) % are not in schema «wa» — the lane is unreachable from PostgREST BY ADDRESS (the API is configured for public + graphql_public), and moving one to `public` would put a forgeable tombstone on the open REST surface',
+      array_to_string(bad, ', ');
+  end if;
+
+  -- 2 · RLS on, no policy
+  select coalesce(array_agg(c.relname order by c.relname), '{}') into bad
+  from pg_class c join pg_namespace ns on ns.oid = c.relnamespace
+  where ns.nspname = 'wa' and c.relname like 'bridge\_%' and c.relkind = 'r'
+    and not c.relrowsecurity;
+  if coalesce(array_length(bad, 1), 0) > 0 then
+    raise exception 'r24: row level security is OFF on wa.% — RLS with no policy is the second lock (default-deny), and it is what the §4φ advisor triage accepted by design',
+      array_to_string(bad, ', wa.');
+  end if;
+  select coalesce(array_agg(c.relname || ' (' || pol.polname || ')' order by c.relname), '{}')
+    into bad
+  from pg_policy pol join pg_class c on c.oid = pol.polrelid
+  join pg_namespace ns on ns.oid = c.relnamespace
+  where ns.nspname = 'wa' and c.relname like 'bridge\_%';
+  if coalesce(array_length(bad, 1), 0) > 0 then
+    raise exception 'r24: wa.% carries a POLICY — these tables are reached only through SECURITY DEFINER RPCs, which run as the owner and bypass RLS; a policy here can only ever be a door somebody opened for a role that should have none',
+      array_to_string(bad, ', wa.');
+  end if;
+
+  -- 3 · not one privilege for the API roles, tables or sequence
+  select coalesce(array_agg(c.relname || ' → ' || g.grantee order by c.relname, g.grantee), '{}')
+    into bad
+  from pg_class c join pg_namespace ns on ns.oid = c.relnamespace
+  cross join unnest(array['public','anon','authenticated']) g(grantee)
+  where ns.nspname = 'wa' and c.relname like 'bridge\_%'
+    and c.relkind in ('r', 'S')
+    and (has_table_privilege(case when g.grantee = 'public' then 'public' else g.grantee end,
+                             c.oid, 'select')
+      or has_table_privilege(case when g.grantee = 'public' then 'public' else g.grantee end,
+                             c.oid, 'insert')
+      or has_table_privilege(case when g.grantee = 'public' then 'public' else g.grantee end,
+                             c.oid, 'update')
+      or has_table_privilege(case when g.grantee = 'public' then 'public' else g.grantee end,
+                             c.oid, 'delete'));
+  if coalesce(array_length(bad, 1), 0) > 0 then
+    raise exception 'r24: a bridge table is GRANTED to an API role — % — and the whole design of this lane is that no role but the owner ever touches it: a readable tombstone is training data, a writable one is a silent, tokenless data-withholding attack on any identity',
+      array_to_string(bad, ', ');
+  end if;
+
+  -- 4 · the spelled-out vocabularies still mirror their registries
+  select pg_get_constraintdef(con.oid) into def
+  from pg_constraint con join pg_class c on c.oid = con.conrelid
+  join pg_namespace ns on ns.oid = c.relnamespace
+  where ns.nspname = 'wa' and c.relname = 'bridge_tombstones'
+    and con.conname = 'bridge_tombstones_section_chk';
+  if def is null then
+    raise exception 'r24: wa.bridge_tombstones lost its `section` CHECK — the tombstone gate is keyed to a band, and a band nobody constrains is a gate that can be laid on a section that does not exist';
+  end if;
+  select coalesce(array_agg(m[1] order by m[1]), '{}') into got
+  from regexp_matches(def, '''([a-z_]+)''', 'g') m;
+  select coalesce(array_agg(b order by b), '{}') into want from unnest(wa.log_bands()) b;
+  if got is distinct from want then
+    raise exception 'r24: the spelled-out `section` CHECK of wa.bridge_tombstones says (%) while wa.log_bands() says (%) — the literal is deliberate (the proposals_level_chk rule: a CHECK that called a function could be widened by redefining the function), so widening the registry means widening this constraint in the same commit',
+      array_to_string(got, '/'), array_to_string(want, '/');
+  end if;
+
+  select pg_get_constraintdef(con.oid) into def
+  from pg_constraint con join pg_class c on c.oid = con.conrelid
+  join pg_namespace ns on ns.oid = c.relnamespace
+  where ns.nspname = 'wa' and c.relname = 'bridge_tombstones'
+    and con.conname = 'bridge_tombstones_reason_chk';
+  if def is null then
+    raise exception 'r24: wa.bridge_tombstones lost its `reason` CHECK — every removal names why it happened, and the report on the FDMS side prints that word to the developer';
+  end if;
+  select coalesce(array_agg(m[1] order by m[1]), '{}') into got
+  from regexp_matches(def, '''([a-z_]+)''', 'g') m;
+  select coalesce(array_agg(b order by b), '{}') into want from unnest(wa.bridge_reasons()) b;
+  if got is distinct from want then
+    raise exception 'r24: the spelled-out `reason` CHECK of wa.bridge_tombstones says (%) while wa.bridge_reasons() says (%)',
+      array_to_string(got, '/'), array_to_string(want, '/');
+  end if;
+
+  -- the two handle guards: a tombstone's date is an ISO date and its seq is a
+  -- flight number, exactly as wa.is_iso_date and wa.validate_section demand of
+  -- the row it is a tombstone FOR (the first draft took '12/08/2026' and -7)
+  select count(*) into n
+  from pg_constraint con join pg_class c on c.oid = con.conrelid
+  join pg_namespace ns on ns.oid = c.relnamespace
+  where ns.nspname = 'wa' and c.relname = 'bridge_tombstones'
+    and con.conname in ('bridge_tombstones_date_chk', 'bridge_tombstones_seq_chk')
+    and (con.conname <> 'bridge_tombstones_date_chk'
+         or pg_get_constraintdef(con.oid) like '%d{4}-%d{2}-%d{2}%');
+  if n <> 2 then
+    raise exception 'r24: wa.bridge_tombstones is missing a handle guard — the date must carry the ISO pattern wa.is_iso_date matches and the seq must be 1..20, the bounds wa.validate_section asks of a flight row (found % of the 2)', n;
+  end if;
+
+  -- and the credential cannot be armed with nothing to authenticate
+  select count(*) into n
+  from pg_constraint con join pg_class c on c.oid = con.conrelid
+  join pg_namespace ns on ns.oid = c.relnamespace
+  where ns.nspname = 'wa' and c.relname = 'bridge_access'
+    and con.conname = 'bridge_access_armed_chk';
+  if n <> 1 then
+    raise exception 'r24: wa.bridge_access lost bridge_access_armed_chk — without it the table accepts active=true beside token_sha256=null, and the People page would print «active since …» for a credential that refuses every call';
+  end if;
+
+  raise notice 'r24: bridge lane audited — 3 tables in schema wa, RLS on, 0 policies, 0 API grants; section (%) ≡ wa.log_bands(), reason (%) ≡ wa.bridge_reasons(); handle guards and the armed check in place',
+    array_to_string(wa.log_bands(), '/'), array_to_string(wa.bridge_reasons(), '/');
 end $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════

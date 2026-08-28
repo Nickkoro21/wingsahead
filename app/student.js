@@ -334,6 +334,25 @@ WA.renderStudent = async function (view, me, opts) {
      own form locks nothing: on that side every row is his to edit or delete.
      MIRROR: db/schema.sql → wa.carry_stamps. */
   const coLocked = (e) => !asCO && WA.isCO(e);
+  /* ── ROUND 24 — THE SQUADRON'S SCHEDULER WROTE THIS ROW ───────────────────
+     An FDMS row is NOT locked: the student may correct what it says, and the
+     corrected row becomes his (the server strips the stamp, and the squadron
+     sees the difference at its next cross-check). Two things are not his:
+     REMOVING it, and renaming its HANDLE — the sortie, the date and the
+     same-day sequence, which are the scheduler's name for the flight and what
+     its own ledger and report are keyed to. Those controls are drawn INERT
+     here, in front of him, rather than left live to be refused at save time: a
+     control that does nothing is honest, and a save refused after ten minutes
+     of typing is not.
+     The admin's on-behalf form guards nothing — an fdms row is his to edit or
+     delete like any other (his custody; the next push then reports it MISSING
+     and the developer settles it from the report).
+     MIRROR: db/schema.sql → wa.carry_stamps' fdms clause + wa.fdms_lock_msg. */
+  const fdmsRow = (e) => !asCO && WA.isFdms(e);
+  /* the field names an fdms row may not change. cellPick spells its own with
+     the @ / ~ prefixes it uses for the select and the free-text box, so the set
+     is written once, here, and read by applyLocks. */
+  const FDMS_FROZEN = ["date", "sortie", "@sortie", "~sortie"];
   /* the admin entries the record ARRIVED with, per section. Nothing in the UI can
      drop one, so a mismatch at save time means a row was refused on its way
      into the payload — and the owner cannot fix a locked row, so the message
@@ -994,6 +1013,10 @@ WA.renderStudent = async function (view, me, opts) {
             ? `<span class="colock" title="${esc(WA.CO_LOCK_TIP)}">&#128274; ${esc(WA.ADMIN_TAG)}</span>`
             : `<span class="cotag" title="${esc(WA.CO_TIP)}">${esc(WA.ADMIN_TAG)}</span>`)
         : "") +
+      /* ROUND 24 — the third source, said on the row (WA.fdmsTag carries the
+         whole sentence in its tooltip: correct it, but it is not yours to
+         remove or to rename) */
+      WA.fdmsTag(e) +
       (leg ? cflag("incomplete",
         "Recorded on an earlier version of this form — please complete " +
         (missingOf(sec, e).join(", ") || "the missing details") + ". " +
@@ -1747,7 +1770,8 @@ WA.renderStudent = async function (view, me, opts) {
     const m = rowMeta(sec.id, i);
     return `<tr class="frow${m.state ? " st-" + esc(m.state) : ""}${
       stillLegacy(sec.id, e) ? " is-legacy" : ""}${
-      WA.isCO(e) ? " is-co" : ""}${coLocked(e) ? " is-colock" : ""}"
+      WA.isCO(e) ? " is-co" : ""}${coLocked(e) ? " is-colock" : ""}${
+      WA.isFdms(e) ? " is-fdms" : ""}"
       data-row="${esc(sec.id)}:${i}">${sec.row(e, i, m)}</tr>`;
   }
   /* the table itself. It scrolls INSIDE its own wrapper on a narrow screen, so
@@ -2317,6 +2341,24 @@ WA.renderStudent = async function (view, me, opts) {
      multi-select), which is why it is one function and not a flag per box. */
   function applyLocks() {
     if (asCO) return;
+    /* ── ROUND 24 — THE FDMS ROW'S FOUR INERT CONTROLS ────────────────────
+       Not a lock: everything else in the row stays live, because correcting a
+       pushed flight is the student's right and the corrected row becomes his.
+       What is frozen is the HANDLE (sortie · date) and the two ways to make
+       the row disappear (✕ remove, ⌫ clear back to an owed slot) — the four
+       acts wa.carry_stamps refuses, drawn as refusals BEFORE they are typed.
+       The ↻ same-day re-fly stays live for the round-16 reason «+ 2nd trial»
+       does: it edits nothing, it MINTS a new row that is the student's own
+       from the first keystroke. */
+    for (const row of form.querySelectorAll(".frow.is-fdms")) {
+      for (const el of row.querySelectorAll("input, select, textarea, button")) {
+        const f = el.getAttribute("data-field");
+        if (!(f && FDMS_FROZEN.indexOf(f) >= 0)
+            && !el.hasAttribute("data-rm") && !el.hasAttribute("data-clear")) continue;
+        el.disabled = true;
+        if (!el.title) el.title = WA.FDMS_TIP;
+      }
+    }
     /* round 12b — .frow is the same row in its table form (a <tr>) */
     for (const row of form.querySelectorAll(".rrow.is-colock, .frow.is-colock")) {
       for (const el of row.querySelectorAll("input, select, textarea, button")) {

@@ -795,10 +795,12 @@ WA.renderInstructor = async function (view, me, opts) {
      one row shape — SELF (his own currency rows, projected), SP-ENTERED (every
      flights/fs row of ANY active student naming him: oid first, surname
      fallback, shared surnames FLAGGED and never guessed) and FDMS-PROGRESS
-     (the designed slot: rows whose provenance stamp is 'fdms' — zero today, so
-     the source column exists and counts 0 until the Phase-4 bridge lane lands
-     into it). The student's row belongs to the student — no control here
-     writes.
+     (rows whose provenance stamp is 'fdms'). ROUND 24 — THE SLOT IS NO LONGER
+     EMPTY: public.bridge_push writes those rows, so this lane counts what the
+     squadron's own scheduler pushed, and round 21's promise that «Phase 4 lands
+     into a finished surface with NO further logbook change» is now a fact —
+     nothing in this file changed to receive it. The student's row belongs to
+     the student — no control here writes.
 
      THE SELF LANE IS REDRAWN FROM THE SAVED ROWS (CUR_SAVED_ROWS — the same
      migrated shape the server projects), so a currency save updates the
@@ -1020,8 +1022,13 @@ WA.renderInstructor = async function (view, me, opts) {
       icon: "&#9992;",
       what: "Your own sorties for the squadron&rsquo;s currency register &mdash; Continuation or " +
             "With SP, what was flown, and the E-items" +
+            /* ROUND 24 — «the lane the bridge WILL fill» was true for exactly
+               one round. The bridge fills it now (public.bridge_push writes
+               entered_by:'fdms' rows, and wa.instructor_logbook has labelled
+               them src:'fdms' since round 21), so the tile stops promising and
+               starts describing. */
             (LOG ? " &mdash; and below them your Flight Logbook: every flight a student logged " +
-                   "naming you, and the FDMS-Progress lane the bridge will fill" : "") +
+                   "naming you, and the FDMS-Progress lane the bridge fills" : "") +
             ". It names no student and changes nobody&rsquo;s record.",
     },
   };

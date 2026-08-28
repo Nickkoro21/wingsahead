@@ -8008,6 +8008,489 @@ than the brief it is read beside, trading one disagreement for another. It is
 here for the next round rather than done crookedly in this one.
 
 
+## 4z. Round 24 (2026-08-28) — P45-WA: THE BRIDGE LANE — THE WA SIDE OF PHASES 4+5
+
+**ΑΠΟΦΑΝΣΗ ΧΡΗΣΤΗ 28/08/2026**: *«Πάμε και τη Φάση 4,5. Πρώτα να δουλέψει το
+αυτόματο και μετά το bunch.»* This round builds the **Wings Ahead half** of the
+FDMS bridge's live two-way lane: the credential, the two wire doors, the
+provenance stamp `'fdms'` and the four guards that keep a pushed flight honest
+on this side. The FDMS half (the planner, the ledger, the transport, the Bridge
+tab) is the next round and touches nothing here.
+
+The two invariants the whole feature serves, restated once, in the architect's
+own words:
+
+> **One flight = `(student OID ∷ group ∷ node uid ∷ ord)` on the FDMS side and
+> `(sortie, date, seq)` inside a WA section — and the mapping between the two
+> lives in a LEDGER, never inside either row.**
+>
+> **Nothing crosses the wire silently.** Every write is logged with rollback on
+> the side that made it and visible on the side that received it; a conflict is
+> a report line, never an overwrite; a deletion is a **tombstone**, never an
+> absence.
+
+### 4z·1. WHAT THIS ROUND STANDS ON — AND WHAT IT REPAIRED FIRST
+
+The round began with an **uncommitted 158-line fragment** left in
+`db/schema.sql` by an implementer that lost its connection mid-round: three
+tables and `wa.auth_bridge`. The adversarial verify of 28/08 ran against that
+half-state and its verdict was *keep the structure, fix six proven defects*.
+Both halves of that verdict are honoured below — the fragment's architecture is
+the round's architecture, and every one of its six defects is closed with the
+proof named beside it.
+
+**WHAT THE FRAGMENT GOT RIGHT, AND STAYS.** The three tables live in schema
+`wa`, which PostgREST does not expose, so they are unreachable **by
+construction** and not merely by permission (`Accept-Profile: wa` → *406, «Only
+the following schemas are exposed: public, graphql_public»*); RLS with zero
+policies and an owner-only ACL are the second and third locks. `wa.auth_bridge`
+answers every failure with **one sentence**. Cross-credential confusion is
+structurally impossible in both directions. And `volatile` on `wa.auth_bridge`
+is **load-bearing**, proven live: a read-only transaction over it dies with
+*«cannot execute UPDATE in a read-only transaction»*, which is exactly what a
+`stable` `bridge_pull` would have hit on every call.
+
+#### 4z·1·1. THE SIX FRAGMENT DEFECTS, CLOSED
+
+| # | the defect (all proven live by the verify) | the fix, and the judgement recorded |
+|---|---|---|
+| 1 | Two comments (`:446-447`, `:540-541`) promised **a foot-of-file audit block that did not exist** — the «comment that lied» class of rounds 22b/23b | **The block is written** (`r24:`). It reads pg_class / pg_policy / pg_constraint / the ACLs and fails the deployment with names on: a table outside schema `wa`, RLS off, any policy, any privilege for public/anon/authenticated, and every vocabulary or guard below. Proven to fire by **six doctored catalogs** (§4z·6·6). |
+| 2 | `bridge_tombstones_live` was described as making a replayed remove *«idempotent by the INDEX and not by the caller being careful»* — **false**: a unique index RAISES, and under the round's own verdicts-not-exceptions rule the raise would void every sibling op | The comment now says what the index does (it forbids a second live tombstone) and what it does **not** (it does not absorb a replay). **`public.bridge_push` carries the idempotency**: its remove branch answers a replay `unchanged` *before* it writes, and lays its tombstone `on conflict do nothing` so a race is absorbed instead of raised. |
+| 3 | `people → bridge_tombstones` was `on delete cascade`, so **deleting a person erased the gate** and a re-create on the same `external_oid` resurrected every undone push (proven: 2 tombstones → person deleted → 0 remaining) | **The key is the roster OID, and it outlives the person.** `student_oid text not null` is the key (people.external_oid is UNIQUE since round 9); `student_id` stays beside it as a convenience handle and is `on delete set null`. The live-uniqueness index moved to `(student_oid, rid)`. **Judgement**: the identity a tombstone gates is FDMS's own `rid`, which carries the OID — it was never a WA uuid, so keying on one was the mistake. |
+| 4 | `date` took `'12/08/2026'` and `seq` took `-7` | Two spelled-out guards: `date ~ '^\d{4}-\d{2}-\d{2}'` (the pattern inside `wa.is_iso_date`) and `seq between 1 and 20` (the bounds `wa.validate_section` asks of a flight row). Both are asserted present by the r24 block, and the date guard is asserted to carry that pattern. |
+| 5 | `wa.bridge_access` admitted `active = true` beside `token_sha256 IS NULL` — authentication refused it correctly, but **the admin card would have printed «active since …» for a credential that cannot authenticate** | `bridge_access_armed_chk check (not active or token_sha256 is not null)`. The house's presence-before-membership discipline written into the table: the state «armed» is not expressible without the thing that arms it. The reverse stays legal — a digest with `active = false` is exactly what **Revoke** leaves, and it is what lets `revoked_at` mean something. |
+| 6 | `check (section in ('flights','fs'))` re-typed `wa.log_bands()` as a **third mirror**, and these were the only table-level text-enum CHECKs in the file | **The literal stays and the AUDIT is added** — the design's own first alternative, and the `proposals_level_chk` precedent verbatim (*«a CHECK that called a function could be silently widened by redefining the function»*). What was missing was the other half: nothing tied the literal back to the registry. The r24 block extracts the literals from `pg_get_constraintdef` and fails the deployment if they differ from `wa.log_bands()`. The same is done for `reason` against the new `wa.bridge_reasons()`. **Proven**: widen `wa.log_bands()` to a third band and the deployment fails, naming both lists. |
+
+**AND THE COSMETIC SEAM.** The short-token path answered *«WA: invalid bridge
+token»* while every other failure answered the long sentence — a **different**
+sentence is an oracle: it discloses that a length floor exists and where. All
+four failures (never minted · wrong · revoked · too short) now say **one
+sentence**, `wa.bridge_refusal_msg()`, which is a function for the
+`wa.admin_lock_msg` reason: it is said in more than one place and one definition
+cannot drift from itself. The length test stays — it is what keeps a NULL out of
+`digest()` — it simply no longer speaks in its own voice.
+
+### 4z·2. THE FOUR BINDING MUST-FIXES OF THE ADVERSARIAL READ
+
+1. **`bridge_pull` is `volatile`.** `wa.auth_bridge` touches `last_used_at`;
+   PostgREST runs a STABLE function inside a **READ ONLY** transaction, so a
+   `stable` pull would have failed on **every** call — including the setup Test,
+   bricking onboarding with a Postgres error where the design promised the
+   server's own sentence. Cost: none. `volatile` is POST-only on PostgREST,
+   which is itself worth having: the token travels in the request **body**,
+   where no URL and no proxy log can smear it, and that is why the future
+   Cloudflare-Worker lift is a URL swap and not a contract change.
+   **Proven live: two pulls in a row, both 38 327 bytes, through REST.**
+2. **The tombstones are unreachable from anon** — by ADDRESS, which is stronger
+   than by permission. Kept from the fragment and now audited (§4z·1·1 #1).
+3. **The authored `seq` is stored and never re-derived.** WA has refused a
+   derived seq since round 12 (*«an array index is a POSITION and this is a
+   FACT»*), and this round holds that line across the wire: `bridge_push` writes
+   the `seq` the op carries and computes none; `(sortie, date, seq)` is the
+   **handle** the ops name and the survival clause tests, never an identity — a
+   date correction MOVES it (verdict `moved`, **one** row, proven) and the
+   date-free `rid` is what the tombstones and the audit are keyed to.
+4. **No hidden background poller — every retry explicit.** The design's
+   `p_if_last_update` was a **courier-era relic**: with the surgery server-side
+   every op is judged against the LIVE stored record inside one transaction, and
+   the per-op provenance verdicts already refuse everything the lock could
+   refuse. What the lock would have ADDED is a lie — after **any** student save
+   the next push answers `stale`, and the recovery written for it was «retry
+   after a fresh pull, automatically», i.e. an automatic background pull of the
+   full real-names export with no tab open, which the same design forbids in its
+   own custody section. **The parameter is dropped**; `public.bridge_push` takes
+   `(p_token, p_student_oid, p_ops)`. Nothing in this file polls.
+
+### 4z·3. WHAT WAS BUILT
+
+#### 4z·3·1. The credential — a table, not a person, not a `wa_role`
+
+`wa.bridge_access` is **one row** (`check (id = 1)`) holding only the **SHA-256
+digest**. The plaintext exists exactly once, in the answer to
+`public.admin_bridge_mint`, on the admin's own screen: **the database cannot
+echo what it never stored**, which is a stronger guarantee than the §4φ rule it
+serves — and that rule now covers `token_sha256` by name, which is a digest and
+is still never returned. A fourth `wa_role` value was refused for three reasons
+(an `alter type` cannot ride this file's do-blocks; a `people` row would leak
+into `wa.person_json`, every export and `admin_list_people`, **which prints
+tokens**; and ruling #7 is blast radius). **Rotation is minting** — one switch
+closes every lane at once.
+
+- `public.admin_bridge_status` · `admin_bridge_mint` · `admin_bridge_revoke`,
+  and the **Bridge card** on People & links (status line, Mint/Rotate, Revoke,
+  and the shown-once dialog with the `.tokbox`).
+- `wa.bridge_status_json()` is the one place the state is described: `exists`
+  (derived from the digest), `active`, and the three dates. Never the digest.
+
+#### 4z·3·2. `wa.validate_section` — the extraction the surgeon rests on
+
+`wa.validate_record` is now a **loop over `wa.validate_section(sec, arr)`**, and
+keeps only what is true of the whole payload (root object, the 400 kB ceiling,
+the section-name whitelist, the two renamed-key refusals). The 727 moved lines
+are the round-12 body verbatim with `p->k` reading `p_arr` and one indentation
+level removed — behaviour-identical **by construction** (the moved code never
+referenced `p` except as `p->k`) and the caller walks `wa.sections()` in the same
+order, so the FIRST refusal a bad payload meets has not moved. **The 400-row
+`wa.section_cap` travelled with it**, deliberately: it lived in the generic loop,
+and an extraction that left it behind would let the surgeon grow a section past
+a limit the form cannot.
+
+**WHY IT IS THE FEATURE AND NOT A TIDY-UP — the live intelligence.** **One of
+the four stored student records in the local stack FAILS `wa.validate_record` on
+its own migrated form** (an SMS entrance written before round 8 names no ΚΕΠΕ
+condition — the open item recorded at §7 since round 11). A `bridge_push`
+written as a client-side read-modify-write **courier** would be **permanently
+refused for that student**, over a rule about a section the bridge does not
+touch, cannot see and could never fix. Proven both ways in this round: the
+record still refuses its own re-save, **and his flights push lands** (§4z·6·2).
+
+#### 4z·3·3. `public.bridge_pull` — one body, two doors
+
+`wa.export_body(p_with_proposals boolean)` is called by **both**
+`public.admin_export` and `public.bridge_pull`. The two answers differ in exactly
+two declared ways: `proposals` (admin only — the one payload with real judgement
+sensitivity and zero bridge use) and `"via": "bridge"`. The key is **removed**,
+not emptied: `{"proposals": null}` cannot be told from «this squadron has
+recorded no assessments», and one of those readings is false.
+**Both stay `wa-export-v1`** — the two additions (`fdms_entries` per record and
+the `bridge` block) are ADDITIVE, and §4u·9's promotion rule fires on a key
+renamed, a type changed or a section removed. None happened.
+
+The `bridge` block (in **both** doors): `tombstones`, `audit_total`, the last
+200 `audit_tail` rows, and `credential` (booleans and dates). **No names, no
+grades** anywhere in it.
+
+#### 4z·3·4. `public.bridge_push` — the server-side surgeon
+
+One student, a list of ops, one transaction. `{op, section, rid, prev, row,
+clear_tombstone, reason}`, ops `upsert | remove`, sections `flights | fs`.
+
+- **The person is the roster's object id.** Exactly one ACTIVE student or a
+  refusal that says which of the two things went wrong — nobody, or two people
+  carrying it (heal the roster first).
+- **Verdicts, not exceptions.** `wa.bridge_verdicts()`: `created · moved ·
+  updated · removed · unchanged · exists_student · exists_admin · exists_fdms ·
+  missing · tombstoned · refused`. Only the **envelope** raises. Even a section
+  that would not validate with an op applied is that **op's** `refused` — the
+  candidate array is validated inside a plpgsql sub-block, so the validator's
+  raise rolls back to its savepoint and the siblings land.
+- **It never overwrites a row it does not own.** A handle held by a student's or
+  the admin's row is answered `exists_student` / `exists_admin`, **the row is
+  returned in full** so the FDMS report can show both versions, and nothing is
+  written. The same test runs on the handle a MOVE is aiming at (`exists_fdms`
+  when another bridge row is there), so a move can never make two rows one
+  flight.
+- **It never accepts provenance from the wire.** `entered_by` is set here, to
+  `'fdms'`; a client that sends one is **refused by name** rather than silently
+  overwritten — a caller that sends it believes something false about who
+  decides it. `ng: true`, `legacy` and any non-null `duration` are refused by
+  name too (F.4's welded doors and ruling #8).
+- **It never bakes the migration into storage.** The write-back is **surgical**:
+  `data = <stored, untouched> || {the touched sections}`. A whole-record
+  `data = wa.migrate_record(...)` would have replaced every stored record's raw
+  form ~5 s after any training-log write with no human in the loop; today only a
+  human save bakes it. **Proven: every untouched section byte-identical after a
+  push, a legacy free-text FPC result included.**
+- **The normalisation boundary is honoured by the same call the stored rows go
+  through**: the candidate row is built by `wa.migrate_record` on a
+  one-row section, which normalises every string (round 5b), writes the three
+  authored defaults (`seq` 1, `kind` 'syllabus', `ng` false), resolves the track
+  from a syllabus code and strips retired keys. Building it any other way would
+  make an **unchanged** row look changed on every push — permanent churn, and a
+  report the developer would learn to ignore. A candidate the migration flags
+  `legacy` (no date / sortie / track / instructor) is `refused`: the bridge
+  writes complete rows.
+
+#### 4z·3·5. The survival clause — `wa.carry_stamps` grows an fdms branch
+
+Two sentences bind, and they pull in opposite directions: *«an fdms row does NOT
+lock the student out of his own record»* and *«a bridge row must not be deletable
+by accident, from either side»*. They meet at **one test, and it is the HANDLE**:
+
+- a stored `'fdms'` entry that comes back fact-for-fact keeps its stamp;
+- one that does not come back but has a **successor at the same
+  `(sortie, date, seq)`** is an **EDIT** — allowed, the stamp is stripped by the
+  existing loop, and the row is now the student's;
+- one with **no** successor at its handle — including the whole-section-omitted
+  case — is a **DELETION**, and the save is **refused** by `wa.fdms_lock_msg`,
+  which names the flight and the day.
+
+The admin clause is untouched and still fires on the literal `'admin'`, which is
+why an fdms row locks nothing. `wa.carry_stamps` never reads
+`wa.bridge_tombstones` and never asks whether the bridge is configured: a
+student's save is judged against **what is in his record**, so no bridge state
+can lock him out.
+
+**MUST-FIX 9, THE BOUNDARY SAID OUT LOUD.** The successor test keys on the
+handle, so changing the sortie, the date or the seq is indistinguishable from
+removing the row and is refused as one. That is a **policy, not an accident** —
+the handle is the scheduler's own name for the flight, and a student silently
+renaming it would leave the two systems talking about different flights with
+nobody told. The sentence therefore says which fields are his and which are not,
+instead of promising «correct it if it is wrong» and then refusing exactly one
+kind of correction. **On the client the four acts are drawn INERT before they
+are typed** (§4z·4).
+
+The **admin path** (`wa.stamp_record_diff`) is deliberately unchanged: he may
+edit an fdms row — it becomes his and **locks** — or delete it (his custody),
+and the next push then answers `missing`, which is a report line for the
+developer, not a re-creation.
+
+### 4z·4. THE CLIENT — MINIMAL, AND THE THIRD SOURCE EVERYWHERE AT ONCE
+
+- **`WA.srcOf(e) → 'self' | 'admin' | 'fdms'`**, `WA.isFdms`, `WA.FDMS_TAG`,
+  `WA.FDMS_TIP`, `WA.fdmsTag`. **`WA.isCO` is untouched, deliberately**: it
+  decides LOCKS and COUNTS, and an fdms row is neither the admin's nor locked.
+- **`WA.coTag` learned the third value**, which is what makes the chip appear on
+  every surface that already asked «who put this here» — the student's tables,
+  the admin's drill-downs, the printed brief — with one edit instead of thirty
+  call sites and one missed. `WA.coWord` (the CSV column) returns `WA.srcOf`.
+- **`WA.coSource` counts `fdms` and names it in the tip.** «Self-reported by its
+  owner» had become false for a record holding pushed rows — the one place that
+  counted the other two sources and called everything else the owner's. The
+  ADMIN question (`n`, `all`, `some`, `word`, `WA.coRecordTag`) is unchanged:
+  folding fdms rows into it would re-create the round-4 defect from the other
+  side.
+- **The student's form**: `.frow.is-fdms`, the `FDMS` pill, and **four inert
+  controls** — the sortie, the date, the ✕ remove and the ⌫ clear — because a
+  control that does nothing is honest and a save refused after ten minutes of
+  typing is not. Everything else stays live: correcting a pushed flight is his
+  right. The ↻ same-day re-fly stays live for the round-16 reason «+ 2nd trial»
+  does: it edits nothing, it MINTS a row that is his from the first keystroke.
+  **The admin's on-behalf form guards nothing** (his custody).
+- **The instructor's logbook needed NOT ONE LINE.** Round 21's FDMS-Progress
+  slot reads `entered_by = 'fdms'` in `wa.instructor_logbook`, which this round
+  fills; its promise that *«Phase 4's lane lands into a finished surface with no
+  further logbook change»* held **literally**. What changed is **two sentences
+  that had stopped being true**: «the lane the bridge WILL fill» and «zero rows
+  carry it». (`app/instructor.js`, `db/schema.sql` — the 22b/23b rule applied to
+  this round's own inheritance.)
+- **The Bridge card** on People & links: the status line, Mint / Rotate / Revoke
+  with confirmations that say what breaks, and the shown-once token dialog.
+  `admin_bridge_status` is fetched with the dashboard's own two loads and is
+  `.catch(() => null)`: an instance still running a pre-round-24 schema shows
+  «unavailable» and everything else works.
+
+### 4z·5. THE JUDGEMENTS THIS ROUND MADE, RECORDED
+
+1. **Tombstones are keyed to the roster OID, not the WA uuid** (§4z·1·1 #3).
+2. **`p_if_last_update` is dropped, not softened** (§4z·2 #4). The per-op guards
+   are the real lock.
+3. **`wa.bridge_ops` / `bridge_reasons` / `bridge_verdicts` are SQL-only
+   registries.** The house rule is «a registry gets BOTH mirrors», and it exists
+   because a CLIENT that hardcodes a vocabulary drifts from the server that
+   judges it. **No Wings Ahead surface renders an op, a verdict or a removal
+   reason**: the ops are written by FDMS, the verdicts are read by FDMS, and the
+   only WA surface touching the lane prints booleans and dates. The value that
+   DOES reach a WA surface is the stamp `'fdms'`, and it has both its mirrors
+   (`wa.entry_count_by` / `WA.srcOf` + `WA.FDMS_TAG`).
+4. **`wa.bridge_audit.op` / `.verdict` are deliberately UNCONSTRAINED** — the
+   opposite ruling from the tombstone table, for the opposite reason. A tombstone
+   is a live GATE the push consults; this is a LOG. A vocabulary CHECK on a log
+   makes the history unwritable the day the vocabulary changes and makes an old,
+   honest row unreadable by a future constraint validation. The guarantee lives
+   at the single writer instead.
+5. **A non-null `duration` on a pushed row is REFUSED, not dropped** — silently
+   discarding a number somebody sent is how two systems start disagreeing about
+   hours. Ruling #8 stands until FDMS has the field.
+6. **The `proposals` key is removed rather than emptied** from the bridge door
+   (§4z·3·3).
+7. **The seed is the singleton credential row in its never-minted state, once,
+   ledger-guarded** (`wa.migrations` id `p45-bridge-lane`). **A deployment can
+   never mint**: the plaintext exists once, on a human's screen, and a token
+   minted by a schema run would sit armed with nobody holding it. Ledger-guarded
+   and not `on conflict`, for the round-10/18 reason: a future de-provisioning
+   that deletes the row must not be undone by the next deploy.
+8. **The refusal arithmetic, written where the grants list is.** The list is 25
+   entries. Two (`bridge_pull`, `bridge_push`) accept the bridge credential;
+   `keepalive()` takes none; `whoami` answers `{"role": null}` to a stranger
+   rather than refusing. «Every other RPC refuses it» is therefore **21 refusals
+   + 1 anonymous answer + 1 tokenless ping** — an acceptance test that says «25
+   refusals» fails on its own arithmetic.
+
+### 4z·6. SELF-VERIFICATION — RUN LIVE ON THE LOCAL STACK
+
+#### 4z·6·1. The credential, and the pull
+Mint through `public.admin_bridge_mint` (48 chars = 2 × `wa.gen_token`). The
+stored value is 64 hex characters and **is not the plaintext**;
+`admin_bridge_status` never mentions a token. `bridge_pull` **succeeds twice in a
+row** (38 327 bytes each, over REST) — the read-only defect is dead. Key diff
+against `admin_export`: pull **minus** export = `{via}`, export **minus** pull =
+`{proposals}`, and the two bodies are otherwise **byte-identical**. The pull
+contains neither the string `"token"` nor `token_sha256`, and **does not contain
+the admin token**.
+
+#### 4z·6·2. The surgeon proof
+The record that fails its own re-save (*«every SMS entrance names the condition
+it was raised under … (sms[0].reason)»*) took a flights push: **`created`,
+`fdms_entries = 1`**, its SMS row exactly as unsaveable as before, every
+untouched section byte-identical in storage.
+
+#### 4z·6·3. Create · replay · move · target slot · isolation
+
+| act | verdict | proof |
+|---|---|---|
+| first push | `created` | row stored with `entered_by: 'fdms'`, 1 row |
+| identical replay | `unchanged` | still 1 row, no exception |
+| date correction with `prev` | `moved` | still **1** row, date moved |
+| move onto a **student-typed** row | `exists_student` | the row **returned in full**, nothing written |
+| checkride sortie in a flights push | `refused` (the validator's own sentence) | its two siblings still landed |
+| wrong-track sortie | `refused` | ditto |
+| `ng: true` · `entered_by` sent · section `fpc` · incomplete row | `refused` ×4, each by name | the good sibling landed |
+
+#### 4z·6·4. Remove · replay · resurrect · clearance
+`remove` → **`removed`**, row gone, 1 tombstone. Replay → **`unchanged`**, still
+1 tombstone, **no exception, no duplicate**. An automatic re-push of the undone
+rid → **`tombstoned`**. The deliberate `clear_tombstone` re-push → `created`,
+0 live tombstones, 1 cleared.
+**And the gate outlives the person**: lay it, `admin_delete_person`, and the
+tombstone **survives with `student_id` nulled**; re-create the student on the
+**same** `external_oid` and the auto re-push still answers **`tombstoned`** —
+delete-and-recreate resurrection is impossible.
+
+#### 4z·6·5. The student's save, six cases on their own rows
+(a) the ordinary save — every fdms row carried back **without** `entered_by`
+(which is what the form sends) plus a new row of his own → **accepted**, all
+stamps survive, his row unstamped. (b) correcting a pushed row's **mission** →
+**accepted**, the stamp is stripped, the row is his. (c) dropping one →
+**refused**, naming `C4331 of 02/09/2026`. (d) changing the **date** →
+**refused**, same sentence. (e) omitting the **whole section** → **refused**.
+(f) a new NFS row beside the fdms flights → **accepted** — an fdms row locks
+nothing else. Then the admin edits one: it becomes **`admin`**, the record stamp
+becomes `admin`, `fdms_entries` drops by one, and the next push answers
+**`missing`**.
+Counts throughout: `record_stamp = null` while only fdms rows exist,
+`co_entries = 0`, `fdms_entries` correct, `entries_total` correct.
+
+#### 4z·6·6. Discipline
+- **Schema applied TWICE** with `ON_ERROR_STOP=1`, **exit 0** both times; **and
+  from scratch into a virgin database**, exit 0 — three tables in `wa`, RLS on,
+  `relacl = {postgres=arwdDxtm/postgres}`, the singleton credential row seeded
+  never-minted, `wa.migrations` carrying `p45-bridge-lane`. The scratch database
+  was dropped (0 remaining).
+- **All audit blocks fire**: r18, **r20 «search_path pinned on all 126 wa
+  functions»** (the round's **ten** new `wa` functions counted automatically —
+  `auth_bridge` from the fragment plus the nine this round wrote), r22 ×2,
+  and the new **r24** line naming the two vocabularies it just compared.
+- **The r24 tripwire FIRES on six doctored catalogs**: a `grant … to anon`; RLS
+  off; a policy created; `wa.log_bands()` widened with the CHECK left behind
+  (*«chk(flights/fs) vs log_bands(flights/fs/sim2)»*); a handle guard dropped;
+  the armed check dropped. All six rolled back.
+- **The table guards refuse bad data**: `date = '12/08/2026'`, `seq = -7`,
+  `section = 'sim9'`, a second credential row, and `active = true` with a null
+  digest — five refusals by constraint name.
+- **`validate_record` ≡ the loop of `validate_section`** on every stored record,
+  outcome for outcome (including the record that refuses itself).
+- **Anon REST**: `public.bridge_*` → 404 (they are not in `public`);
+  `Accept-Profile: wa` → **406 «Invalid schema: wa»** for all three tables. The
+  five new RPCs answer through PostgREST with their named parameters.
+- **The bridge credential at every other door**: **21 refusals**, all with the
+  single sentence `WA: invalid or revoked token`; `whoami` → `{"role": null}`;
+  `keepalive` → `ok`. The **admin token pasted as the bridge credential** is
+  refused by the bridge's own one sentence, so an FDMS config can never silently
+  hold the crown jewel. Revoked, wrong, short and NULL tokens all get that same
+  one sentence.
+- **The logbook lane is live**: a pushed row naming an instructor by OID appears
+  in `wa.instructor_logbook` as `src: 'fdms'`, `match: 'oid'`, `counts.fdms = 1`
+  — with **no change to that function**.
+- **Client**: `node --check` clean on all **seven** files; **zero console
+  messages of any level** across the four admin tabs, the student form and the
+  instructor logbook; 3 `.fdmstag` chips and 3 `.frow.is-fdms` rows rendered on
+  the student's form, 3 on the admin's analysis; the four inert controls
+  measured per row (`date`, `@sortie`, `~sortie`, `[rm]`/`[clear]` disabled;
+  instructor, duration, grade, NG, mission and ↻ live); the mint dialog renders
+  the token once and says so.
+- **Contrast**: `.fdmstag` on `--panel` across all **eight** palettes —
+  **worst 5.60 : 1** (slate), identical to the shipped `.cotag` it borrows its
+  colour trio from, everything else 5.7–9.4.
+- **Busters, touched-only** → `styles.css?v=20260828c`, `app.js?v=20260828f`,
+  `student.js?v=20260828e`, `instructor.js?v=20260828e`,
+  `admin.js?v=20260828f`. `config.js`, `items-catalog.js`,
+  `currency-catalog.js` unbumped (byte-identical).
+- **Privacy**: 82 distinct roster tokens (surnames · given names · call signs)
+  grepped word-boundary over every tracked file — **one hit, diagnosed as a
+  false positive**: a surname that collides with an ordinary English word used
+  in lower case in two comment blocks. **Zero** roster tokens appear anywhere in
+  the round-24 diff.
+- **Hygiene, byte-exact.** The scratch credential deleted and
+  `wa.bridge_access` returned to its seeded never-minted state (1 row, no
+  digest, inactive, no dates); tombstones and audit emptied and the audit
+  sequence reset. The roster student used as the push target was restored to
+  **exactly** its pre-round tuple — `data = {}`, `entered_by = null`,
+  `last_update`, `created_at` **and** `updated_at` to the microsecond, recovered
+  from the dead heap tuple with `pageinspect` (which was then dropped again) and
+  written back with the `updated_at` trigger briefly disabled and re-enabled.
+  **All six table fingerprints are byte-identical to the pre-round capture**:
+  `people 9038cb66…`, `student_records 9811753…`, `instructor_records
+  34939e72…`, `proposals 581f5eef…`, `wa.migrations a6fec2e6…`, `wa.settings
+  8cb95b1a…`.
+
+### 4z·7. DELIBERATELY OUT — NAMED, WITH THE RULE BESIDE EACH
+
+- **Deletion of student-authored rows** — the bridge removes only its own rows,
+  tombstoned, and only where the stored stamp at `prev` is still `'fdms'`.
+- **Ground push** (`lessons` / `exams`) — the class-scope asymmetry fabricates
+  attendance after a class move; report-only, as Phase 3 ruled.
+- **`proposals`, people CRUD, settings, tokens** — not in `bridge_pull`, not
+  callable, not readable.
+- **`evaluations` / `solo_flights` / the event sections** — their own doctrines,
+  both directions, unchanged.
+- **`ng` from the lane** — never `true`; refused by name.
+- **`duration`** — carried in neither direction until slice 6 (ruling #8).
+- **Background polling, the CF Worker, the weekly backup Action** — the first is
+  refused, the other two are Phase 5 and belong to the FDMS round and to the
+  private `fdms-data` repo.
+- **The FDMS half in full** — the ledger, the planner, the derived queue, the
+  wire client, the Bridge tab, the numbered dialog, `bridgeLog`'s two new acts
+  and the header chip. **P45-FDMS.**
+
+### 4z·8. §4φ GATE — RESTATED, AND THE STACK GROWS BY ONE
+
+This round **changes `db/schema.sql`**, so the Supabase-MCP deployment gate is
+mandatory before anything is pushed. Term 2 stays inviolable: **never from
+subagents/rounds** — this round worked only in the local laboratory. Rounds 20
+through 23b are already on `origin/main` and already deployed, so the stack is
+**one commit**: the repo is **committed and NOT pushed**, the branch stands
+**one ahead** of `origin/main`, and **one §4φ gate covers it**.
+
+Pending, in order, **from the main session only and with the user's explicit
+word per execution**:
+
+1. **Deploy** `db/schema.sql` through the Supabase MCP — **without** the final
+   echo statement that prints the admin token, and with **no** command ever
+   returning a `token` column (checks by counts/booleans). The rule now covers
+   `token_sha256` by name: it is a digest, it is nobody's business, and
+   `wa.bridge_status_json` is the only thing that ever describes the credential.
+2. **`get_advisors`** immediately afterwards (term 4).
+
+**THE EXPECTED IS A PREDICTION, NOT A RESULT** (§4v·7·1, §4w·4·2):
+`function_search_path_mutable` stays at **0** — the nine new `wa` functions all
+carry the pin and the r20 block counts them (126 total, all pinned);
+`rls_enabled_no_policy` moves **6 → 9** (the three new `wa` tables), still
+**ACCEPTED BY DESIGN** and by the stronger argument the round adds — they are in
+schema `wa`, which the Data API does not expose at all, so RLS is the second
+lock on a door that has no handle; `anon/authenticated_security_definer_function_executable`
+moves **42 → 47** (the five new public RPCs), **ACCEPTED BY DESIGN** for the
+reason the other 42 are: the architecture is RPC-only with the credential as an
+argument, and each function authenticates itself.
+**AND ONE THING TO WATCH:** the file is now 6 986 lines. The batch splitter that
+strips the final token-echo statement must still be seen to cover it — the
+statement is, and must remain, the **last** statement of the file.
+
+### 4z·9. THE ONE THING THIS ROUND DELIBERATELY DID NOT DO
+
+**Nothing on the WA side reports the bridge's history to a human yet.**
+`wa.bridge_audit` and `wa.bridge_tombstones` travel in `bridge_pull` **and** in
+`admin_export`, so both sides can render «what Wings Ahead remembers happening»
+beside «what the FDMS ledger claims» — and no Wings Ahead **screen** draws
+either. That is deliberate and it is the right cut: the reader those rows exist
+for is the developer's cross-check report on the FDMS side, which is P45-FDMS's
+whole subject, and a WA-side audit table drawn before the lane has a history
+would be an empty page pretending to be a feature. The data contract is
+delivered and named here so the next round can be judged against it.
+
+
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /
@@ -8735,3 +9218,50 @@ subagents/γύρους**. Το repo είναι τώρα **δύο commits μπρ�
 δημιούργησε, δεν διέγραψε και δεν μετονόμασε καμία συνάρτηση — οι τρεις έλεγχοι
 είναι `perform wa.chk(...)` **μέσα** στην `wa.validate_instructor_record`, που
 ήδη έφερε τη ρήτρα. Τοπικά: **110 wa functions · 110 pinned · 0 unpinned**.
+
+**ΓΥΡΟΣ 24 (28/08/2026) — P45-WA: Η ΠΥΛΗ ΞΑΝΑΔΙΑΤΥΠΩΝΕΤΑΙ, ΚΑΙ Ο ΟΡΟΣ 3
+ΜΕΓΑΛΩΝΕΙ ΚΑΤΑ ΜΙΑ ΣΤΗΛΗ.** Ο γύρος 24 άγγιξε `db/schema.sql` (τρεις πίνακες
+`wa.bridge_*`, δέκα νέες `wa` συναρτήσεις, πέντε νέα public RPC, η ρήτρα `fdms`
+στην `wa.carry_stamps`, η εξαγωγή `wa.validate_section`, ο κοινός
+`wa.export_body`, το r24 audit block και η γραμμή `p45-bridge-lane` στο
+`wa.migrations`), πέντε αρχεία του client και το spec. **Δεν άγγιξε — και δεν
+επιτρέπεται να αγγίξει — το Supabase MCP**: ο **όρος 2 μένει απαράβατος, ποτέ
+από subagents/γύρους**. Οι γύροι 20–23b είναι ήδη στο `origin/main` και ήδη
+deployed, άρα η στοίβα είναι **ένα commit**: **committed και ΟΧΙ pushed**, ένα
+μπροστά από το `origin/main`, και **μία πύλη §4φ το καλύπτει**.
+
+**Ο ΟΡΟΣ 3, ΕΠΕΚΤΕΤΑΜΕΝΟΣ ΜΕ ΤΟ ΟΝΟΜΑ ΤΗΣ ΝΕΑΣ ΣΤΗΛΗΣ.** «Καμία εντολή δεν
+επιστρέφει ποτέ στήλη token» ισχύει πλέον **ονομαστικά και για την
+`wa.bridge_access.token_sha256`**. Δεν είναι token — είναι digest — αλλά δεν
+είναι και υπόθεση κανενός: η μόνη περιγραφή του διαπιστευτηρίου που επιστρέφεται
+ποτέ είναι η `wa.bridge_status_json()` (booleans και ημερομηνίες). Το plaintext
+δεν αποθηκεύεται καθόλου, οπότε η βάση **δεν μπορεί** να το επιστρέψει ακόμη κι
+αν της ζητηθεί: εγγύηση ισχυρότερη από τον κανόνα που υπηρετεί. Και το
+διαπιστευτήριο **δεν κόβεται ποτέ από deploy** — ο seed του γύρου γράφει τη
+μοναδική γραμμή στην κατάσταση «never minted» και τίποτε άλλο.
+
+Εκκρεμούν, με τη σειρά, **ΜΟΝΟ από την κύρια συνεδρία και με ρητή εντολή του
+χρήστη ανά εκτέλεση**:
+
+1. **Deploy** του `db/schema.sql` (όπως στέκει μετά τον 24) μέσω Supabase MCP —
+   **χωρίς** την τελική εντολή-ηχώ που τυπώνει το admin token (είναι, και πρέπει
+   να παραμείνει, η **τελευταία** εντολή του αρχείου· το αρχείο είναι τώρα 6 986
+   γραμμές, και ο batch splitter πρέπει να φαίνεται ότι εξακολουθεί να την
+   καλύπτει), και **καμία** εντολή να μην επιστρέφει ποτέ στήλη `token` ή
+   `token_sha256`.
+2. **`get_advisors`** αμέσως μετά (όρος 4).
+
+**ΤΟ ΑΝΑΜΕΝΟΜΕΝΟ ΕΙΝΑΙ ΠΡΟΒΛΕΨΗ, ΟΧΙ ΑΠΟΤΕΛΕΣΜΑ** (§4v·7·1, §4w·4·2, §4z·8):
+`function_search_path_mutable` **μένει 0** — και οι **126** `wa` συναρτήσεις
+φέρουν τη ρήτρα και το r20 block τις μετράει μόνο του·
+`rls_enabled_no_policy` **6 → 9** (οι τρεις νέοι πίνακες `wa.bridge_*`),
+**ΑΠΟΔΕΚΤΟ BY DESIGN** και με ισχυρότερο επιχείρημα από τους έξι προηγούμενους:
+ζουν στο σχήμα `wa`, το οποίο το Data API **δεν εκθέτει καθόλου** (`Accept-Profile:
+wa` → 406), άρα το RLS είναι η δεύτερη κλειδαριά σε πόρτα χωρίς πόμολο·
+`anon/authenticated_security_definer_function_executable` **42 → 47** (τα πέντε
+νέα public RPC), **ΑΠΟΔΕΚΤΟ BY DESIGN** για τον λόγο που είναι και τα 42: η
+αρχιτεκτονική είναι RPC-only με το διαπιστευτήριο ως όρισμα και κάθε συνάρτηση
+αυθεντικοποιεί μόνη της (`wa.auth` / `wa.auth_role` / `wa.auth_bridge`).
+Τοπικά, μετά από **δύο** εφαρμογές με `ON_ERROR_STOP=1` και μία **από το μηδέν**
+σε παρθένα βάση: **126 wa functions · 126 pinned · 0 unpinned**, και τα τέσσερα
+audit blocks (r18, r20, r22 ×2) **συν το νέο r24** τυπώνουν όλα τη γραμμή τους.

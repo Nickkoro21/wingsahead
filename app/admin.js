@@ -64,12 +64,24 @@ WA.renderAdmin = async function (view, me) {
     if (A.loading) return;
     A.loading = true;
     try {
-      const [d, p] = await Promise.all([
+      /* ROUND 24 — the bridge credential's STATE rides with the dashboard's own
+         loads instead of being a third question the People tab must remember to
+         ask. It is booleans and dates and nothing else: admin_bridge_status
+         CANNOT return the token, because the database never stored it — only
+         its SHA-256 digest, which is not returned either.
+         It is `.catch(() => null)` on purpose: a cloud instance still running a
+         pre-round-24 schema answers 404, and a dashboard that failed to load
+         because a feature it does not have is missing would be a worse bug than
+         the missing card. The card says «unavailable» and everything else
+         works. */
+      const [d, p, b] = await Promise.all([
         rpc("admin_get_data", { p_token: WA.token }),
         rpc("admin_list_people", { p_token: WA.token }),
+        rpc("admin_bridge_status", { p_token: WA.token }).catch(() => null),
       ]);
       A.data = d;
       A.people = p;
+      A.bridge = b;
       for (const s of A.data.students) {
         /* the server migrates on read; repeating it here keeps the dashboard
            correct against a cloud instance still running the v1 schema */
@@ -2482,7 +2494,52 @@ WA.renderAdmin = async function (view, me) {
       <div class="card"><h3>Admin</h3>
         <div class="tblwrap"><table class="tbl">
           <thead><tr><th>Name</th><th>Details</th><th>Status</th><th>Token</th><th>Actions</th></tr></thead>
-          <tbody>${peopleRows(adm, "admin")}</tbody></table></div></div>`;
+          <tbody>${peopleRows(adm, "admin")}</tbody></table></div></div>
+      ${htmlBridgeCard()}`;
+  }
+
+  /* ════════ THE BRIDGE CARD (round 24 / P45-WA) ════════
+     ONE credential for the FDMS bridge, and it is NOT A PERSON: it has no row
+     in `people`, appears in no roster, no export and no seniority sort, and
+     `wa.auth` cannot match it. It opens exactly two doors — bridge_pull (an
+     export-equivalent READ) and bridge_push (rows into the two flight logs,
+     stamped 'fdms', every one of them audited) — and structurally nothing
+     else: not one admin RPC, not one owner RPC, not one login token.
+     THE PLAINTEXT IS SHOWN ONCE. The database stores only a SHA-256 digest, so
+     it cannot echo the token later even if somebody asks it to; this card
+     therefore says so at mint time and shows booleans and dates thereafter.
+     ROTATION IS MINTING: a second Mint overwrites the digest, and every holder
+     of the old token — a browser, another device, the weekly backup job — is
+     out at its next call. Revoke is the same switch, without a successor. */
+  function htmlBridgeCard() {
+    const b = A.bridge;
+    const line = !b
+      ? `<p class="hint">The bridge lane is not available on this instance — its schema has not been deployed here yet. Nothing else on this page is affected.</p>`
+      : !b.exists
+      ? `<p class="hint"><b>No bridge credential.</b> Mint one and paste it into the FDMS Scheduler's Bridge settings; it is the only thing the two systems need to know about each other.</p>`
+      : b.active
+      ? `<p class="hint"><span class="badge badge-good">active</span>
+           since ${esc(fmtDT(b.minted_at))} &middot; ${b.last_used_at
+             ? "last used " + esc(fmtDT(b.last_used_at))
+             : "<b>never used yet</b> — the FDMS side has not called in"}</p>`
+      : `<p class="hint"><span class="badge badge-warn">revoked</span>
+           ${esc(fmtDT(b.revoked_at))} — every FDMS device holding it is out. Mint a new one to open the lane again.</p>`;
+    return `
+      <div class="card"><h3>Bridge <span class="k" title="${esc(
+        "The FDMS scheduler's own credential. It is not a person: it holds no link, appears on no roster and can call nothing but the two bridge RPCs — the export-equivalent read, and the flight rows it pushes into the logs (stamped FDMS, and audited).")}">— the FDMS lane</span></h3>
+        ${line}
+        ${b ? `<div class="toolrow">
+          <button type="button" class="btn btn-sm btn-add" data-brg="mint" title="${esc(
+            b.exists
+              ? "Mint a NEW credential. The old one stops working immediately — on every device that holds it, including the weekly backup job. The new token is shown once, here."
+              : "Mint the bridge credential. It is shown once, here, and stored only as a digest — nothing can print it again.")}"
+            >${b.exists ? "Rotate — mint a new one" : "Mint the credential"}</button>
+          ${b.active ? `<button type="button" class="btn btn-sm" data-brg="revoke" title="${esc(
+            "Close the lane. The FDMS side stops reading and stops pushing at its next call; nothing already pushed is removed, and every audit row and tombstone stays.")}"
+            >Revoke</button>` : ""}
+          <span class="spacer"></span>
+          <span class="hint">Rows the bridge has written carry the ${esc(WA.FDMS_TAG)} chip wherever a row's source is shown, and they never count as the admin's.</span>
+        </div>` : ""}</div>`;
   }
 
   /* person editor modal */
@@ -2978,6 +3035,47 @@ WA.renderAdmin = async function (view, me) {
       return;
     }
 
+    /* ── THE BRIDGE CREDENTIAL (round 24) ────────────────────────────────
+       Two acts, both confirmed in words that say what breaks. The token comes
+       back from admin_bridge_mint ONCE and is put on screen and in the
+       clipboard in the same breath; it is never stored in A, never re-rendered
+       and never asked for again, because the database cannot answer.
+       THE ADMIN TOKEN IS NOT INVOLVED beyond authenticating the call: this is
+       a separate credential precisely so the FDMS side never holds the one
+       that can read every login link in the squadron. */
+    const brg = t.closest("[data-brg]");
+    if (brg) {
+      const what = brg.dataset.brg;
+      const b = A.bridge || {};
+      if (what === "mint" && b.exists &&
+          !window.confirm("Mint a NEW bridge credential?\n\nThe current one stops working IMMEDIATELY — on every device that holds it, and on the weekly backup job if it has been set up. You will have to paste the new token into the FDMS Scheduler once.")) return;
+      if (what === "revoke" &&
+          !window.confirm("Revoke the bridge credential?\n\nFDMS stops reading and stops pushing at its next call. Nothing already pushed is removed, and every tombstone and audit row is kept.")) return;
+      brg.disabled = true;
+      try {
+        if (what === "mint") {
+          const r = await rpc("admin_bridge_mint", { p_token: WA.token });
+          const ok = await WA.copyText(r.token);
+          $("adm-modal").innerHTML = `
+            <h3>The bridge credential</h3>
+            <p class="hint">This is the <b>only time</b> it is shown. Wings Ahead stores a one-way digest of it and
+               nothing else, so no page and no command can print it again — if it is lost, mint another one here.</p>
+            <p><code class="tokbox">${esc(r.token)}</code></p>
+            <p class="hint">Paste it into the FDMS Scheduler → <b>Bridge</b> → <b>&#9881;</b>, beside the project URL and the anon key.
+               ${ok ? "It is already in your clipboard." : "Copy it from the box above — the clipboard was not available."}
+               Keep it out of chats and out of any file that travels.</p>
+            <div class="toolrow"><span class="spacer"></span>
+              <button type="button" class="btn btn-primary" data-act="modal-cancel">Done — I have it</button></div>`;
+          $("adm-veil").classList.remove("hidden");
+        } else {
+          await rpc("admin_bridge_revoke", { p_token: WA.token });
+          toast("Bridge credential revoked");
+        }
+        await load(false); A.tab = "people"; render();
+      } catch (e) { toast("Failed: " + e.message, true); }
+      brg.disabled = false;
+      return;
+    }
     const copy = t.closest("[data-copy]");
     if (copy) {
       const ok = await WA.copyText(linkFor(copy.dataset.copy));

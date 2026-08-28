@@ -721,6 +721,42 @@ input:disabled, select:disabled { background: var(--panel); }
 }
 .rrow.is-colock .rm, .rrow.is-colock .mschip .x,
 .rrow.is-colock .chip:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── PUSHED BY THE SQUADRON'S SCHEDULER (round 24) ─────────────────────────
+   The THIRD source of a row, after the owner's own and the admin's. It is the
+   same accent family as .cotag, because it states the same KIND of fact — the
+   SOURCE of a row — and the accent is the tint this application reserves for
+   "noted, not wrong" (warn and bad are alerts and neither applies). What tells
+   the two apart is the word and the SILHOUETTE: the admin's chip is a square
+   badge, the scheduler's is a pill. The colour values are the ones .badge-acc
+   already carries on all eight palettes, so nothing new needed proving.
+   AN FDMS ROW IS NOT LOCKED, and it must not look locked: its border mark is
+   the accent at 55 % rather than the admin's solid 3-4 px, because most of the
+   row is still the student's to correct. Only the four inert controls — the
+   sortie, the date and the two ways to delete the row — get the not-allowed
+   treatment, in the same words as the admin lock's. */
+.fdmstag {
+  display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: 0.6px;
+  color: var(--accent); background: var(--accent-soft);
+  border: 1px solid rgba(var(--accent-rgb), 0.55); border-radius: 999px;
+  padding: 0 6px; margin-left: 5px; vertical-align: baseline; cursor: help; white-space: nowrap;
+}
+.ftbl tr.is-fdms td:first-child { box-shadow: inset 3px 0 0 rgba(var(--accent-rgb), 0.55); }
+.ftbl tr.is-fdms input:disabled, .ftbl tr.is-fdms select:disabled {
+  background: var(--panel); color: var(--text); opacity: 1; cursor: not-allowed;
+}
+.ftbl tr.is-fdms button:disabled { opacity: 0.4; cursor: not-allowed; }
+/* THE CREDENTIAL, SHOWN ONCE. A monospace block the eye can check character by
+   character and a triple-click can select whole — it is pasted into another
+   application by hand, and a token that wraps mid-word is a token that gets
+   mis-copied. It appears in exactly one place in this application, the mint
+   dialog, and never comes back. */
+.tokbox {
+  display: block; font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13px; line-height: 1.5; word-break: break-all; user-select: all;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; color: var(--text);
+}
 /* the banner that says loudly WHOSE form this is */
 .cobar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
