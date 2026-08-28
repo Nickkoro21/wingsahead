@@ -9342,6 +9342,266 @@ remain, the **last** of it.
 
 
 
+### 4z·13. P45-WAe — THE READ DOOR AT SCALE: THE 5× MIGRATION, THE 53 000 CALLS, AND THE SENTENCE NOBODY WAS SHOWN
+
+**THE MEASURED PROBLEM, from two independent verifiers of the P45-FDMSb round.**
+`public.bridge_pull(p_token)` returns `wa.export_body(false)` **whole**, and after
+the first real drain it stopped returning at all: 4 records / 47 KB → ~250 ms,
+8 / 217 KB → ~1 700 ms, **34 records / 1 873 flight rows / 967 KB → 3 008–3 056 ms
+→ HTTP 500, SQLSTATE 57014** on the `anon` role's `statement_timeout = 3s`
+(9 975 ms as `postgres` with no limit). The scaling was **worse than linear**, so
+the answer was not «it is big» but «something in the path is pathological». And
+the consequence was larger than a missing cross-check: the FDMS client's roster
+mitigation and the whole `missing`-reconciliation live on `ui.parsed`, which can
+only be refreshed from that door.
+
+**THE ROUND'S DATASET, so every number below has a subject.** A scratch set built
+locally and removed in hygiene: **44 student records** (40 fake cadets + the 4
+real ones) carrying **2 200 flight rows + 480 F/S rows + 4 109 entries in all**,
+**753 273 bytes stored**, answering as a **1 550 801-byte** payload — one and a
+half times the dataset that killed the door in production, and every scratch row
+push-legal so the write door could be measured on the same records.
+
+#### 4z·13·1. PROFILE FIRST — the three costs, named with numbers
+
+**1 · THE MIGRATION RAN FIVE TIMES PER RECORD, AND NOTHING COULD SEE IT.**
+`wa.export_body` hung the read migration off a `cross join lateral (select
+wa.migrate_record(r.data) as rec) m` and then named `m.rec` **five times** (plus
+twice more inside `wa.record_stamp`, once the planner inlines it). **A LATERAL
+sub-select with no FROM is not a variable**: PostgreSQL flattens it
+(`pull_up_simple_subquery`) and substitutes the expression at every reference. So
+the most expensive function in the schema ran once per mention — and every run
+returns the same bytes, so no output, no diff and no test could ever show it.
+Timed block by block on this record set, that one block was **15.7 s of the
+16.7 s** the whole export cost; with the lateral materialised, **3.38 s** for the
+identical payload — the rest of the round took it from there.
+
+**2 · A PIN ON EVERY HELPER MEANS A PER-FIELD CALL IS NEVER FREE.** This is the
+fact the round turns on, and it is worth writing down once, plainly: PostgreSQL's
+SQL-function inliner (`inline_function`) **refuses any function that carries a
+`SET` clause**, and «`set search_path = public, wa, pg_temp`» is on all 128 `wa`
+helpers by house rule — the r20 audit *fails the deployment* without it. The pin
+is right and it stays; what follows from it is that **a helper called once per
+field of a 4 109-entry record set is 53 000 full executor invocations**, and at
+that scale it is seconds, not microseconds. Two hot loops were paying it:
+
+- `wa.norm_entry` called `wa.norm_field` **once per field** — **2 195 ms** per
+  4 109 entries, of which ~1.7 s was the calls themselves.
+- `wa.strip_entry` had `where t.k = any(wa.entry_keys(p_sec))` in the WHERE of a
+  scan over `jsonb_each`, so the section's key registry was rebuilt **once per
+  field** — **731 ms** per 4 109 entries.
+
+Beside them, `wa.migrate_record`'s final pass accumulated with `e := e ||
+jsonb_build_array(…)` — quadratic in a section that is 55 rows on a real record
+and grows for as long as a student flies.
+
+**3 · THE REFUSAL WAS COMPOSED FOR EVERY ROW THAT DID NOT NEED IT.** `wa.chk(ok,
+where, MSG)` takes its sentence as an **argument**, so an inline `format(…)` is
+built whether the check passes or fails. In `wa.validate_section` that was:
+
+- the generic **key whitelist**, a `for f in select jsonb_object_keys(e)` loop
+  that built `format('… accepted fields are %s', array_to_string(wa.entry_keys(k),
+  ', '))` **for every field of every row** — **145 ms of the 216 ms** a 55-row
+  `flights` section cost to validate. Isolated: the loop as shipped **3 625 ms**
+  per 25 passes over those 55 rows, of which **1 946 ms** was the construction,
+  715 times per pass, of a message nobody was ever shown; the same loop with the
+  registry hoisted and the sentence built only for a real offender, **12 ms**;
+- the **band ⇄ code** check, whose sentence calls `wa.sortie_band` twice on top of
+  the two calls in its own test — four executor calls into a 130-code catalogue
+  per row, **~30 ms** more per pass;
+- the kind / mission / grade / duration sentences, on the same pattern.
+
+`public.bridge_push` **validates the whole touched section once per operation**,
+so all of this was multiplied by 25 on every chunk — which is why the WRITE door
+turned out to be dead as well (§4z·13·5).
+
+#### 4z·13·2. THE CURES — five, all semantics-identical, none of them a fallback
+
+1. **`wa.export_body` reads each migration once**, from a `with … as
+   materialized` CTE, for students and for instructors (whose four spellings of
+   `wa.migrate_instructor_record` were four migrations by hand rather than by the
+   planner). `as materialized` is a promise, not a hint.
+2. **`wa.norm_entry` writes the per-field dispatch out** instead of calling
+   `wa.norm_field` 53 000 times. What is duplicated is exactly two CASEs — the
+   type dispatch and the class dispatch — and **neither a registry nor a rule is
+   copied**: `wa.code_fields` / `wa.free_fields` / `wa.norm_code` / `wa.norm_free`
+   / `wa.norm_line` are still called, and `wa.norm_field` still owns the `items[]`
+   arm and is still called for it.
+3. **`wa.strip_entry` reads `wa.entry_keys` once per entry** — same name, same
+   signature, same rule; `plpgsql`, because that is what has a local to read it
+   into.
+4. **`wa.migrate_record`'s final pass is one statement per section** —
+   `jsonb_agg(… order by ord)` instead of a `||` per row. The `order by` is not
+   decoration: a section's rows are a LIST whose order is a fact.
+5. **Six refusals ask before they compose** — the key whitelist (which now asks
+   for the FIRST key the section does not name, exactly the one the loop would
+   have stopped at, with the registry hoisted out of the row loop), band ⇄ code,
+   track ⇄ code, kind, the two mission rules, and the trailing-zero sentences of
+   `wa.chk_grade` / `wa.chk_duration`. `wa.chk` raises precisely when its test
+   fails, so building the sentence only then is behaviour-identical by
+   construction — and it is proven message for message below.
+
+**NOTHING ELSE CHANGED.** No function added, none removed (**128** `wa` helpers,
+the r20 block still says so out loud), no table, no column, no grant, no RPC
+(**25**), no signature, no wire shape, no verdict word.
+
+#### 4z·13·3. THE PROOF THAT THE OUTPUT DID NOT MOVE
+
+The stored bytes were fixed, the pre-round schema (`e98a9bd`) applied, every
+artefact captured; then this round's schema applied **with no write in between**,
+and every artefact captured again. **Eight comparisons, all byte-identical:**
+
+| artefact | bytes | |
+|---|---:|---|
+| `wa.export_body(false)` minus `exported_at` — the bridge door | 1 550 727 | **identical** |
+| `wa.export_body(true)` minus `exported_at` — the admin door | 1 557 039 | **identical** |
+| `wa.migrate_record` · `wa.norm_record` · `wa.strip_entry` over **all 44 records** | 2 263 289 | **identical** |
+| `wa.migrate_instructor_record` over the instructor records | 544 | **identical** |
+| `wa.norm_entry` / `wa.norm_field` / `wa.strip_entry` over a 14-key × 15-value grid | 33 770 | **identical** |
+| the edge grid (non-object, NULL, unknown section, non-array section, mixed array) | 122 | **identical** |
+| **45 `wa.validate_section` + 7 `wa.validate_record` refusals**, SQLSTATE and SQLERRM verbatim | 9 857 | **identical** |
+| **18 `bridge_push` calls** over REST — verdicts, notes, the written record, the tombstones and the audit rows | 7 951 | **identical** |
+
+The validator probe is the one that carries the weight for cure 5: it covers the
+key whitelist in **every one of the thirteen sections**, the multi-offender
+ordering (`aaa`/`zzz` → `aaa`; `b`/`aa` → `b`, because a jsonb object's keys are
+stored by length then bytewise), the flights band / track / checkride / kind /
+mission refusals, both retired keys, the cross-row fences and the two renamed
+sections.
+
+#### 4z·13·4. THE MEASUREMENTS — same stack, same dataset, before and after
+
+| | **BEFORE** (`e98a9bd`) | **AFTER** |
+|---|---|---|
+| `wa.export_body(false)`, psql, unlimited | 15 716 · 15 900 · 15 936 ms | **786 · 826 · 853 ms** |
+| `wa.export_body(true)` | 15 705 ms | **817 ms** |
+| **`POST rpc/bridge_pull` as `anon` (3 s wall)** | **HTTP 500 / 57014 at 3.004 · 3.014 · 3.035 s** | **HTTP 200 · 1 550 801 bytes · 0.816 · 0.828 · 0.893 s** |
+| `wa.migrate_record` × 44 | 3 038–3 085 ms | **634–686 ms** |
+| `wa.norm_record` × 44 | 2 220–2 257 ms | **412–421 ms** |
+| `wa.norm_entry` × 4 109 entries | 2 146–2 195 ms | **363–401 ms** |
+| `wa.strip_entry` × 4 109 entries | 714–756 ms | **99–114 ms** |
+| the final pass of `wa.migrate_record` × 44 | 863–994 ms | **147–155 ms** |
+| `wa.validate_section('flights', 55 rows)` | 220.3 ms | **26.8–27.7 ms** |
+| `wa.validate_record` (whole record) | 305.5 ms | **40.6–44.5 ms** |
+| **`POST rpc/bridge_push`, 25 ops, 55-row section** | **HTTP 500 / 57014 at 3.004 s, four times of four** | **HTTP 200 · 0.91–0.99 s** |
+
+**AND THE SCALING IS LINEAR AGAIN, which was the actual complaint.** Doubled to
+**84 records / 4 974 flight rows / a 3 356 316-byte answer**, the export takes
+**1 763–1 814 ms** — 2.16× the records for 2.15× the time. The read door has
+better than 3× headroom at the round's worst case and better than 1.6× at twice
+it, on a wall the client also knows how to survive.
+
+#### 4z·13·5. THE WRITE DOOR WAS DEAD TOO, AND IS NOT ANY MORE — with its limit stated
+
+The brief called `bridge_push`'s cost growth «a related smell». It was the same
+defect, and it was already fatal: **a 25-op push onto a 55-flight record answered
+HTTP 500 / 57014 at 3.004 s**, four times out of four. Unlimited, the shape was
+~230–340 ms **per operation**, and `wa.validate_section` — run once per op over
+the whole section — was **216 ms of it**. After the round the same call lands in
+**0.91–0.99 s**, and the whole ladder is measurable rather than theoretical:
+
+| `flights` section | 55 | 80 | 105 | 130 | 155 | 180 | 205 | 230 |
+|---|---|---|---|---|---|---|---|---|
+| one 25-op push | 0.91 s | 1.23 s | 1.60 s | 1.94 s | 2.19 s | 2.47 s | **2.81 s** | **500 / 57014** |
+
+**THE RESIDUAL IS NAMED RATHER THAN HIDDEN.** The push is O(ops × section rows)
+**by design** — «a section that would not validate with the op applied is a
+verdict, not an exception» is what stops one bad op voiding its nine siblings,
+and it costs a full validation per op. The wall is therefore not removed, it is
+**moved from ~30 rows to ~230 rows**: a complete T-6A `flights` section is about
+85 rows plus its re-flies, so the crossing now sits at roughly **2.5 complete
+records in one section**, and past it the FDMS client's chunk halving does what
+it was built for — measured here, **a 12-op call on that same 230-row section:
+HTTP 200 in 1.51 s**. Closing it properly means validating the touched row plus
+the cross-row rules instead of the whole section, which changes WHICH refusal a
+caller is shown when a section was already invalid before the op. That is a
+semantic change, and it is **out of scope for a round whose contract was
+«semantics-identical»** — recorded here as the next honest errand, not smuggled
+in as an optimisation.
+
+#### 4z·13·6. TWO NEW AUDIT BLOCKS, BECAUSE NEITHER PROPERTY IS VISIBLE
+
+Both fail the deployment, both read the **catalog** rather than this file, and
+both were **proven to fail** by breaking the property on purpose inside a
+rolled-back transaction:
+
+1. **`wa.norm_entry` ≡ `wa.norm_field`**, asserted across every field class ×
+   every jsonb type (14 names × 17 shapes). A dispatch said in two places can
+   disagree, and the disagreement would be silent — an export whose sortie codes
+   stopped being upper-cased still validates and still diffs clean against
+   nothing, and only surfaces as a bridge that cannot match a row it wrote.
+   Broken deliberately (`wa.norm_line` where `wa.norm_code` belongs) → **32
+   disagreements named, deployment dead**.
+2. **`wa.export_body` migrates each record once** — the body, with **both** SQL
+   comment syntaxes stripped (the P45-WAd F2 lesson), must still carry two `as
+   materialized` and name `wa.migrate_record` / `wa.migrate_instructor_record`
+   **exactly once each**. Broken deliberately, twice: the CTE demoted to a plain
+   `with` → **caught**; the migration named a second time inside a materialised
+   CTE → **caught**.
+
+#### 4z·13·7. WHAT WAS CONSIDERED AND REFUSED
+
+- **Altering the `anon` role's `statement_timeout`.** Not this round's to do — a
+  global blast-radius change on every RPC of the instance — and, after the
+  profile, not needed: the door answers in 0.83 s against a 3 s budget.
+- **Pagination of `bridge_pull`.** The named fallback of the brief, to be judged
+  ONLY if honest optimisation could not fit the budget. It did fit, with better
+  than 3× to spare and linear scaling, so a second RPC and a versioned wire
+  change were not bought. Left written down, unbuilt.
+- **Dropping `wa.norm_field` / `wa.norm_str`.** Considered — the house drops a
+  helper that loses its last caller (round 23) — and refused: both keep real
+  callers (`norm_field` owns the `items[]` arm, `norm_str` is called from it),
+  and audit 1 needs the independent second opinion to compare against.
+
+#### 4z·13·8. §4φ GATE — AND THE ONE NUMBER THIS ROUND MAY NOT FILL IN
+
+This round changes `db/schema.sql`, so §4z·8 stands **verbatim and unweakened**
+and **term 2 was obeyed to the letter**: this was a round, it worked only in the
+local laboratory, and it **did not touch — and may not touch — the Supabase MCP,
+`cublgiougtbiyaqputfd` or any `supabase.co` host**.
+
+**WHERE THE REPO STANDS, exactly.** `origin/main` is `e98a9bd`, i.e. rounds 24
+through 24d are pushed; this commit is **committed and NOT pushed** and stands
+**one ahead** of it.
+
+**WHERE THE STACK STANDS — AND WHY A ROUND CANNOT SAY.** §4z·8's stacking rule is
+«already on `origin/main` **and already deployed** does not stack». The first
+half is git and is checkable here; the second half is a fact about the **cloud
+database**, and the only honest way to establish it is `get_advisors` / a read
+against the deployed schema — which is exactly what a round is forbidden to do.
+So the count is left **for the main session to fill in**, with the two branches
+written out so nothing is guessed:
+- if the schema of `e98a9bd` is **already deployed**, the stack is **one commit**
+  — this one — and one §4φ gate covers it;
+- if it is **not**, the stack is **five** (`54b7b4e` · `d327f73` · `6d106b2` ·
+  `e98a9bd` · this one) and one §4φ gate covers all five, because `db/schema.sql`
+  is deployed **whole** and its current state is the union of them.
+Either way the pending steps are the same, **from the main session only and with
+the user's explicit word per execution**: deploy `db/schema.sql` through the
+Supabase MCP **without** the final echo statement, with **no** command ever
+returning a `token` or `token_sha256` column; then `get_advisors`.
+
+**THE ADVISOR PREDICTION IS UNCHANGED.** No function added, none removed
+(**128**); no table, no policy, no RPC — the public surface is still **25**;
+`function_search_path_mutable` **0** (the r20 block re-asserted it on this file,
+including the one helper whose LANGUAGE changed — `wa.strip_entry` is `plpgsql`
+now and carries the same pin), `rls_enabled_no_policy` **9**,
+`anon/authenticated_security_definer_function_executable` **47**. The batch
+splitter that strips the final token-echo statement must still be seen to cover
+the file — that statement is, and must remain, the **last** of it, and the file
+is now **7 944 lines** (it was 7 702 at `e98a9bd`; the growth is comments,
+two audit blocks and five rewritten function bodies, no new statement after the
+echo).
+
+**AND ONE NOTE FOR WHOEVER RUNS THE GATE.** The cloud database has never served a
+`bridge_pull` at production scale. When it does, the numbers above are what to
+compare against — and they were taken on this laptop's local stack, which a
+Frankfurt instance is not. What travels is not the milliseconds; it is the
+**shape**: linear in the payload, ~0.8 s for 1.5 MB here, and a
+`statement_timeout` that is the client's to survive and never the schema's to
+widen.
+
+
 ## 4. Screens
 
 1. **Student form** (via personal link): sectioned, repeatable rows (+ add /

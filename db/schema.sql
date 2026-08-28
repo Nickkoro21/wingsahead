@@ -885,10 +885,46 @@ language sql immutable set search_path = public, wa, pg_temp as $$
 $$;
 
 -- one entry, every field normalised
+--
+-- ══ P45-WAe — THE DISPATCH IS SAID HERE, NOT CALLED ONCE PER FIELD ═════════
+-- THE MEASUREMENT THAT FORCED THIS (44 records / 2 200 flight rows / 4 109
+-- entries, the round's scratch dataset, local stack): this function is reached
+-- ~4 100 times per export and it used to call wa.norm_field once per FIELD —
+-- ~53 000 calls — and every one of those is a FULL EXECUTOR INVOCATION.
+-- WHY IT CANNOT BE INLINED AWAY, which is the fact the whole round turns on:
+-- PostgreSQL's SQL-function inliner (inline_function) refuses ANY function that
+-- carries a `SET` clause, and «set search_path = public, wa, pg_temp» is on
+-- every wa helper by house rule (the round-20 audit at the foot of this file
+-- FAILS THE DEPLOYMENT without it). So in this schema a helper call in a
+-- per-field loop is never free and never will be: 53 000 of them cost 1.7 s of
+-- a 3 s statement budget, measured, and that is 1.7 s no reader ever asked for.
+--   wa.norm_entry, shipped (call per field)   2 195 ms / 4 109 entries
+--   wa.norm_entry, this version                 380 ms   (5.7×)
+--
+-- WHAT IS DUPLICATED, EXACTLY, AND WHAT IS NOT. The CASE below is wa.norm_field's
+-- own CASE with its two cheap arms taken here and its one expensive arm — the
+-- items[] list, which needs a sub-select over an SRF — still DELEGATED to it.
+-- The string arm is wa.norm_str's CASE, likewise: the REGISTRIES (wa.code_fields
+-- / wa.free_fields) and the three RULES (wa.norm_code / wa.norm_free /
+-- wa.norm_line) are called, never copied, so a field that changes class or a
+-- rule that changes shape still changes in exactly one place.
+-- AND THE DUPLICATION IS MACHINE-CHECKED, not remembered: an audit block at the
+-- foot of this file asserts wa.norm_entry(jsonb_build_object(k, v))->k ≡
+-- wa.norm_field(k, v) across every field class × every jsonb type, and FAILS THE
+-- DEPLOYMENT if the two ever disagree. That is the r22 withsp_markers pattern
+-- applied to a pair of expressions instead of a pair of registries — the house
+-- answer to a mirrored rule, and the only one that survives a later round.
 create or replace function wa.norm_entry(e jsonb) returns jsonb
 language sql immutable set search_path = public, wa, pg_temp as $$
   select case when jsonb_typeof(e) <> 'object' then e else
-    coalesce((select jsonb_object_agg(t.k, wa.norm_field(t.k, t.v))
+    coalesce((select jsonb_object_agg(t.k, case
+                when t.v is null                  then 'null'::jsonb
+                when jsonb_typeof(t.v) = 'string' then to_jsonb(
+                       case when t.k = any(wa.code_fields()) then wa.norm_code(t.v #>> '{}')
+                            when t.k = any(wa.free_fields()) then wa.norm_free(t.v #>> '{}')
+                            else                                  wa.norm_line(t.v #>> '{}') end)
+                when jsonb_typeof(t.v) = 'array'  then wa.norm_field(t.k, t.v)
+                else t.v end)
               from jsonb_each(e) t(k, v)), '{}'::jsonb) end
 $$;
 
@@ -960,10 +996,16 @@ begin
   perform wa.chk(jsonb_typeof(v) = 'number', p_where, 'grade must be a number');
   n := (v #>> '{}')::numeric;
   perform wa.chk(n >= 0 and n <= 100, p_where, 'grade out of range 0-100');
-  perform wa.chk(n = trunc(n), p_where,
+  -- P45-WAe — the sentence is composed only when it is going to be raised.
+  -- This helper runs on every graded row of every section (2 200 flight rows
+  -- on the round's scratch record set), and the trailing-zero trim it prints
+  -- was being computed for all of them to say nothing.
+  if n <> trunc(n) then
+    perform wa.chk(false, p_where,
                  format('grades are whole numbers — %s is not accepted (round it, e.g. %s)',
                         trim(trailing '.' from trim(trailing '0' from n::text)),
                         round(n)::text));
+  end if;
 end $$;
 
 -- a row that came from a v1 record and could not be completed by the read-time
@@ -2508,10 +2550,13 @@ begin
                  'a flown sortie lasted longer than nothing — leave the box empty while the time is not known yet');
   perform wa.chk(n <= 24, p_where,
                  'duration is DECIMAL HOURS, not minutes — 1.3 is one hour and eighteen minutes');
-  perform wa.chk(n = round(n, 1), p_where,
+  -- P45-WAe — composed only when raised, for the wa.chk_grade reason exactly.
+  if n <> round(n, 1) then
+    perform wa.chk(false, p_where,
                  format('duration is recorded to one decimal (6-minute steps) — %s is not (round it, e.g. %s)',
                         trim(trailing '.' from trim(trailing '0' from n::text)),
                         trim(trailing '.' from trim(trailing '0' from round(n, 1)::text))));
+  end if;
 end $$;
 
 -- ── PENDING IS GONE (round 8) ─────────────────────────────────────────────
@@ -2682,12 +2727,31 @@ drop function if exists wa.solo_twin(jsonb, int, text);
 drop function if exists wa.solo_row_name(jsonb);
 
 -- one entry, reduced to the keys its section allows (read-time repair)
+--
+-- ══ P45-WAe — THE REGISTRY IS READ ONCE PER ENTRY, NOT ONCE PER FIELD ══════
+-- IDENTICAL OUTPUT, SAME SIGNATURE, SAME RULE — and 6.6× the speed, for one
+-- reason: `where t.k = any(wa.entry_keys(p_sec))` sits in the WHERE of a scan
+-- over jsonb_each, so wa.entry_keys was evaluated ONCE PER FIELD. p_sec is a
+-- Param, not a constant, so nothing folds it; the pin blocks the inliner (see
+-- wa.norm_entry for that whole story); and the function builds a 13-element
+-- text[] from literals on every one of those calls. Measured on the round's
+-- scratch dataset (4 109 entries, ~53 000 fields):
+--   shipped (registry per field)   731 ms / 4 109 entries
+--   this version (registry once)   109 ms
+-- plpgsql rather than SQL because plpgsql is what has a LOCAL to read it into.
+-- The early return is the same `jsonb_typeof(e) <> 'object'` test the SQL CASE
+-- made, and it is written the same way round: a NULL e answers '{}' through the
+-- aggregate below exactly as it did through the CASE's ELSE arm.
 create or replace function wa.strip_entry(e jsonb, p_sec text) returns jsonb
-language sql immutable set search_path = public, wa, pg_temp as $$
-  select case when jsonb_typeof(e) <> 'object' then '{}'::jsonb else
-    coalesce((select jsonb_object_agg(t.k, t.v) from jsonb_each(e) t(k, v)
-              where t.k = any(wa.entry_keys(p_sec))), '{}'::jsonb) end
-$$;
+language plpgsql immutable set search_path = public, wa, pg_temp as $$
+declare ks text[]; o jsonb;
+begin
+  if jsonb_typeof(e) <> 'object' then return '{}'::jsonb; end if;
+  ks := wa.entry_keys(p_sec);
+  select coalesce(jsonb_object_agg(t.k, t.v), '{}'::jsonb) into o
+    from jsonb_each(e) t(k, v) where t.k = any(ks);
+  return o;
+end $$;
 
 -- ── ONE SECTION, VALIDATED ON ITS OWN (round 24 / P45-WA) ─────────────────
 -- The STUDENT RECORD's structural validation, per section: the v2 shape of
@@ -2734,11 +2798,16 @@ declare
   prev_id text;
   done boolean[];
   is_ng boolean;
+  -- P45-WAe — the section's key whitelist, read ONCE for the whole array
+  -- instead of twice per field of every row. See the KEY WHITELIST block at
+  -- the foot of the entry loop for the measurement and the reasoning.
+  ks text[];
 begin
   perform wa.chk(jsonb_typeof(p_arr) = 'array', k, 'must be a list');
   -- ROUND 12: the flat 200 became wa.section_cap — the log tables can hold
   -- the whole syllabus and its re-flies, which no earlier section could.
   perform wa.chk(jsonb_array_length(p_arr) <= wa.section_cap(k), k, 'too many entries');
+  ks := wa.entry_keys(k);
   for i in 0 .. coalesce(jsonb_array_length(p_arr), 0) - 1 loop
     e := p_arr->i;
     w := format('%s[%s]', k, i);
@@ -3071,22 +3140,40 @@ begin
       -- off-catalogue (the syllabus data may lag reality and a record must
       -- never become unstorable); a syllabus-SHAPED code whose letter
       -- contradicts the table it sits in is provably wrong.
-      perform wa.chk(wa.code_track(e->>'sortie') is null or (e->>'track') is null
-                     or wa.code_track(e->>'sortie') = (e->>'track'),
-                     w || '.sortie',
+      --
+      -- ══ P45-WAe — THE TWO CATALOGUE CHECKS ASK BEFORE THEY COMPOSE ═══════
+      -- wa.chk(ok, where, MSG) takes its sentence as an ARGUMENT, so an
+      -- inline format() is built on every row whether the row is wrong or not.
+      -- These two are the expensive pair of this branch: the band sentence
+      -- calls wa.sortie_band FOUR times (twice in the test, twice in the two
+      -- CASE arms of the message) and each of those is a full executor call
+      -- into a 130-code catalogue. Measured on a 55-row `flights` section: the
+      -- band check alone ~30 ms per validation — 30 of the 68 ms that were still
+      -- left once the KEY WHITELIST below had been repaired (it was 216 ms
+      -- before that). And public.bridge_push validates the whole section ONCE
+      -- PER OPERATION, so a 25-op chunk paid all of it 25 times.
+      -- The `if` is the same predicate, negated: wa.chk raises exactly when the
+      -- test fails, so building the sentence only then is behaviour-identical —
+      -- the refusal, its wording and its field path are unchanged, and the
+      -- P45-WAe validator probe proves that message for message.
+      if not (wa.code_track(e->>'sortie') is null or (e->>'track') is null
+              or wa.code_track(e->>'sortie') = (e->>'track')) then
+        perform wa.chk(false, w || '.sortie',
                      format('%s belongs to the %s track but this row is in the %s table — record it in that table instead',
                             upper(e->>'sortie'), wa.code_track(e->>'sortie'), e->>'track'));
+      end if;
       -- BAND ⇄ CODE, the same doctrine one axis over. Nothing derives
       -- flights-from-F/S out of a code, so the generated catalogue is the
       -- only authority — and where it knows the code, it is a fact.
-      perform wa.chk(wa.sortie_band(e->>'sortie') is null
-                     or wa.sortie_band(e->>'sortie') = k,
-                     w || '.sortie',
+      if not (wa.sortie_band(e->>'sortie') is null
+              or wa.sortie_band(e->>'sortie') = k) then
+        perform wa.chk(false, w || '.sortie',
                      format('%s is %s sortie — it belongs in the %s tables, not the %s ones',
                             upper(e->>'sortie'),
                             case when wa.sortie_band(e->>'sortie') = 'fs' then 'a SIMULATOR' else 'an AIRCRAFT' end,
                             case when wa.sortie_band(e->>'sortie') = 'fs' then 'F/S' else 'Flights' end,
                             case when k = 'fs' then 'F/S' else 'Flights' end));
+      end if;
       -- ONE FACT, ONE ROW. The eight checkrides have their own section,
       -- with the syllabus-order rule and the pass-attempt rule on them. A
       -- second row here would be a second grade for one flight, and the two
@@ -3152,10 +3239,13 @@ begin
 
       -- THE KIND — closed list, 'syllabus' by default (see wa.flight_kinds)
       perform wa.chk_text(e->'kind', w || '.kind', false, 20);
-      perform wa.chk((e->>'kind') is null or (e->>'kind') = any(wa.flight_kinds()),
-                     w || '.kind',
+      -- P45-WAe — asked before composed, as above: wa.flight_kinds() is a call
+      -- and array_to_string over its answer is a string built for nobody.
+      if not ((e->>'kind') is null or (e->>'kind') = any(wa.flight_kinds())) then
+        perform wa.chk(false, w || '.kind',
                      format('unknown kind of flight — the list is %s',
                             array_to_string(wa.flight_kinds(), ' / ')));
+      end if;
 
       -- THE INSTRUCTOR IS ON EVERY ROW — the round-6 solo doctrine applied
       -- to every sortie: «a student never launches alone on their own
@@ -3187,11 +3277,16 @@ begin
       -- THE MISSION, AND WHERE IT MAY LIVE (round 12b). Only where the
       -- grade is absent and the row is not NG. Two answers, no third.
       perform wa.chk_text(e->'mission', w || '.mission', false, 20);
-      perform wa.chk((e->>'mission') is null or (e->>'mission') = any(wa.missions()),
-                     w || '.mission',
+      -- P45-WAe — asked before composed. The second of the two is the one that
+      -- matters most: its sentence calls wa.grade_mission on the row's grade,
+      -- so the shipped spelling ran a catalogue lookup on EVERY flight of the
+      -- record to build a sentence that applies to almost none of them.
+      if not ((e->>'mission') is null or (e->>'mission') = any(wa.missions())) then
+        perform wa.chk(false, w || '.mission',
                      format('unknown mission — %s', array_to_string(wa.missions(), ' / ')));
-      perform wa.chk((e->>'mission') is null or jsonb_typeof(e->'grade') <> 'number',
-                     w || '.mission',
+      end if;
+      if not ((e->>'mission') is null or jsonb_typeof(e->'grade') <> 'number') then
+        perform wa.chk(false, w || '.mission',
                      format('this row has a grade, so its mission is READ from it (%s %% is “mission %s”) — a stored mission beside a stored grade is a second source of truth that can contradict the first',
                             -- round-12 verify finding 1, kept: the grade is whole by
                             -- construction (chk_grade above), so it prints UNCHANGED —
@@ -3199,6 +3294,7 @@ begin
                             -- 100 into "1 %" here.
                             (e->>'grade'),
                             wa.grade_mission((e->>'grade')::numeric)));
+      end if;
       perform wa.chk((e->>'mission') is null or not is_ng,
                      w || '.mission',
                      'a non-graded (NG) flight is not scorable at all — it carries neither a grade nor a mission');
@@ -3365,12 +3461,33 @@ begin
 
     -- KEY WHITELIST — last, so the specific messages above win when they
     -- apply. Everything else: named, and refused.
+    --
+    -- ══ P45-WAe — THE REFUSAL IS BUILT WHEN THERE IS ONE, NOT ON EVERY FIELD
+    -- THIS BLOCK WAS 145 ms OF THE 216 ms A 55-ROW `flights` SECTION COST TO
+    -- VALIDATE — two thirds of it — and public.bridge_push validates the whole
+    -- section once PER OPERATION, so a 25-op push on a real record spent 3.6 s
+    -- here alone and died on the anon role's 3 s statement_timeout (measured,
+    -- local stack, P45-WAe). Two faults, one shape:
+    --   · wa.chk(ok, where, MSG) takes its sentence as an ARGUMENT, so the
+    --     sentence was BUILT FOR EVERY FIELD OF EVERY ROW — 715 format() +
+    --     array_to_string() + wa.entry_keys() on a 55-row section — and thrown
+    --     away 715 times, because the check passes. 1.9 s of the 3.6 s was the
+    --     construction of a message nobody was ever shown.
+    --   · wa.entry_keys(k) was called twice per field on top of that.
+    -- THE CURE IS THE SAME RULE THE LOOP ALREADY OBEYED, WRITTEN OUT: the loop
+    -- raised on the FIRST key the section does not name and never looked at the
+    -- rest, so ASK FOR THAT KEY and build the sentence only if there is one.
+    -- Byte-identical refusals, byte-identical `where` paths, same order:
+    -- jsonb_object_keys yields a jsonb object's keys in stored order (length,
+    -- then bytewise) and `limit 1` takes the same first one the loop would have
+    -- stopped at. 3 625 ms → 12 ms on the same 25×55 rows.
     perform wa.chk_text(e->'entered_by', w || '.entered_by', false, 20);
-    for f in select jsonb_object_keys(e) loop
-      perform wa.chk(f = any(wa.entry_keys(k)), w || '.' || f,
+    f := (select ko from jsonb_object_keys(e) ko where not (ko = any(ks)) limit 1);
+    if f is not null then
+      perform wa.chk(false, w || '.' || f,
         format('unknown field for a %s entry — accepted fields are %s',
-               k, array_to_string(wa.entry_keys(k), ', ')));
-    end loop;
+               k, array_to_string(ks, ', ')));
+    end if;
   end loop;
 
   -- ONE ROW PER SOLO SLOT. The section is a fixed list; two rows claiming
@@ -3984,12 +4101,21 @@ begin
   -- cannot show and the validator no longer accepts is dropped on READ, so a
   -- record that was written before this rule stops carrying it (a smuggled
   -- {"pending":true} anywhere disappears the moment the record is read).
+  --
+  -- P45-WAe — ONE STATEMENT PER SECTION INSTEAD OF ONE `||` PER ROW. The inner
+  -- loop was `e := e || jsonb_build_array(…)`, which rebuilds the whole array
+  -- it has accumulated so far on every row — quadratic in the section's length,
+  -- on the section that is 55 rows on a real record and grows for as long as a
+  -- student flies. `jsonb_agg … order by ord` is the same rows in the same
+  -- order, built once. With the wa.strip_entry repair above it, the final pass
+  -- went 869 ms → 147 ms over the round's 44-record scratch dataset.
+  -- The `order by` is not decoration: without it the aggregate's input order is
+  -- the scan's, and a section's rows are a LIST whose order is a fact.
   arr := '{}'::jsonb;
   for k in select jsonb_object_keys(o) loop
-    e := '[]'::jsonb;
-    for i in 0 .. coalesce(jsonb_array_length(o->k), 0) - 1 loop
-      e := e || jsonb_build_array(wa.strip_entry(o->k->i, k));
-    end loop;
+    select coalesce(jsonb_agg(wa.strip_entry(t.x, k) order by t.ord), '[]'::jsonb)
+      into e
+      from jsonb_array_elements(o->k) with ordinality t(x, ord);
     arr := arr || jsonb_build_object(k, e);
   end loop;
   return arr;
@@ -6042,29 +6168,77 @@ $$;
 --     saved from a live pull can never be mistaken for an admin download.
 -- Everything else is identical, `instructor_records` and `currency_kinds`
 -- included: the currency lane is the named next errand of this same credential.
+--
+-- ══ P45-WAe — THE MIGRATION IS READ ONCE PER RECORD, AND THE CTE IS WHY ═════
+-- THE DEFECT THIS FIXES WAS INVISIBLE IN THE OUTPUT AND FATAL IN THE CLOCK.
+-- The student-records block used to read
+--     from public.student_records r
+--     cross join lateral (select wa.migrate_record(r.data) as rec) m
+-- and then name `m.rec` FIVE times (data · record_stamp · co_entries ·
+-- fdms_entries · entries_total — and wa.record_stamp names it twice more once
+-- the planner inlines it). A LATERAL sub-select with no FROM is not a variable:
+-- PostgreSQL FLATTENS it (pull_up_simple_subquery) and substitutes the
+-- expression at every reference, so wa.migrate_record ran ~5 TIMES PER RECORD.
+-- Nobody could see it, because every one of those runs returns the same bytes.
+-- MEASURED, on the round's scratch dataset (44 records / 2 200 flight rows /
+-- a 1.55 MB answer, local stack): wa.export_body(false) took 15.7–16.7 s, and
+-- timed block by block ~15.7 s of that was THIS ONE BLOCK; with the lateral
+-- materialised the same block is 3.4 s — the SAME PAYLOAD, byte for byte, for a
+-- fifth of the work. The rest of the round (wa.norm_entry · wa.strip_entry · the
+-- final pass) took the whole door from there to 0.83 s over REST as anon.
+-- `as materialized` is the whole cure and it is a PROMISE, not a hint: the CTE
+-- is evaluated once and its columns are read, never re-derived. An audit block
+-- at the foot of this file asserts that the word is still here and that
+-- wa.migrate_record is named exactly ONCE in this body — because a later round
+-- that «tidied» the CTE back into a lateral would re-arm a 5× cost that no
+-- test, no diff and no reader can see.
 create or replace function wa.export_body(p_with_proposals boolean) returns jsonb
 language plpgsql stable set search_path = public, wa, pg_temp as $$
-declare o jsonb;
+declare o jsonb; recs jsonb; ins jsonb;
 begin
+  with m as materialized (
+    select r.student_id, r.data, r.entered_by, r.last_update,
+           wa.migrate_record(r.data) as rec
+      from public.student_records r)
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'student_id', m.student_id,
+           'data', m.rec,
+           'data_as_stored', m.data,
+           'entered_by', wa.record_stamp(m.rec, m.entered_by),
+           'co_entries', wa.co_entry_count(m.rec),
+           -- ROUND 24 — the bridge's own count, beside the
+           -- admin's and never inside it (see admin_get_data)
+           'fdms_entries', wa.entry_count_by(m.rec, 'fdms'),
+           'entries_total', wa.entry_count(m.rec),
+           'last_update', m.last_update)), '[]'::jsonb)
+    into recs
+    from m;
+
+  -- the same treatment for the instructor records, where the re-derivation was
+  -- not the planner's doing but the text's: wa.migrate_instructor_record was
+  -- WRITTEN four times in the block below, once per key that needed it.
+  with mi as materialized (
+    select ir.instructor_id, ir.data, ir.last_update,
+           wa.migrate_instructor_record(ir.data) as rec
+      from public.instructor_records ir)
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'instructor_id', mi.instructor_id,
+           'data', mi.rec,
+           'data_as_stored', mi.data,
+           'entries_total', wa.ins_entry_count(mi.rec),
+           'legacy_rows', wa.ins_legacy_count(mi.rec),
+           'withsp_legacy_rows', wa.ins_withsp_scat_count(mi.rec),
+           'last_update', mi.last_update)), '[]'::jsonb)
+    into ins
+    from mi;
+
   o := jsonb_build_object(
     'schema', 'wa-export-v1',
     'exported_at', now(),
     'people', coalesce((select jsonb_agg(wa.person_json(p)
                           order by p.role, wa.seniority_key(p), p.last_name)
                         from public.people p), '[]'::jsonb),
-    'student_records', coalesce((select jsonb_agg(jsonb_build_object(
-                          'student_id', r.student_id,
-                          'data', m.rec,
-                          'data_as_stored', r.data,
-                          'entered_by', wa.record_stamp(m.rec, r.entered_by),
-                          'co_entries', wa.co_entry_count(m.rec),
-                          -- ROUND 24 — the bridge's own count, beside the
-                          -- admin's and never inside it (see admin_get_data)
-                          'fdms_entries', wa.entry_count_by(m.rec, 'fdms'),
-                          'entries_total', wa.entry_count(m.rec),
-                          'last_update', r.last_update))
-                        from public.student_records r
-                        cross join lateral (select wa.migrate_record(r.data) as rec) m), '[]'::jsonb),
+    'student_records', recs,
     -- ROUND 10: the assessment and its weight. The frozen rank_* / nr_*
     -- columns are not exported either — the export is what the app knows, and
     -- the app no longer knows anything about aircraft types.
@@ -6096,18 +6270,11 @@ begin
     -- rows still carrying the old form's Σ claim (§4x·2). And the migrated
     -- `data` already carries the NEW kind keys (continuation / with_sp), so
     -- exports say what the surfaces say without a reader translating.
-    'instructor_records', coalesce((select jsonb_agg(jsonb_build_object(
-                            'instructor_id', ir.instructor_id,
-                            'data', wa.migrate_instructor_record(ir.data),
-                            'data_as_stored', ir.data,
-                            'entries_total', wa.ins_entry_count(
-                                               wa.migrate_instructor_record(ir.data)),
-                            'legacy_rows', wa.ins_legacy_count(
-                                             wa.migrate_instructor_record(ir.data)),
-                            'withsp_legacy_rows', wa.ins_withsp_scat_count(
-                                                    wa.migrate_instructor_record(ir.data)),
-                            'last_update', ir.last_update))
-                          from public.instructor_records ir), '[]'::jsonb),
+    -- P45-WAe — built above, from a materialised CTE, for the reason written at
+    -- the head of this function: the four spellings of
+    -- wa.migrate_instructor_record that used to stand here were four migrations
+    -- of the same record per row.
+    'instructor_records', ins,
     -- ROUND 21 — the closed kind list, with its printed labels, so no reader
     -- ever hardcodes 'continuation'/'with_sp' the way it never hardcodes a Σ
     -- slug. ADDITIVE, so the stamp stays `wa-export-v1` (§4x·7): §4u·9's
@@ -7688,6 +7855,81 @@ begin
 
   raise notice 'r24: bridge lane audited — 3 tables in schema wa, RLS on, 0 policies, 0 API grants; section (%) ≡ wa.log_bands(), reason (%) ≡ wa.bridge_reasons(); handle guards, the armed check and the read-only (GET) guard executable and FIRST (both comment syntaxes stripped)',
     array_to_string(wa.log_bands(), '/'), array_to_string(wa.bridge_reasons(), '/');
+end $$;
+
+-- ══ P45-WAe — THE TWO PROPERTIES THIS ROUND BOUGHT, AND NEITHER IS VISIBLE ═══
+-- ── AUDIT 1 · wa.norm_entry SAYS WHAT wa.norm_field SAYS ──────────────────
+-- wa.norm_entry writes out the per-field dispatch instead of calling
+-- wa.norm_field 53 000 times per export (the whole story is at that function).
+-- A dispatch said in two places is a rule that can disagree with itself, and
+-- the disagreement would be SILENT: an export whose sortie codes stopped being
+-- upper-cased, or whose notes lost their inner newlines, still validates, still
+-- diffs clean against nothing, and only surfaces as a bridge that cannot match
+-- a row it wrote. So the equivalence is ASSERTED, not remembered — the r22
+-- withsp_markers pattern applied to a pair of expressions — across every field
+-- CLASS (code / free / plain / unregistered) × every jsonb TYPE the two can
+-- meet. It reads the LIVE functions, so what it proves is true of the database.
+do $$
+declare bad text[] := '{}'; kk text; vv jsonb; got jsonb; want jsonb;
+begin
+  foreach kk in array (wa.code_fields() || wa.free_fields()
+                       || array['instructor','date','grade','legacy','entered_by','zzz']) loop
+    foreach vv in array array[
+        '" c4302 "'::jsonb, '"C4302"'::jsonb, '"c4302"'::jsonb, '"  a   b  "'::jsonb,
+        '""'::jsonb, '" one \n two "'::jsonb, '"x y​z﻿"'::jsonb,
+        'null'::jsonb, '0'::jsonb, '3'::jsonb, '1.5'::jsonb, 'true'::jsonb, 'false'::jsonb,
+        '[]'::jsonb, '[" x ","Y "]'::jsonb, '[1,"  z  ",null,true]'::jsonb,
+        '{"a":" b "}'::jsonb] loop
+      got  := wa.norm_entry(jsonb_build_object(kk, vv)) -> kk;
+      want := wa.norm_field(kk, vv);
+      if got is distinct from want then
+        bad := bad || format('%s = %s → norm_entry %s / norm_field %s',
+                             kk, vv::text, got::text, want::text);
+      end if;
+    end loop;
+  end loop;
+  if coalesce(array_length(bad, 1), 0) > 0 then
+    raise exception 'P45-WAe: wa.norm_entry no longer normalises a field the way wa.norm_field does — % disagreement(s): %. The per-field dispatch is written out inside wa.norm_entry because calling wa.norm_field once per field costs 1.7 s of a 3 s statement budget on a real export (the pin on every wa helper blocks PostgreSQL''s SQL inliner, so the call is never free); the price of writing it twice is that the two must be PROVEN equal on every deploy. Fix the copy in wa.norm_entry, or change wa.norm_field and wa.norm_str together with it',
+      array_length(bad, 1), array_to_string(bad, ' · ');
+  end if;
+  raise notice 'P45-WAe: wa.norm_entry ≡ wa.norm_field over % field name(s) × 17 value shapes',
+    coalesce(array_length(wa.code_fields() || wa.free_fields()
+                          || array['instructor','date','grade','legacy','entered_by','zzz'], 1), 0);
+end $$;
+
+-- ── AUDIT 2 · THE EXPORT STILL READS EACH RECORD'S MIGRATION ONCE ─────────
+-- THE DEFECT THIS GUARDS AGAINST HAS NO OUTPUT SIGNATURE AT ALL. wa.export_body
+-- used to hang the migration off a `cross join lateral (select …) m` and name
+-- `m.rec` five times; PostgreSQL flattens such a sub-select and substitutes the
+-- expression at every reference, so wa.migrate_record ran ~5× per record and the
+-- answer was byte-identical every time. 16.8 s for a 1.5 MB payload, against the
+-- anon role's 3 s statement_timeout — i.e. the read door of the FDMS bridge was
+-- dead after the first real push, and no diff, no test and no reader could see
+-- why. A CTE «as materialized» is the cure and the ONLY part of it a later round
+-- could undo by accident while tidying. Two assertions, on the catalog's own
+-- copy of the body with both comment syntaxes stripped (the P45-WAd F2 lesson —
+-- a guard that only knows `--` does not know `/* … */`):
+--   · the CTEs are still MATERIALIZED, and
+--   · each migration is NAMED EXACTLY ONCE, because a second spelling is a
+--     second migration whatever the CTE says.
+do $$
+declare def text; body text; n_mat int; n_stu int; n_ins int;
+begin
+  select pg_get_functiondef(p.oid) into def
+  from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+  where ns.nspname = 'wa' and p.proname = 'export_body';
+  if def is null then
+    raise exception 'P45-WAe: wa.export_body does not exist — it is the ONE body behind both public.admin_export and public.bridge_pull';
+  end if;
+  body := regexp_replace(regexp_replace(def, '/\*.*?\*/', '', 'g'), '--[^\n]*', '', 'g');
+  select count(*) into n_mat from regexp_matches(body, 'as\s+materialized', 'gi');
+  select count(*) into n_stu from regexp_matches(body, 'wa\.migrate_record\s*\(', 'g');
+  select count(*) into n_ins from regexp_matches(body, 'wa\.migrate_instructor_record\s*\(', 'g');
+  if n_mat < 2 or n_stu <> 1 or n_ins <> 1 then
+    raise exception 'P45-WAe: wa.export_body has lost its once-per-record migration — the executable body carries % «as materialized» (expected 2), % call(s) to wa.migrate_record (expected 1) and % to wa.migrate_instructor_record (expected 1). Naming a migrated record more than once — or hanging it off a plain LATERAL / a non-materialised CTE, which the planner flattens and substitutes at every reference — re-runs the migration once per reference. It is invisible: every run returns the same bytes. It cost 16.8 s instead of 3.4 s on a 44-record / 2 200-flight-row export, which is the whole difference between the bridge''s read door answering and dying on the anon role''s 3 s statement_timeout',
+      n_mat, n_stu, n_ins;
+  end if;
+  raise notice 'P45-WAe: wa.export_body migrates each record ONCE (% materialized CTE(s), 1 wa.migrate_record, 1 wa.migrate_instructor_record)', n_mat;
 end $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════
